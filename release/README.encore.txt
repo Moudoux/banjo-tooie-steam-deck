@@ -1,4 +1,4 @@
-Banjo-Tooie: Encore 0.1.0-alpha.4 - Windows x64
+Banjo-Tooie: Scurvy Dog Port 0.1.0-alpha.4.1 - Windows x64
 ================================================
 
 Unofficial alpha. The game is not included; you need your own copy.
@@ -6,7 +6,7 @@ There is no installer.
 
 START
 1. Extract the whole ZIP to a folder and keep its files together.
-2. Run BanjoTooieEncore.exe. If Windows reports a missing DLL, install the
+2. Run BanjoTooieScurvyDogPort.exe. If Windows reports a missing DLL, install the
    Microsoft Visual C++ x64 Redistributable:
    https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist
 3. When asked, choose your NTSC-U 1.0 big-endian .z64 ROM.
@@ -15,6 +15,7 @@ START
 
 SAVES AND SETTINGS
 Stored in %LOCALAPPDATA%\BanjoTooieEncore
+This existing folder name is retained so Alpha 4 progress stays available.
 If that folder has no game save yet and an Alpha 3 save is found in
 %LOCALAPPDATA%\BanjoTooieRecompiled\saves, you are asked once whether to
 copy it. The Alpha 3 save is never changed.

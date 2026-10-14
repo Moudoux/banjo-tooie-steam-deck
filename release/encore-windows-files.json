@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "product": "Banjo-Tooie: Encore",
-  "version": "0.1.0-alpha.4",
-  "tag": "v0.1.0-alpha.4",
-  "archive": "BanjoTooieEncore-Alpha4-Windows-x64.zip",
-  "executable": "BanjoTooieEncore.exe",
+  "product": "Banjo-Tooie: Scurvy Dog Port",
+  "version": "0.1.0-alpha.4.1",
+  "tag": "v0.1.0-alpha.4.1",
+  "archive": "BanjoTooieScurvyDogPort-Alpha4.1-Windows-x64.zip",
+  "executable": "BanjoTooieScurvyDogPort.exe",
   "reviewRule": "Package exactly these paths plus package-manifest.json. Build rows come from the gated build directory; source rows must be tracked files of the clean release commit. Keep every existing third-party notice; never prune attribution.",
   "guest": {
     "sha256": "7ec531fab27e02e3b0a46473dba78109dd6144f61230470fe3c12e59db6188ed",
@@ -13,7 +13,7 @@
   "rawFunctionCount": 417,
   "build": {
     "target": "TooieBaseline",
-    "executable": "baseline/player-bin/BanjoTooieEncore.exe",
+    "executable": "baseline/player-bin/BanjoTooieScurvyDogPort.exe",
     "map": "baseline/player-bin/TooieBaseline.map",
     "archive": "BaselineRecompiledFuncs.lib",
     "raw": "baseline/render-bridge-camera-candidate/composition-v2/raw",
@@ -72,7 +72,7 @@
     }
   },
   "files": [
-    {"path": "BanjoTooieEncore.exe", "from": "build", "source": "baseline/player-bin/BanjoTooieEncore.exe"},
+    {"path": "BanjoTooieScurvyDogPort.exe", "from": "build", "source": "baseline/player-bin/BanjoTooieScurvyDogPort.exe"},
     {"path": "SDL2.dll", "from": "build", "source": "baseline/player-bin/SDL2.dll", "sameAsDependency": "rt64/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3/lib/x64/SDL2.dll"},
     {"path": "dxcompiler.dll", "from": "build", "source": "baseline/player-bin/dxcompiler.dll", "sameAsDependency": "rt64/src/contrib/dxc/bin/x64/dxcompiler.dll"},
     {"path": "dxil.dll", "from": "build", "source": "baseline/player-bin/dxil.dll", "sameAsDependency": "rt64/src/contrib/dxc/bin/x64/dxil.dll"},

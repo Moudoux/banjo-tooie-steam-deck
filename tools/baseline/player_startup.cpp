@@ -24,7 +24,7 @@ namespace baseline::player {
 namespace {
 constexpr wchar_t product_folder[] = L"BanjoTooieEncore";
 constexpr wchar_t legacy_folder[] = L"BanjoTooieRecompiled";
-constexpr wchar_t title[] = L"Banjo-Tooie: Encore";
+constexpr wchar_t title[] = L"Banjo-Tooie: Scurvy Dog Port";
 using SaveBytes = std::array<char, save_bytes>;
 fs::path log_file;
 std::atomic<bool> log_only_errors{false};
@@ -32,7 +32,7 @@ std::atomic<bool> log_only_errors{false};
 [[noreturn]] void fail(const std::string& text) { throw Failure(text); }
 std::string windows_error(DWORD error) { return " (Windows error " + std::to_string(error) + ")"; }
 std::string in_use(const fs::path& root) {
-    return "Another copy of Banjo-Tooie: Encore is already using " + utf8(root) +
+    return "Another copy of Banjo-Tooie: Scurvy Dog Port is already using " + utf8(root) +
         ". Close it, then start the game again.";
 }
 
@@ -128,7 +128,7 @@ void write_record(const fs::path& path, const std::string& text) {
 
 bool ask_import(const fs::path& source) {
     const auto text = "Saved progress from an earlier Banjo-Tooie: Recompiled alpha was found:\n" + utf8(source) +
-        "\n\nCopy it into your new Banjo-Tooie: Encore profile?\n\nThe original file is left unchanged. "
+        "\n\nCopy it into your new Banjo-Tooie: Scurvy Dog Port profile?\n\nThe original file is left unchanged. "
         "Settings and practice states are not copied. You will not be asked again.";
     return MessageBoxW(nullptr, widen(text).c_str(), title,
         MB_YESNO | MB_ICONQUESTION | MB_TASKMODAL | MB_SETFOREGROUND) == IDYES;
@@ -154,7 +154,7 @@ Arguments parse_arguments(const std::vector<std::wstring>& arguments) {
     Arguments result;
     if (arguments.empty()) return result;
     const auto usage = [] {
-        return Failure("Usage: BanjoTooieEncore [--profile-dir FOLDER [--rom FILE] [--import-save FILE] "
+        return Failure("Usage: BanjoTooieScurvyDogPort [--profile-dir FOLDER [--rom FILE] [--import-save FILE] "
             "[--seconds 1..900 [--input-script FILE]]]");
     };
     bool seconds_seen = false;
@@ -239,7 +239,7 @@ Profile Profile::acquire(const fs::path& requested) {
     const bool empty = fs::is_empty(root, listing);
     if (listing) fail("The profile folder " + utf8(root) + " could not be read (" + listing.message() + ").");
     if (!empty)
-        fail("The folder " + utf8(root) + " already contains files that are not a Banjo-Tooie: Encore profile. "
+        fail("The folder " + utf8(root) + " already contains files that are not a Banjo-Tooie: Scurvy Dog Port profile. "
             "Move them elsewhere or choose another folder. Nothing was changed.");
     // CREATE_NEW: of two simultaneous first launches exactly one owns the folder.
     handle = CreateFileW(marker.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_NEW,
@@ -277,7 +277,7 @@ ImportResult import_save(const fs::path& source, const fs::path& root) {
         if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) return ImportResult::SourceMissing;
         if (error == ERROR_SHARING_VIOLATION)
             fail("The earlier save " + utf8(source) + " is in use. Close Banjo-Tooie: Recompiled, "
-                "then start Encore again. Nothing was copied.");
+                "then start Scurvy Dog Port again. Nothing was copied.");
         fail("The earlier save " + utf8(source) + " could not be opened" + windows_error(error) +
             ". Nothing was copied.");
     }
@@ -377,7 +377,7 @@ std::optional<fs::path> pick_rom() {
     dialog.lpstrFilter = L"N64 ROM (*.z64;*.n64;*.v64)\0*.z64;*.n64;*.v64\0All files (*.*)\0*.*\0";
     dialog.lpstrFile = buffer.data();
     dialog.nMaxFile = DWORD(buffer.size());
-    dialog.lpstrTitle = L"Banjo-Tooie: Encore - choose your Banjo-Tooie (USA) ROM";
+    dialog.lpstrTitle = L"Banjo-Tooie: Scurvy Dog Port - choose your Banjo-Tooie (USA) ROM";
     dialog.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR |
         OFN_DONTADDTORECENT | OFN_HIDEREADONLY;
     const BOOL chosen = GetOpenFileNameW(&dialog);

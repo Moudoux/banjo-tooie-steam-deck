@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bind, assemble and verify the Banjo-Tooie: Encore Windows ZIP; never publishes it.
+"""Bind, assemble and verify the Banjo-Tooie: Scurvy Dog Port Windows ZIP; never publishes it.
 
   receipt  After a clean build of this committed checkout, run every gate and
            write the path-free build receipt (default <build>/encore-build-receipt.json).
@@ -94,7 +94,7 @@ def git(*args: str, cwd: Path = ROOT) -> str:
 
 def load_allowlist() -> dict:
     allow = read_json(ALLOWLIST)
-    need(allow.get("schema") == 1, "Unrecognized Encore package allowlist")
+    need(allow.get("schema") == 1, "Unrecognized player package allowlist")
     need(allow["tag"] == "v" + allow["version"], "Release tag must be v<version>")
     need(re.fullmatch(r"[A-Za-z0-9._-]+\.zip", allow["archive"]), "Unsafe archive name")
     rules = allow["cmake"]

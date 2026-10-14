@@ -152,7 +152,7 @@ std::string rom_problem(const std::filesystem::path& rom, std::u8string& game_id
     case recomp::RomValidationError::Good: return {};
     case recomp::RomValidationError::FailedToOpen: return "The ROM file could not be read.";
     case recomp::RomValidationError::NotARom: return "This file is not an N64 ROM.";
-    case recomp::RomValidationError::IncorrectVersion: return "This is a different version of Banjo-Tooie; Encore needs the USA ROM.";
+    case recomp::RomValidationError::IncorrectVersion: return "This is a different version of Banjo-Tooie; Scurvy Dog Port needs the USA ROM.";
     case recomp::RomValidationError::IncorrectRom: return "This is not a Banjo-Tooie ROM.";
     default: return "This ROM is not supported.";
     }
@@ -220,7 +220,7 @@ int main(int argc, char** argv) {
             .rom_hash = 0x00F70DE5F2D70EA2,
             .internal_name = "BANJO TOOIE",
 #ifdef BASELINE_PLAYER
-            .display_name = "Banjo-Tooie: Encore",
+            .display_name = "Banjo-Tooie: Scurvy Dog Port",
 #else
             .display_name = "Banjo-Tooie baseline",
 #endif
@@ -358,7 +358,7 @@ int main(int argc, char** argv) {
     } catch (const std::exception& error) {
         std::fprintf(stderr, "baseline admission failed: %s\n", error.what());
 #ifdef BASELINE_PLAYER
-        baseline::player::show_error(std::string("Banjo-Tooie: Encore could not start.\n\n") + error.what());
+        baseline::player::show_error(std::string("Banjo-Tooie: Scurvy Dog Port could not start.\n\n") + error.what());
 #endif
         baseline::close_devices();
         return 1;

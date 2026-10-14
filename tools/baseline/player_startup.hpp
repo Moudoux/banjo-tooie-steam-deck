@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-// Banjo-Tooie: Encore player startup (BASELINE_PLAYER only): owned profile,
+// Banjo-Tooie: Scurvy Dog Port player startup (BASELINE_PLAYER only): owned profile,
 // ROM picker, one-time copy of an older ordinary save, user log and readable
 // failures. The engineering command line is compiled unchanged without it.
 namespace baseline::player {
@@ -29,6 +29,7 @@ Arguments parse_arguments(const std::vector<std::wstring>& arguments);
 // Wide command line without the executable; Unicode paths survive.
 std::vector<std::wstring> command_line();
 
+// Legacy profile marker and folder stay stable across display-name changes.
 inline constexpr wchar_t marker_name[] = L".encore-profile";
 inline constexpr char marker_text[] = "Banjo-Tooie: Encore profile v1\n";
 // Unchanged runtime identity: saves/<game_id>.bin, 16 Kbit EEPROM.

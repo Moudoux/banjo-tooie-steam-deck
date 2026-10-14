@@ -253,7 +253,7 @@ if(TOOIE_BASELINE_RENDERER_CANDIDATE_OUTPUT)
 else()
     set(_baseline_executable_dir "${CMAKE_BINARY_DIR}/baseline/bin")
 endif()
-option(TOOIE_BASELINE_PLAYER "Banjo-Tooie: Encore player startup instead of the engineering command line" OFF)
+option(TOOIE_BASELINE_PLAYER "Banjo-Tooie: Scurvy Dog Port player startup instead of the engineering command line" OFF)
 if(TOOIE_BASELINE_PLAYER)
     # A player build never replaces an engineering executable in the same tree.
     set(_baseline_executable_dir "${CMAKE_BINARY_DIR}/baseline/player-bin")
@@ -355,7 +355,7 @@ if(TOOIE_BASELINE_PLAYER)
     file(CONFIGURE OUTPUT "${_player_generated}/encore_version.hpp" CONTENT [[
 #pragma once
 namespace baseline::player::build {
-inline constexpr char product[] = "Banjo-Tooie: Encore";
+inline constexpr char product[] = "Banjo-Tooie: Scurvy Dog Port";
 inline constexpr char version[] = "@TOOIE_PLAYER_VERSION@";
 }
 ]] @ONLY)
@@ -364,7 +364,7 @@ inline constexpr char version[] = "@TOOIE_PLAYER_VERSION@";
     target_compile_definitions(TooieBaseline PRIVATE BASELINE_PLAYER=1)
     target_link_libraries(TooieBaseline PRIVATE user32 shell32 ole32 comdlg32)
     # Double-click play opens no console; diagnostics go to the profile log.
-    set_target_properties(TooieBaseline PROPERTIES OUTPUT_NAME BanjoTooieEncore WIN32_EXECUTABLE TRUE)
+    set_target_properties(TooieBaseline PROPERTIES OUTPUT_NAME BanjoTooieScurvyDogPort WIN32_EXECUTABLE TRUE)
     target_link_options(TooieBaseline PRIVATE /ENTRY:mainCRTStartup)
     # Release-family PDB reference without the build machine's absolute path.
     target_link_options(TooieBaseline PRIVATE "/PDBALTPATH:%_PDB%")

@@ -582,7 +582,7 @@ ultramodern::renderer::WindowHandle open_devices(const std::filesystem::path& ro
     if (audio_summary.limit && std::getenv("SDL_DYNAMIC_API")) throw std::runtime_error("Audio summary forbids redirected SDL dynapi");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) throw std::runtime_error(SDL_GetError());
 #ifdef BASELINE_PLAYER
-    constexpr const char* window_title = "Banjo-Tooie: Encore";
+    constexpr const char* window_title = "Banjo-Tooie: Scurvy Dog Port";
 #else
     constexpr const char* window_title = "Banjo-Tooie baseline";
 #endif
