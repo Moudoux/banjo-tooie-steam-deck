@@ -8,7 +8,8 @@
   verify   Recompute the receipt and re-check an existing ZIP and checksum.
 
 The executable embeds no source revision. The binding is a clean committed
-checkout, a build configured from that checkout and current per Ninja, the
+checkout, a build configured from that checkout and brought current by a real
+build of the gated target (source and selection rechecked after it), the
 existing raw-archive/native gate, the embedded-guest gate and the pinned guest.
 """
 
@@ -45,6 +46,8 @@ REQUIRED_ON = ("TOOIE_BASELINE", "TOOIE_BASELINE_PLAYER", "TOOIE_BASELINE_BOOT_P
 # Never shipped: ROMs, saves, Python, build/debug artifacts, logs, source config.
 FORBIDDEN_SUFFIXES = {".z64", ".n64", ".v64", ".rom", ".bin", ".eep", ".sav", ".srm",
                       ".py", ".pdb", ".map", ".lib", ".obj", ".log", ".toml", ".ini"}
+# A current build finishes in seconds; a genuine corpus rebuild stays bounded.
+BUILD_TIMEOUT = 4 * 60 * 60
 
 
 def need(ok: object, why: str) -> None:
@@ -167,14 +170,14 @@ def selected_options(cache: dict[str, str], rules: dict) -> dict[str, str]:
     return actual
 
 
-def build_is_current(cache: dict[str, str], build: Path, target: str) -> None:
-    # The archive gate is an always-run custom target; any other step means stale outputs.
-    result = subprocess.run([cache["CMAKE_COMMAND"], "--build", str(build), "--target", target, "--", "-n"],
-                            capture_output=True, encoding="utf-8", timeout=600)
-    need(result.returncode == 0, "Build dry run failed: " + (result.stdout + result.stderr).strip()[-2000:])
-    steps = [line for line in result.stdout.splitlines() if re.match(r"\[\d+/\d+\] ", line)]
-    stale = [line for line in steps if not ("verify_baseline_binding.py" in line and " archive " in line)]
-    need(not stale, f"Build is not current for this checkout; rebuild first: {stale[:3]}")
+def build_target(cache: dict[str, str], build: Path, target: str) -> None:
+    # A Ninja dry run cannot execute CMake's CONFIGURE_DEPENDS glob check, so it always
+    # plans a regeneration. A real build runs that check, rebuilds anything genuinely
+    # stale from this clean checkout and reruns the always-on archive gate.
+    result = subprocess.run([cache["CMAKE_COMMAND"], "--build", str(build), "--target", target],
+                            capture_output=True, encoding="utf-8", errors="replace", timeout=BUILD_TIMEOUT)
+    need(result.returncode == 0,
+         "Build of the gated target failed: " + (result.stdout + result.stderr).strip()[-2000:])
 
 
 def checkout_commit(path: Path) -> str:
@@ -193,16 +196,24 @@ def in_build(build: Path, relative: str) -> Path:
     return path
 
 
-def compute_receipt(build: Path, allow: dict) -> tuple[dict, dict[str, Path]]:
-    source = source_identity()
+def build_selection(build: Path, allow: dict) -> tuple[dict[str, str], dict[str, str]]:
     cache = cmake_cache(build)
     need(Path(cache.get("CMAKE_HOME_DIRECTORY", "")).resolve() == ROOT,
          "Build directory was configured from a different source checkout")
     need(Path(cache.get("CMAKE_CACHEFILE_DIR", "")).resolve() == build, "CMake cache belongs to another build directory")
-    need(cache.get("CMAKE_GENERATOR") == "Ninja", "Freshness check requires the single-config Ninja generator")
+    need(cache.get("CMAKE_GENERATOR") == "Ninja", "Receipt build requires the single-config Ninja generator")
+    return cache, selected_options(cache, allow["cmake"])
+
+
+def compute_receipt(build: Path, allow: dict) -> tuple[dict, dict[str, Path]]:
+    source = source_identity()
+    cache, options = build_selection(build, allow)
     spec = allow["build"]
-    options = selected_options(cache, allow["cmake"])
-    build_is_current(cache, build, spec["target"])
+    build_target(cache, build, spec["target"])
+    # The build may regenerate; it must not change the source or the selected configuration.
+    need(source_identity() == source, "Source changed during the build; commit, rebuild and rerun")
+    cache, rebuilt_options = build_selection(build, allow)
+    need(rebuilt_options == options, "CMake selection changed during the build")
     deps = Path(cache["TOOIE_DEPS_ROOT"]).resolve()
     dependencies = {name: checkout_commit(deps.joinpath(*safe_relative(relative).parts))
                     for name, relative in sorted(allow["dependencyCheckouts"].items())}
