@@ -1,7 +1,7 @@
 [
   "boot_osInitialize", "boot___osPiRawStartDma", "boot_osPiGetStatus",
   "boot___osDisableInt", "boot___osRestoreInt", "boot___osSetSR", "boot___osGetSR",
-  "boot___osSetFpcCsr", "boot___osSiRawReadIo", "boot___osSiRawWriteIo",
+  "boot___osSiRawReadIo", "boot___osSiRawWriteIo",
   "boot___osExceptionPreamble", "boot___osException", "boot_send_mesg", "boot_handle_CpU",
   "boot___osEnqueueAndYield", "boot___osEnqueueThread", "boot___osPopThread",
   "boot___osDispatchThread", "boot___osCleanupThread", "boot_osWritebackDCache",
@@ -17,5 +17,6 @@
   "boot_osSendMesg", "boot_osRecvMesg", "boot___osResetGlobalIntMask",
   "boot___osEPiRawWriteIo", "boot___osEPiRawReadIo", "boot___osSetGlobalIntMask",
   "boot_osYieldThread", "func_8001DDC0", "ovl_entrypoint_alternate",
-  "tooie_core1_osInitialize"
+  "tooie_core1_osInitialize", "func_8001A3A0", "func_8001A324", "func_800A7840",
+  "func_800EBED4", "func_8010A79C"
 ]

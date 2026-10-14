@@ -1,5 +1,5 @@
 #pragma once
-#include "ultramodern/rsp.hpp"
+#include "librecomp/rsp.hpp"
 #include "json/json.hpp"
 #include <functional>
 #include <string>
@@ -18,7 +18,7 @@ Recognition recognize_task(const uint8_t* rdram, const OSTask* task);
 // unsupported destination/source/DMA length. Does not execute a microcode task.
 int overlay_index(uint32_t imem, uint32_t source_offset, uint32_t dma_length) noexcept;
 // Configure while runtime workers are stopped. Failure reports never post guest
-// events. The runtime must honor a false run_task result and stop the task path.
+// events. Stock run_task rejects shape before DMA; wrapper failures report/throw.
 void configure(Log log, Failure failure = {}, bool detailed_success_logging = true);
-ultramodern::rsp::callbacks_t callbacks();
+recomp::rsp::callbacks_t callbacks();
 }

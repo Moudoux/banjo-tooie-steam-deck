@@ -22,9 +22,49 @@ LOOKUP = re.compile(r"^(?P<indent>\s*)LOOKUP_FUNC\((?P<target>[^\n]+)\)\(rdram,\
 NATIVE_TOKEN = re.compile(r"\b((?:tooie_|boot_|os\w*_|__\w*_)\w*|recomp_syscall_handler|pause_self|yield_self(?:_1ms)?)\s*\(")
 RUNTIME_ADAPTERS = frozenset({"osRecvMesg_recomp", "osSendMesg_recomp", "osJamMesg_recomp",
     "osStartThread_recomp", "osStopThread_recomp", "osSetThreadPri_recomp", "recomp_syscall_handler"})
+CAMERA_SYNC_EDGES = {
+    "baseline_camera_construction_begin": "tooie_camera_construction_begin",
+    "baseline_camera_construction_end": "tooie_camera_construction_end",
+    "baseline_camera_de498_ignore": "tooie_camera_de498_ignore",
+}
+
+
+def camera_sync_adapters(bodies):
+    """Exact reviewed clone edges: selected leaves must remain call-free.
+
+    Bounded source loops and the 16+8-byte ABI are reviewed separately. No
+    suspension or capture is admitted while the native clone is live.
+    """
+    semantic = {name: re.sub(r"//[^\n]*|/\*.*?\*/", "", body, flags=re.S)
+                for name, body in bodies.items()}
+    used = {edge for edge in CAMERA_SYNC_EDGES if any(
+        re.search(r"\b" + edge + r"\s*\(", body) for body in semantic.values())}
+    if not used:
+        return frozenset()
+    if used != CAMERA_SYNC_EDGES.keys():
+        raise ValueError("incomplete selected camera thunk contract")
+    for leaf in CAMERA_SYNC_EDGES.values():
+        if leaf not in semantic:
+            raise ValueError("missing selected camera leaf: " + leaf)
+        declaration = re.match(r"\s*RECOMP_FUNC void " + leaf +
+            r"\(uint8_t\* rdram, recomp_context\* ctx\)\s*\{", semantic[leaf])
+        if not declaration:
+            raise ValueError("unexpected selected camera declaration: " + leaf)
+        calls = set(re.findall(r"\b([A-Za-z_]\w*)\s*\(", semantic[leaf][declaration.end():]))
+        calls -= {"if", "switch", "ADD32", "MEM_HU", "MEM_W", "S32", "S64"}
+        if calls:
+            raise ValueError("camera clone leaf is not call-free: " + leaf)
+    return frozenset(used)
+
 SYSCALL = re.compile(r"^\s*recomp_syscall_handler\(rdram,\s*ctx,\s*[^;]+\);\s*$")
 BACKPACK_BEGIN = '    tooie_model_backpack_draw_begin((uint32_t)ctx->r16);\n'
 BACKPACK_END = '    tooie_model_backpack_draw_end();\n'
+BACKPACK_BODY_BEGIN = '    tooie_model_backpack_body_draw_begin(rdram, (uint32_t)ctx->r16);\n'
+BACKPACK_BODY_END = '    tooie_model_backpack_body_draw_end();\n'
+GPU_NODE_BEGIN = '    tooie_model_gpu_node_begin(rdram, ctx);\n'
+GPU_NODE_END = '    tooie_model_gpu_node_end(rdram, ctx);\n'
+NEST_BEGIN = re.compile(r'    tooie_model_nest_child_begin\(\(uint32_t\)ctx->r16, 0x80800E(?:30|90|BC)u\);\n')
+NEST_END = '    tooie_model_nest_child_end();\n'
 
 
 def digest(data):
@@ -55,6 +95,28 @@ def lift_body(body, function_id, generated_names, adapters=frozenset(), checkpoi
     signature = name_match[0]
     content = body[len(signature):]
     content = content.replace(PREAMBLE, "", 1)
+    # The authored wrapper's mechanical bracket is compiled guest C. Close
+    # its native capture before yielding from DE448, while retaining all guest
+    # instructions between that return and the original END import.
+    wrapper_begin = '    tooie_wrapper_attachment_begin(rdram, ctx);\n'
+    wrapper_end = '    tooie_wrapper_attachment_end(rdram, ctx);\n'
+    wrapper_call = '    func_800DE448(rdram, ctx);\n'
+    compiled_wrapper = wrapper_begin in content or wrapper_end in content
+    if compiled_wrapper:
+        if (name != 'babackpack_entrypoint_3' or content.count(wrapper_begin) != 1 or
+                content.count(wrapper_end) != 1 or content.count(wrapper_call) != 1):
+            raise ValueError(f'{name}: compiled attachment bracket identity drift')
+        begin_at, call_at, end_at = (content.index(token) for token in
+                                    (wrapper_begin, wrapper_call, wrapper_end))
+        if not begin_at < call_at < end_at:
+            raise ValueError(f'{name}: compiled attachment bracket order drift')
+        region = content[begin_at + len(wrapper_begin):end_at]
+        if [m['name'] for line in region.splitlines() if (m := CALL.fullmatch(line))] != ['func_800DE448']:
+            raise ValueError(f'{name}: compiled attachment has an intervening call')
+        if not content[:end_at].rstrip().endswith('ctx->r4 = ctx->r16 | 0;'):
+            raise ValueError(f'{name}: compiled attachment END owner ABI drift')
+        content = content.replace(wrapper_end,
+            '    // Native attachment END was performed before the DE448 yield test.\n', 1)
     # Strip comments before classifying native tokens; names in instruction
     # comments do not establish executable callback edges.
     semantic = re.sub(r"//[^\n]*", "", content)
@@ -94,18 +156,25 @@ def lift_body(body, function_id, generated_names, adapters=frozenset(), checkpoi
 
     lines = []
     checkpoint_seen = False
-    backpack_bracket_open = False
-    backpack_end_after_resume = False
+    draw_bracket_open = None
+    draw_end_after_resume = None
     for line in content.splitlines(keepends=True):
-        if backpack_end_after_resume:
-            if line != BACKPACK_END:
-                raise ValueError(f"{name}: backpack bracket lost adjacent end")
-            backpack_end_after_resume = False
+        if draw_end_after_resume:
+            if line != draw_end_after_resume:
+                raise ValueError(f"{name}: draw bracket lost adjacent end")
+            draw_end_after_resume = None
             continue
-        if line == BACKPACK_BEGIN:
-            if backpack_bracket_open:
-                raise ValueError(f"{name}: nested backpack bracket")
-            backpack_bracket_open = True
+        if line in (BACKPACK_BEGIN, BACKPACK_BODY_BEGIN, GPU_NODE_BEGIN) or NEST_BEGIN.fullmatch(line):
+            if draw_bracket_open:
+                raise ValueError(f"{name}: nested draw bracket")
+            if line == BACKPACK_BEGIN:
+                draw_bracket_open = ("func_800DE448", BACKPACK_END)
+            elif line == BACKPACK_BODY_BEGIN:
+                draw_bracket_open = ("func_800DE448", BACKPACK_BODY_END)
+            elif line == GPU_NODE_BEGIN:
+                draw_bracket_open = ("LOOKUP:ctx->r25", GPU_NODE_END)
+            else:
+                draw_bracket_open = ("func_801018A4", NEST_END)
             lines.append(line)
             continue
         if checkpoint is not None and line.startswith(f"    // 0x{checkpoint:08X}:"):
@@ -120,9 +189,10 @@ def lift_body(body, function_id, generated_names, adapters=frozenset(), checkpoi
         lookup = LOOKUP.fullmatch(line.rstrip("\n"))
         syscall = "recomp_syscall_handler" in adapters and SYSCALL.fullmatch(line.rstrip("\n"))
         if lookup or syscall or (call and (call["name"] in generated_names or call["name"] in adapters)):
-            close_backpack = backpack_bracket_open
-            if close_backpack and (not call or call["name"] != "func_800DE448"):
-                raise ValueError(f"{name}: backpack bracket has unexpected guest call")
+            close_draw = draw_bracket_open
+            bracket_callee = ("LOOKUP:" + lookup["target"]) if lookup else call["name"] if call else None
+            if close_draw and bracket_callee != close_draw[0]:
+                raise ValueError(f"{name}: draw bracket has unexpected guest call")
             pc = next_pc
             next_pc += 1
             if pc == checkpoint:
@@ -136,10 +206,14 @@ def lift_body(body, function_id, generated_names, adapters=frozenset(), checkpoi
             else:
                 direct_calls += 1
                 lines.append(line)
-            if close_backpack:
-                lines.append(BACKPACK_END)
-                backpack_bracket_open = False
-                backpack_end_after_resume = True
+            if compiled_wrapper and call and call['name'] == 'func_800DE448':
+                # No guest registers are passed or changed: the typed BEGIN
+                # already captured the owner and the native worker identity.
+                lines.append('    tooie_wrapper_attachment_native_end();\n')
+            if close_draw:
+                lines.append(close_draw[1])
+                draw_bracket_open = None
+                draw_end_after_resume = close_draw[1]
             lines.append("    if (tooie_persist_yielded()) return;\n")
             lines.append(f"persistent_resume_{pc}:\n")
         elif line.strip() == "return;":
@@ -164,8 +238,8 @@ def lift_body(body, function_id, generated_names, adapters=frozenset(), checkpoi
                     raise ValueError(f"{name}: native callback in multiline expression needs an explicit contract")
                 lines.append("    tooie_persist_invalidate();\n")
             lines.append(line)
-    if backpack_bracket_open or backpack_end_after_resume:
-        raise ValueError(f"{name}: unterminated backpack bracket")
+    if draw_bracket_open or draw_end_after_resume:
+        raise ValueError(f"{name}: unterminated draw bracket")
     if checkpoint is not None and not checkpoint_seen:
         raise ValueError(f"{name}: checkpoint instruction not present")
     declarations = PREAMBLE + "".join(f"    {kind} {var} = 0;\n" for kind, var in extra)
@@ -196,13 +270,14 @@ def main():
     names = {match[1] for _, match in bodies}
     if len(names) != len(bodies):
         raise ValueError("Duplicate generated function identity")
+    camera_adapters = camera_sync_adapters({match[1]: match[0] for _, match in bodies})
     ids = {name: i + 1 for i, name in enumerate(sorted(names))}
     metadata = []
     output_files = []
     inputs = {path.name: digest(text.encode()) for path, text in texts.items()}
     for path, text in texts.items():
         def replace(match):
-            transformed, record = lift_body(match[0], ids[match[1]], names, RUNTIME_ADAPTERS)
+            transformed, record = lift_body(match[0], ids[match[1]], names, RUNTIME_ADAPTERS | camera_adapters)
             record["translation_unit"] = path.name
             metadata.append(record)
             return transformed
@@ -213,6 +288,7 @@ def main():
     native = collections.Counter(symbol for item in metadata for symbol in item["native_contracts_required"])
     manifest = {
         "schema": 1, "kind": "generated-continuation-coverage-NOT-gameplay-savestate",
+        "camera_synchronous_adapters": sorted(camera_adapters),
         "generator_sha256": digest(Path(__file__).read_bytes()), "inputs": inputs,
         "translation_units": len(files), "functions": len(metadata),
         "direct_continuation_calls": sum(item["direct_calls"] for item in metadata),

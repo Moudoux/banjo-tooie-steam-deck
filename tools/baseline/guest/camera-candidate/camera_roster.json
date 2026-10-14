@@ -1,0 +1,187 @@
+{
+  "scope": "Exact Max camera-only guest replacement roster; default OFF",
+  "owners": [
+    {
+      "name": "func_800CA314",
+      "section": ".core2",
+      "vram": "0x800ca314",
+      "section_offset": "0x48d54",
+      "extent": "0x20"
+    },
+    {
+      "name": "func_800CA334",
+      "section": ".core2",
+      "vram": "0x800ca334",
+      "section_offset": "0x48d74",
+      "extent": "0x30"
+    },
+    {
+      "name": "func_800CA364",
+      "section": ".core2",
+      "vram": "0x800ca364",
+      "section_offset": "0x48da4",
+      "extent": "0x20"
+    },
+    {
+      "name": "func_800CA384",
+      "section": ".core2",
+      "vram": "0x800ca384",
+      "section_offset": "0x48dc4",
+      "extent": "0x20"
+    },
+    {
+      "name": "func_800CA440",
+      "section": ".core2",
+      "vram": "0x800ca440",
+      "section_offset": "0x48e80",
+      "extent": "0xd0"
+    },
+    {
+      "name": "func_8010FB34",
+      "section": ".core2",
+      "vram": "0x8010fb34",
+      "section_offset": "0x8e574",
+      "extent": "0xa0"
+    },
+    {
+      "name": "func_8010F9C0",
+      "section": ".core2",
+      "vram": "0x8010f9c0",
+      "section_offset": "0x8e400",
+      "extent": "0x124"
+    },
+    {
+      "name": "func_8010FBD4",
+      "section": ".core2",
+      "vram": "0x8010fbd4",
+      "section_offset": "0x8e614",
+      "extent": "0x64"
+    },
+    {
+      "name": "func_80110068",
+      "section": ".core2",
+      "vram": "0x80110068",
+      "section_offset": "0x8eaa8",
+      "extent": "0x7c"
+    },
+    {
+      "name": "func_8010FD08",
+      "section": ".core2",
+      "vram": "0x8010fd08",
+      "section_offset": "0x8e748",
+      "extent": "0x30"
+    },
+    {
+      "name": "ncpod_entrypoint_12",
+      "section": ".ncpod",
+      "vram": "0x808005c0",
+      "section_offset": "0x5c0",
+      "extent": "0xd8"
+    },
+    {
+      "name": "ncpod_entrypoint_14",
+      "section": ".ncpod",
+      "vram": "0x808006a0",
+      "section_offset": "0x6a0",
+      "extent": "0x138"
+    },
+    {
+      "name": "func_800E9F20",
+      "section": ".core2",
+      "vram": "0x800e9f20",
+      "section_offset": "0x68960",
+      "extent": "0x13c"
+    },
+    {
+      "name": "func_800E44FC",
+      "section": ".core2",
+      "vram": "0x800e44fc",
+      "section_offset": "0x62f3c",
+      "extent": "0x12c"
+    },
+    {
+      "name": "func_800E4640",
+      "section": ".core2",
+      "vram": "0x800e4640",
+      "section_offset": "0x63080",
+      "extent": "0x64"
+    },
+    {
+      "name": "func_800E4628",
+      "section": ".core2",
+      "vram": "0x800e4628",
+      "section_offset": "0x63068",
+      "extent": "0x18"
+    },
+    {
+      "name": "func_800E41CC",
+      "section": ".core2",
+      "vram": "0x800e41cc",
+      "section_offset": "0x62c0c",
+      "extent": "0x3c"
+    },
+    {
+      "name": "func_800E4208",
+      "section": ".core2",
+      "vram": "0x800e4208",
+      "section_offset": "0x62c48",
+      "extent": "0x3c"
+    },
+    {
+      "name": "func_800E42F0",
+      "section": ".core2",
+      "vram": "0x800e42f0",
+      "section_offset": "0x62d30",
+      "extent": "0x14c"
+    },
+    {
+      "name": "func_800BC948",
+      "section": ".core2",
+      "vram": "0x800bc948",
+      "section_offset": "0x3b388",
+      "extent": "0x2e0"
+    },
+    {
+      "name": "func_800DE498",
+      "section": ".core2",
+      "vram": "0x800de498",
+      "section_offset": "0x5ced8",
+      "extent": "0xe8c"
+    },
+    {
+      "name": "func_800BC690",
+      "section": ".core2",
+      "vram": "0x800bc690",
+      "section_offset": "0x3b0d0",
+      "extent": "0x210"
+    },
+    {
+      "name": "func_800BC8A0",
+      "section": ".core2",
+      "vram": "0x800bc8a0",
+      "section_offset": "0x3b2e0",
+      "extent": "0x58"
+    },
+    {
+      "name": "func_800BC8F8",
+      "section": ".core2",
+      "vram": "0x800bc8f8",
+      "section_offset": "0x3b338",
+      "extent": "0x50"
+    },
+    {
+      "name": "func_8001A3A0",
+      "section": ".core1",
+      "vram": "0x8001a3a0",
+      "section_offset": "0x8370",
+      "extent": "0xa0"
+    },
+    {
+      "name": "func_8001A324",
+      "section": ".core1",
+      "vram": "0x8001a324",
+      "section_offset": "0x82f4",
+      "extent": "0x7c"
+    }
+  ]
+}

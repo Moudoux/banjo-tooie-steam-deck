@@ -1,4 +1,5 @@
 #include "runtime_lifecycle.hpp"
+#include "runtime_dp.hpp"
 #include "ultramodern/ultramodern.hpp"
 #include <atomic>
 #include <condition_variable>
@@ -24,12 +25,15 @@ bool enabled() noexcept { return active.load(std::memory_order_acquire); }
 bool stopping() noexcept { return stopping_flag.load(std::memory_order_acquire); }
 void poll() { if (stopping()) throw ultramodern::thread_terminated{}; }
 void request_stop() noexcept {
-    std::lock_guard lock(owner_mutex);
-    stopping_flag.store(true,std::memory_order_release);
-    // Only touch native semaphores. Guest queues and OSThread memory belong to
-    // the scheduler, and must never be modified by the controller concurrently.
-    for (auto [context,launched]:producers) if (launched) context->running.signal();
-    owners_changed.notify_all();
+    {
+        std::lock_guard lock(owner_mutex);
+        stopping_flag.store(true,std::memory_order_release);
+        // Only touch native semaphores. Guest queues and OSThread memory belong to
+        // the scheduler, and must never be modified by the controller concurrently.
+        for (auto [context,launched]:producers) if (launched) context->running.signal();
+        owners_changed.notify_all();
+    }
+    dp::notify_stop();
 }
 void fail(std::exception_ptr error) noexcept {
     { std::lock_guard lock(owner_mutex); if (!first_failure) first_failure=error; }
@@ -53,23 +57,28 @@ void creation_failed(UltraThreadContext* context) noexcept {
     owners_changed.notify_all();
 }
 void enqueue_completed(UltraThreadContext* context,const std::function<void()>& scheduler_exit) {
-    std::lock_guard lock(owner_mutex);
-    // Serialize the last ordinary scheduler access with broadcast shutdown.
-    // Otherwise a late run_next_thread could signal an already cleaned context.
-    if (!stopping_flag.load()) {
-        try { scheduler_exit(); }
-        catch (...) {
-            if (!first_failure) first_failure=std::current_exception();
-            stopping_flag.store(true,std::memory_order_release);
-            for (auto [other,ready]:producers) if (ready) other->running.signal();
+    bool published=false;
+    {
+        std::lock_guard lock(owner_mutex);
+        // Serialize the last ordinary scheduler access with broadcast shutdown.
+        // Otherwise a late run_next_thread could signal an already cleaned context.
+        if (!stopping_flag.load()) {
+            try { scheduler_exit(); }
+            catch (...) {
+                if (!first_failure) first_failure=std::current_exception();
+                stopping_flag.store(true,std::memory_order_release);
+                published=true;
+                for (auto [other,ready]:producers) if (ready) other->running.signal();
+            }
         }
+        // Remove ownership and enqueue under one lock. Stop cannot dereference a
+        // context after the cleaner sees it. Quiescence follows the final enqueue.
+        if (producers.erase(context)!=1) std::terminate();
+        ultramodern::cleanup_thread(context);
+        ++enqueued_count;
+        owners_changed.notify_all();
     }
-    // Remove ownership and enqueue under one lock. Stop cannot dereference a
-    // context after the cleaner sees it. Quiescence follows the final enqueue.
-    if (producers.erase(context)!=1) std::terminate();
-    ultramodern::cleanup_thread(context);
-    ++enqueued_count;
-    owners_changed.notify_all();
+    if (published) dp::notify_stop();
 }
 void deleted(UltraThreadContext*) noexcept {
     if (!enabled()) return;

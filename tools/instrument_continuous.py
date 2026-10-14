@@ -1,76 +1,13 @@
 """Apply bounded application adaptations to generated code.
 
-Add cooperative cancellation, observations and native hardware reads. Four
-source-verified saved-RA returns use the host call stack, like ordinary JR RA.
-Their guest register/memory operations and delay slots remain unchanged. This
-is an application post-generation pass, not a change to N64Recomp or the ROM.
+Add cooperative cancellation, observations and native hardware reads. This is
+an application post-generation pass, not a change to N64Recomp or the ROM.
 """
 import hashlib
 import re
 from pathlib import Path
 
 _GPRS = 'zero at v0 v1 a0 a1 a2 a3 t0 t1 t2 t3 t4 t5 t6 t7 s0 s1 s2 s3 s4 s5 s6 s7 t8 t9 k0 k1 gp sp fp ra'.split()
-
-# Original core1/1E2B200.s: these four wrappers save their caller's RA in A1/A3,
-# call the named math helper (which preserves that register), and JR the saved
-# register. N64Recomp represents JAL/JR RA with the host stack and deliberately
-# does not update guest RA at each call; generic LOOKUP_FUNC for these returns
-# therefore looks up the thread's initial RA instead of returning to the caller.
-# Pin complete generator bodies, including every instruction comment, operation
-# and delay slot, plus the complete helpers. Do not infer this from arbitrary JR.
-_SAVED_RA_BODIES = {
-    'func_800137D4': 'fbd2ab949e373ef26e5d05e7feec38876791afd98c33966cdc96bfbb7be1620d',
-    'func_800137F4': '2b5525c9dd9718130b8890b8d3e2a05cf4d34ab188689f8cd1a6d3800083f03f',
-    'func_80013818': 'ca604a315bb5b950d808cd9dad3bcef017a4d667e89491968324ecc06b20f058',
-    'func_80013A5C': '1fda180ae555ce61b5238de304182107a593b0260bc67e2dce94219684ea8094',
-    'func_80013A7C': '2113995de5dbd5633a5774daec544544ef7b2a84ce18d6d7d99ae25dff4a632e',
-    'func_80013ABC': 'abd1775bcea6ce1b8f882cb87ef4b29637401e0a8dc9ff9615eb6587fe1a0416',
-}
-_SAVED_RA_RETURNS = {
-    'func_800137D4': (0x800137E0, 0x800137EC, 0x800137F0, 5, 'mov.s', '$f0, $f2'),
-    'func_800137F4': (0x80013804, 0x80013810, 0x80013814, 5, 'mov.s', '$f0, $f2'),
-    'func_80013A5C': (0x80013A60, 0x80013A74, 0x80013A78, 7, 'sub.s', '$f0, $f2, $f0'),
-    'func_80013A7C': (0x80013A84, 0x80013A98, 0x80013A9C, 7, 'sub.s', '$f0, $f2, $f0'),
-}
-
-
-def correct_saved_ra_returns(text, source='<generated>'):
-    """Correct only four exact original saved-register returns, before hooks.
-
-    Bodies/helpers must all be present and byte-identical to the verified raw
-    generator output. This rejects changed math, helper register use, delay-slot
-    semantics, or already instrumented input instead of guessing a new idiom.
-    """
-    found = {}
-    for match in re.finditer(r'RECOMP_FUNC void (\w+)\([^\n]*\n.*?^;}\n', text, re.S|re.M):
-        if match[1] in _SAVED_RA_BODIES:
-            if match[1] in found:
-                raise ValueError(f'{source}: duplicate saved-RA family function {match[1]}')
-            found[match[1]] = match[0]
-    if not found:
-        return text, []
-    if set(found) != set(_SAVED_RA_BODIES):
-        raise ValueError(f'{source}: incomplete saved-RA wrapper/helper family: {sorted(found)}')
-    for name, body in found.items():
-        if hashlib.sha256(body.encode()).hexdigest() != _SAVED_RA_BODIES[name]:
-            raise ValueError(f'{source}: changed original instructions/generated body for {name}')
-    corrected = []
-    for name, (save_pc, jr_pc, delay_pc, register, delay_op, delay_args) in _SAVED_RA_RETURNS.items():
-        body = found[name]
-        instructions = [(int(pc,16),op,args.strip()) for pc,op,args in re.findall(
-            r'^\s*// 0x([0-9A-Fa-f]+):\s+([\w.]+)\s*(.*)$',body,re.M)]
-        required = [(save_pc,'or',f'${_GPRS[register]}, $ra, $zero'),
-                    (jr_pc,'jr',f'${_GPRS[register]}'),(delay_pc,delay_op,delay_args)]
-        if any(item not in instructions for item in required):
-            raise ValueError(f'{source}: original saved-RA instruction mismatch for {name}')
-        call = f'    LOOKUP_FUNC(ctx->r{register})(rdram, ctx);\n'
-        if body.count(call) != 1 or body.count('    return;\n') != 1:
-            raise ValueError(f'{source}: saved-RA return shape mismatch for {name}')
-        replacement = body.replace(call, f'    // Original JR ${_GPRS[register]} at 0x{jr_pc:08X} returns to this host caller.\n')
-        text = text.replace(body,replacement,1)
-        corrected.append(name)
-    return text, corrected
-
 
 def callsite_observations(lines, stubs, source='<generated>'):
     """Map executable calls to their own instruction plus delay-slot comments.
@@ -125,81 +62,43 @@ def callsite_observations(lines, stubs, source='<generated>'):
     return observations
 
 
-def observe_global_settings(text, source='<generated>'):
-    """Read-only hooks scoped to original overlay699 function/call/delay pairs.
-
-    Run before callsite instrumentation. No bare overlay-PC matching: other
-    overlays share these virtual PCs. The five added calls never replace an
-    original operation; removing those lines recovers the exact input bodies.
-    """
-    targets = {
-        'func_80800168_glglobalsettings': [
-            ('    // 0x808001A8: jal         0x808000A4\n'
-             '    // 0x808001AC: or          $a1, $s1, $zero\n'
-             '    ctx->r5 = ctx->r17 | 0;\n',
-             '    func_808000A4_glglobalsettings(rdram, ctx);\n', None, 0x808001B0),
-        ],
-        'glglobalsettings_entrypoint_1': [
-            ('    // 0x8080022C: jal         0x80800168\n'
-             '    // 0x80800230: addiu       $a0, $sp, 0x18\n'
-             '    ctx->r4 = ADD32(ctx->r29, 0X18);\n',
-             '    func_80800168_glglobalsettings(rdram, ctx);\n', None, 0x80800234),
-            ('    // 0x80800240: jal         0x80800000\n'
-             '    // 0x80800244: nop\n\n',
-             '    glglobalsettings_entrypoint_0(rdram, ctx);\n', 0x80800240, None),
-            ('    // 0x80800250: jal         0x800885B8\n'
-             '    // 0x80800254: lw          $a0, 0x18($sp)\n'
-             '    ctx->r4 = MEM_W(ctx->r29, 0X18);\n',
-             '    _glglobaldata_entrypoint_2(rdram, ctx);\n', 0x80800250, 0x80800258),
-        ],
-    }
-    found = {}
-    for match in re.finditer(r'RECOMP_FUNC void (\w+)\([^\n]*\n.*?^;}\n',text,re.S|re.M):
-        if match[1] in targets:
-            if match[1] in found:raise ValueError(f'{source}: duplicate global settings function {match[1]}')
-            found[match[1]]=match[0]
-    count=0
-    for name,original in found.items():
-        if 'tooie_observe_global_settings' in original:
-            raise ValueError(f'{source}: already instrumented global settings function {name}')
-        body=original
-        for prefix,call,before,after in targets[name]:
-            anchor=prefix+call
-            if body.count(anchor)!=1:
-                raise ValueError(f'{source}: changed original global settings call/delay anchor in {name}: {call.strip()}')
-            replacement=prefix
-            if before is not None:replacement+=f'    tooie_observe_global_settings(ctx, 0x{before:08X}u);\n';count+=1
-            replacement+=call
-            if after is not None:replacement+=f'    tooie_observe_global_settings(ctx, 0x{after:08X}u);\n';count+=1
-            body=body.replace(anchor,replacement,1)
-        text=text.replace(original,body,1)
-    return text,count
+WIDESCREEN_PROFILE_QUERY_HOOK = (
+    'uint32_t tooie_widescreen_settings = tooie_widescreen_latched_settings_word();\n'
+    '    if (tooie_widescreen_settings & 1u)\n'
+    '        ctx->r2 = (gpr)(int32_t)((tooie_widescreen_settings >> 1) & 1u);')
 
 
-def apply_widescreen_profile(text, source='<generated>'):
-    """Override only overlay699's original stored-flag import value.
+def verify_widescreen_profile_source(text, source='<generated>'):
+    """Verify the supported v0 producer hook; never rewrite its body."""
+    if 'tooie_widescreen_apply_profile(' in text:
+        raise ValueError(f'{source}: retired native profile writer')
+    matches = list(re.finditer(
+        r'RECOMP_FUNC void func_80800034_glglobalsettings\([^\n]*\n.*?^;}\n',
+        text, re.S | re.M))
+    if not matches:
+        if 'tooie_widescreen_latched_settings_word(' in text:
+            raise ValueError(f'{source}: settings query outside profile producer')
+        return 0
+    if len(matches) != 1:
+        raise ValueError(f'{source}: duplicate global-settings import function')
+    body = matches[0][0]
+    expected = ('    ' + WIDESCREEN_PROFILE_QUERY_HOOK + '\n'
+                '    // 0x80800044: jal         0x808003C8\n'
+                '    // 0x80800048: or          $a0, $v0, $zero\n'
+                '    ctx->r4 = ctx->r2 | 0;\n'
+                '    glglobalsettings_entrypoint_4(rdram, ctx);\n')
+    if (body.count(expected) != 1 or
+            text.count('tooie_widescreen_latched_settings_word(') != 1):
+        raise ValueError(f'{source}: profile source hook/one-adjuster drift')
+    return 1
 
-    The subsequent original entrypoint still calls set_widescreen and the
-    game-owned GFLAG_BB9 setter. Pin the producer/call pair so regeneration
-    rejects source or generator drift instead of patching a similarly shaped
-    overlay call.
-    """
-    matches=list(re.finditer(r'RECOMP_FUNC void func_80800034_glglobalsettings\([^\n]*\n.*?^;}\n',text,re.S|re.M))
-    if not matches:return text,0
-    if len(matches)!=1:raise ValueError(f'{source}: duplicate global-settings import function')
-    body=matches[0][0]
-    if 'tooie_widescreen_apply_profile' in body:
-        raise ValueError(f'{source}: widescreen profile hook already present')
-    anchor=('    // 0x80800044: jal         0x808003C8\n'
-            '    // 0x80800048: or          $a0, $v0, $zero\n'
-            '    ctx->r4 = ctx->r2 | 0;\n'
-            '    glglobalsettings_entrypoint_4(rdram, ctx);\n')
-    if body.count(anchor)!=1:
-        raise ValueError(f'{source}: changed global-settings widescreen import anchor')
-    replacement=anchor.replace('    glglobalsettings_entrypoint_4(rdram, ctx);\n',
-        '    tooie_widescreen_apply_profile(ctx);\n'
-        '    glglobalsettings_entrypoint_4(rdram, ctx);\n')
-    return text.replace(body,body.replace(anchor,replacement,1),1),1
+
+def verify_guest_native_aspect_source(text, source='<generated>'):
+    """The compiled guest replacement owns projection arithmetic."""
+    if (re.search(r'RECOMP_FUNC void func_80015D14\(', text) or
+            'tooie_widescreen_adjust_projection_aspect(' in text):
+        raise ValueError(f'{source}: retired projection owner in generated corpus')
+    return 0
 
 
 def observe_graphics(text, source='<generated>'):
@@ -290,20 +189,30 @@ def observe_title(text, source='<generated>'):
     return text,count
 
 
-def observe_map_actor_list(text, source='<generated>'):
-    """One const snapshot after sort/before descriptor iteration; pinned body."""
+def verify_map_actor_list_source(text, source='<generated>'):
+    """Preserve the declared snapshot's original whole-body obligation."""
     matches=list(re.finditer(r'RECOMP_FUNC void gspropsDll_entrypoint_1\([^\n]*\n.*?^;}\n',text,re.S|re.M))
-    if not matches:return text,0
+    if not matches:return 0
     if len(matches)!=1:raise ValueError(f'{source}: duplicate map actor list function')
     body=matches[0][0]
-    # Includes all register producers, sorting, loop branches, calls and delay
-    # slots. Fail closed on any generator/source drift, not merely a PC match.
-    if hashlib.sha256(body.encode()).hexdigest()!='5ef5d033b99e044c71923141ec0dcece947cb97b782a5b8e77f5b2c169badea4':
+    call='    tooie_observe_map_actor_list(rdram, ctx, 0x808001E0u);\n'
+    if body.count(call)!=1:raise ValueError(f'{source}: map actor list call changed')
+    if hashlib.sha256(body.replace(call,'',1).encode()).hexdigest()!='5ef5d033b99e044c71923141ec0dcece947cb97b782a5b8e77f5b2c169badea4':
         raise ValueError(f'{source}: changed original map actor list body')
-    anchor='L_808001E0:\n    // 0x808001E0: blez        $s4, L_80800284\n'
-    if body.count(anchor)!=1:raise ValueError(f'{source}: missing map actor iteration anchor')
-    updated=body.replace(anchor,'L_808001E0:\n    tooie_observe_map_actor_list(rdram, ctx, 0x808001E0u);\n'+anchor.split('\n',1)[1],1)
-    return text.replace(body,updated,1),1
+    return 1
+
+
+def verify_map_actor_list_hook(text, source='<generated>'):
+    """Require the declared owner and final poll/snapshot/branch order."""
+    bodies=re.findall(r'RECOMP_FUNC void gspropsDll_entrypoint_1\([^\n]*\n.*?^;}\n',text,re.S|re.M)
+    expected=int(bool(bodies))
+    if len(bodies)>1 or len(re.findall(r'\btooie_observe_map_actor_list\s*\(',text))!=expected:
+        raise ValueError(f'{source}: map actor list hook count/owner changed')
+    seam=('L_808001E0:\n    tooie_continuous_poll(rdram, ctx, 0x808001E0u);\n'
+          '    tooie_observe_map_actor_list(rdram, ctx, 0x808001E0u);\n'
+          '    // 0x808001E0: blez        $s4, L_80800284\n')
+    if bodies and bodies[0].count(seam)!=1:
+        raise ValueError(f'{source}: map actor list poll/hook order changed')
 
 
 def apply_save_progress_pause_hook(text, source='<generated>'):
@@ -338,6 +247,37 @@ def apply_save_progress_pause_hook(text, source='<generated>'):
             '    tooie_save_progress_pause_tick(rdram, ctx, (uint32_t)ctx->r4);\n'
             '    uint64_t hi = 0, lo = 0, result = 0;\n')
     return text.replace(body, body.replace(anchor, hook, 1), 1), 1
+
+
+def verify_pause_snapshot_capture_hook(text, source='<generated>'):
+    """Verify the declared entry and original snapshot source/copy ownership."""
+    bodies = re.findall(r'RECOMP_FUNC void func_800C0F8C\([^\n]*\n.*?^;}\n', text, re.S | re.M)
+    call = '    tooie_pause_snapshot_capture();\n'
+    expected = int(bool(bodies))
+    if (len(bodies) > 1 or text.count(call) != expected or
+            text.count('tooie_pause_snapshot_capture(') != expected or (bodies and bodies[0].count(call) != 1)):
+        raise ValueError(f'{source}: pause snapshot hook count/owner changed')
+    if 'extern void tooie_pause_snapshot_capture(void);' in text:
+        raise ValueError(f'{source}: obsolete pause snapshot extern injection')
+    if not bodies:
+        return 0
+    body = bodies[0]
+    entry = ('RECOMP_FUNC void func_800C0F8C(uint8_t* rdram, recomp_context* ctx) {\n'
+             '    tooie_continuous_poll(rdram, ctx, 0x800C0F8Cu);\n'
+             '    uint64_t hi = 0, lo = 0, result = 0;\n    int c1cs = 0;\n' + call + '    // 0x800C0F8C:')
+    if body.count(entry) != 1:
+        raise ValueError(f'{source}: pause snapshot entry order changed')
+    ownership = ('    // 0x800C0FA8: jal         0x8001A0A8\n',
+                 '    func_8001A0A8(rdram, ctx);\n',
+                 '    // 0x800C0FB0: jal         0x80014F00\n',
+                 '    func_80014F00(rdram, ctx);\n',
+                 '    // 0x800C0FC0: jal         0x800C0BC0\n',
+                 '    func_800C0BC0(rdram, ctx);\n')
+    if any(body.count(seam) != 1 for seam in ownership):
+        raise ValueError(f'{source}: changed pause snapshot source/copy ownership')
+    if [body.index(seam) for seam in ownership] != sorted(body.index(seam) for seam in ownership):
+        raise ValueError(f'{source}: changed pause snapshot source/copy order')
+    return 1
 
 
 def apply_game_feature_hooks(text, source='<generated>'):
@@ -491,6 +431,33 @@ def apply_game_feature_followup_hooks(text, source='<generated>', *, lifecycle=T
     return text, count
 
 
+def apply_camera_early_update_hook(text, source='<generated>'):
+    """Apply admitted manual yaw after the early native mode-2 update path."""
+    matches = list(re.finditer(
+        r'RECOMP_FUNC void func_800A4878\([^\n]*\n.*?^;}\n', text, re.S | re.M))
+    if not matches:
+        return text, 0
+    if len(matches) != 1:
+        raise ValueError(f'{source}: duplicate camera update')
+    body = matches[0][0]
+    if 'tooie_camera_component' in body:
+        raise ValueError(f'{source}: early camera hook already present')
+    capture = '    after_0:\n    // 0x800A488C: lw          $t6, 0x38($s0)\n'
+    apply = '    after_1:\n    // 0x800A48B0: b           L_800A4968\n'
+    if body.count(capture) != 1 or body.count(apply) != 1:
+        raise ValueError(f'{source}: changed early camera update anchors')
+    updated = body.replace(capture, capture.replace('    // 0x800A488C:',
+        '    uint32_t tooie_camera_component = (uint32_t)ctx->r2;\n    // 0x800A488C:'), 1)
+    updated = updated.replace(apply, apply.replace('    // 0x800A48B0:',
+        '    tooie_camera_analog_apply_after_native_update(rdram, ctx, tooie_camera_component);\n    // 0x800A48B0:'), 1)
+    include = '#include "funcs.h"\n'
+    if text.count(include) != 1:
+        raise ValueError(f'{source}: unexpected camera include layout')
+    text = text.replace(include, include +
+        'extern void tooie_camera_analog_apply_after_native_update(uint8_t*, recomp_context*, uint32_t);\n', 1)
+    return text.replace(body, updated, 1), 1
+
+
 def apply_first_person_analog_hooks(text, source='<generated>'):
     """Route right-stick axes through Tooie's original first-person math.
 
@@ -576,40 +543,6 @@ def apply_free_camera_hooks(text, source='<generated>'):
     return text.replace(body, updated, 1), 2
 
 
-def apply_camera_interpolation_hook(text, source='<generated>'):
-    """Observe only Tooie's original active-camera selector.
-
-    func_800E42B4 stores its argument in D_8012D500. Camera backup/restore uses
-    separate routines without changing this handle, so the hook identifies a
-    real projection-owner change without position thresholds or guessed modes.
-    """
-    matches = list(re.finditer(
-        r'RECOMP_FUNC void func_800E42B4\([^\n]*\n.*?^;}\n', text, re.S | re.M))
-    if not matches:
-        return text, 0
-    if len(matches) != 1:
-        raise ValueError(f'{source}: duplicate active-camera selector')
-    body = matches[0][0]
-    if 'tooie_camera_interpolation_observe_active' in body:
-        raise ValueError(f'{source}: camera interpolation hook already present')
-    anchor = ('    // 0x800E42BC: sw          $a0, -0x2B00($at)\n'
-              '    MEM_W(-0X2B00, ctx->r1) = ctx->r4;\n'
-              '    return;\n')
-    if body.count(anchor) != 1:
-        raise ValueError(f'{source}: changed active-camera store/return anchor')
-    updated = body.replace(anchor,
-        '    // 0x800E42BC: sw          $a0, -0x2B00($at)\n'
-        '    MEM_W(-0X2B00, ctx->r1) = ctx->r4;\n'
-        '    tooie_camera_interpolation_observe_active((uint32_t)ctx->r4);\n'
-        '    return;\n', 1)
-    include = '#include "funcs.h"\n'
-    if text.count(include) != 1:
-        raise ValueError(f'{source}: unexpected generated include layout for camera interpolation')
-    text = text.replace(include, include +
-        'extern void tooie_camera_interpolation_observe_active(uint32_t);\n', 1)
-    return text.replace(body, updated, 1), 1
-
-
 def apply_camera_pod_recreation_hook(text, source='<generated>'):
     """Reset projection history after ncpod has replaced a camera allocation.
 
@@ -688,6 +621,12 @@ def apply_model_interpolation_hooks(text, source='<generated>'):
         '    tooie_nest_visibility_expand(ctx);\n', 1)
     updated = updated.replace(exit_label, exit_label +
         '    tooie_model_draw_end(rdram, ctx);\n', 1)
+    projection_anchor = ('    // 0x800DEFE8: sw          $t9, 0x4($a2)\n'
+                         '    MEM_W(0X4, ctx->r6) = ctx->r25;\n')
+    if updated.count(projection_anchor) != 1:
+        raise ValueError(f'{source}: changed nest projection allocation anchor')
+    updated = updated.replace(projection_anchor, projection_anchor +
+        '    tooie_model_nest_projection_emitted(rdram, ctx);\n', 1)
     include = '#include "funcs.h"\n'
     if text.count(include) != 1:
         raise ValueError(f'{source}: unexpected generated include layout for model interpolation')
@@ -697,8 +636,9 @@ def apply_model_interpolation_hooks(text, source='<generated>'):
         'extern void tooie_model_draw_end(uint8_t*, recomp_context*);\n', 1)
     text = text.replace('extern void tooie_model_draw_end(uint8_t*, recomp_context*);\n',
         'extern void tooie_model_draw_end(uint8_t*, recomp_context*);\n'
+        'extern void tooie_model_nest_projection_emitted(uint8_t*, recomp_context*);\n'
         'extern void tooie_nest_visibility_expand(recomp_context*);\n', 1)
-    return text.replace(body, updated, 1), 5
+    return text.replace(body, updated, 1), 6
 
 
 def apply_nest_visibility_hooks(text, source='<generated>'):
@@ -732,6 +672,40 @@ def apply_nest_visibility_hooks(text, source='<generated>'):
     text = text.replace(include, include +
         'extern void tooie_nest_body_draw_begin(uint8_t*, recomp_context*);\n', 1)
     return text.replace(body, updated, 1), 1
+
+
+def apply_nest_projection_hooks(text, source='<generated>'):
+    """Associate each nest child projection with its actor and draw role."""
+    matches = list(re.finditer(
+        r'RECOMP_FUNC void func_80800D8C_chnests\([^\n]*\n.*?^;}\n', text,
+        re.S | re.M))
+    if not matches:
+        return text, 0
+    if len(matches) != 1:
+        raise ValueError(f'{source}: duplicate nest child renderer')
+    body = matches[0][0]
+    if 'tooie_model_nest_child_' in body:
+        raise ValueError(f'{source}: nest projection ownership already present')
+    updated = body
+    call = '    func_801018A4(rdram, ctx);\n'
+    for pc in (0x80800E30, 0x80800E90, 0x80800EBC):
+        anchor = f'    // 0x{pc:08X}: jal         0x801018A4\n'
+        if updated.count(anchor) != 1:
+            raise ValueError(f'{source}: changed nest child call {pc:08X}')
+        start = updated.index(anchor)
+        pos = updated.find(call, start)
+        if pos < 0 or pos - start > 512:
+            raise ValueError(f'{source}: changed nest child call body {pc:08X}')
+        updated = updated[:pos] + (
+            f'    tooie_model_nest_child_begin((uint32_t)ctx->r16, 0x{pc:08X}u);\n'
+            + call + '    tooie_model_nest_child_end();\n') + updated[pos + len(call):]
+    include = '#include "funcs.h"\n'
+    if text.count(include) != 1:
+        raise ValueError(f'{source}: unexpected nest include layout')
+    text = text.replace(include, include +
+        'extern void tooie_model_nest_child_begin(uint32_t, uint32_t);\n'
+        'extern void tooie_model_nest_child_end(void);\n', 1)
+    return text.replace(body, updated, 1), 6
 
 
 def apply_intro_model_draw_hooks(text, source='<generated>'):
@@ -810,6 +784,66 @@ def apply_backpack_model_draw_hooks(text, source='<generated>'):
     text = text.replace(include, include +
         'extern void tooie_model_backpack_draw_begin(uint32_t);\n'
         'extern void tooie_model_backpack_draw_end(void);\n', 1)
+    return text.replace(body, updated, 1), 2
+
+
+def apply_backpack_body_draw_hooks(text, source='<generated>'):
+    """Tag only the source player-body draw; native code gates backpack states."""
+    matches = list(re.finditer(
+        r'RECOMP_FUNC void func_80092444\([^\n]*\n.*?^;}\n', text, re.S | re.M))
+    if not matches:
+        return text, 0
+    if len(matches) != 1:
+        raise ValueError(f'{source}: duplicate player body renderer')
+    body = matches[0][0]
+    if 'tooie_model_backpack_body_draw_' in body:
+        raise ValueError(f'{source}: backpack body hooks already present')
+    anchor = '    // 0x800926D8: jal         0x800DE448\n'
+    call = '    func_800DE448(rdram, ctx);\n'
+    if body.count(anchor) != 1:
+        raise ValueError(f'{source}: changed backpack body call anchor')
+    anchor_pos = body.index(anchor)
+    call_pos = body.find(call, anchor_pos)
+    if call_pos < 0 or call_pos - anchor_pos > 512:
+        raise ValueError(f'{source}: changed backpack body call body')
+    updated = body[:call_pos] + (
+        '    tooie_model_backpack_body_draw_begin(rdram, (uint32_t)ctx->r16);\n'
+        + call + '    tooie_model_backpack_body_draw_end();\n') + body[call_pos + len(call):]
+    include = '#include "funcs.h"\n'
+    if text.count(include) != 1:
+        raise ValueError(f'{source}: unexpected generated include layout for backpack body')
+    text = text.replace(include, include +
+        'extern void tooie_model_backpack_body_draw_begin(uint8_t*, uint32_t);\n'
+        'extern void tooie_model_backpack_body_draw_end(void);\n', 1)
+    return text.replace(body, updated, 1), 2
+
+
+def apply_gpu_node_draw_hooks(text, source='<generated>'):
+    """Identify matrix emissions by immutable model node, including recursion."""
+    matches = list(re.finditer(
+        r'RECOMP_FUNC void func_800DE2A4\([^\n]*\n.*?^;}\n', text, re.S | re.M))
+    if not matches:
+        return text, 0
+    if len(matches) != 1:
+        raise ValueError(f'{source}: duplicate model node dispatcher')
+    body = matches[0][0]
+    if 'tooie_model_gpu_node_' in body:
+        raise ValueError(f'{source}: GPU node hooks already present')
+    anchor = '    // 0x800DE2E4: jalr        $t9\n'
+    call = '    LOOKUP_FUNC(ctx->r25)(rdram, ctx);\n'
+    if body.count(anchor) != 1 or body.count(call) != 1:
+        raise ValueError(f'{source}: changed GPU node dispatch anchor')
+    pos = body.find(call, body.index(anchor))
+    if pos < 0 or pos - body.index(anchor) > 512:
+        raise ValueError(f'{source}: changed GPU node dispatch body')
+    updated = body[:pos] + ('    tooie_model_gpu_node_begin(rdram, ctx);\n'
+        + call + '    tooie_model_gpu_node_end(rdram, ctx);\n') + body[pos + len(call):]
+    include = '#include "funcs.h"\n'
+    if text.count(include) != 1:
+        raise ValueError(f'{source}: unexpected GPU node include layout')
+    text = text.replace(include, include +
+        'extern void tooie_model_gpu_node_begin(uint8_t*, recomp_context*);\n'
+        'extern void tooie_model_gpu_node_end(uint8_t*, recomp_context*);\n', 1)
     return text.replace(body, updated, 1), 2
 
 
@@ -905,332 +939,64 @@ def apply_scene_observer_hooks(text, source='<generated>'):
         text = text.replace(include, include + ''.join(declarations), 1)
     return text, count
 
-def apply_gsworld_call_timing_hooks(text, source='<generated>'):
-    """Time only the fixed original calls in world activation; retain no history."""
-    matches = list(re.finditer(
-        r'RECOMP_FUNC void gsworldDll_entrypoint_2\([^\n]*\n.*?^;}\n', text, re.S | re.M))
-    if not matches:
-        return text, 0
-    if len(matches) != 1:
-        raise ValueError(f'{source}: duplicate gsworld activation')
-    body = matches[0][0]
-    if 'tooie_scene_world_call_started' in body:
-        raise ValueError(f'{source}: gsworld timings already present')
-    lines = body.splitlines(keepends=True)
+def verify_guest_update_observer(text, source='<generated>'):
+    """Validate the declared guest-update entry diagnostic without rewriting it."""
+    bodies = re.findall(r'RECOMP_FUNC void func_800A73F4\([^\n]*\n.*?^;}\n', text, re.S | re.M)
+    call = '    tooie_guest_update_observed(MEM_H(0, (gpr)(int32_t)0x80127634U) != 0);\n'
+    expected = int(bool(bodies))
+    if (len(bodies) > 1 or text.count(call) != expected or
+            text.count('tooie_guest_update_observed(') != expected or (bodies and bodies[0].count(call) != 1)):
+        raise ValueError(f'{source}: guest-update hook count/owner changed')
+    if 'extern void tooie_guest_update_observed(int wait_bypassed);' in text:
+        raise ValueError(f'{source}: obsolete guest-update extern injection')
+    seam = ('RECOMP_FUNC void func_800A73F4(uint8_t* rdram, recomp_context* ctx) {\n'
+            '    tooie_continuous_poll(rdram, ctx, 0x800A73F4u);\n'
+            '    uint64_t hi = 0, lo = 0, result = 0;\n    int c1cs = 0;\n' + call + '    // 0x800A73F4:')
+    if bodies and bodies[0].count(seam) != 1:
+        raise ValueError(f'{source}: guest-update entry order changed')
+    return expected
+
+
+def verify_game_delta_observer(text, source='<generated>'):
+    """Check the declared post-replay diagnostic without modifying output."""
+    bodies = re.findall(r'RECOMP_FUNC void func_800123F4\([^\n]*\n.*?^;}\n', text, re.S | re.M)
+    call = '    tooie_game_delta_observed((uint32_t)MEM_W(0, (gpr)(int32_t)0x8012C760U));\n'
+    expected = int(bool(bodies))
+    if (len(bodies) > 1 or text.count(call) != expected or
+            text.count('tooie_game_delta_observed(') != expected or (bodies and bodies[0].count(call) != 1)):
+        raise ValueError(f'{source}: game-delta hook count/owner changed')
+    if 'extern void tooie_game_delta_observed(uint32_t);' in text:
+        raise ValueError(f'{source}: obsolete game-delta extern injection')
+    seam = ('    func_8001608C(rdram, ctx);\n'
+            '        goto after_4;\n    // 0x8001245C: nop\n\n'
+            '    after_4:\n' + call + '    // 0x80012460:')
+    if bodies and bodies[0].count(seam) != 1:
+        raise ValueError(f'{source}: game-delta post-replay continuation changed')
+    return expected
+
+
+_REPLAY_TIMING_HOOKS = (
+    ('func_8001608C', 0x8001608C, 'tooie_replay_timing_begin_record();'),
+    ('func_8001608C', 0x800160F8, 'tooie_replay_timing_record_divisor((uint32_t)MEM_W(0X50, ctx->r29), ctx->r2 != 0);'),
+    ('func_800151BC', 0x8001520C, 'ctx->r2 = (gpr)(int32_t)tooie_replay_timing_scheduler_divisor((uint32_t)ctx->r2, 1);'),
+    ('func_800151BC', 0x8001524C, 'ctx->r2 = (gpr)(int32_t)tooie_replay_timing_scheduler_divisor((uint32_t)ctx->r2, 0);'),
+)
+
+
+def verify_replay_timing_hooks(text, source='<generated>'):
+    """Verify four declared hooks without changing generated text."""
     count = 0
-    for index in range(len(lines) - 1, -1, -1):
-        pc_match = re.fullmatch(r'    // 0x([0-9A-F]+): jal .*\n', lines[index])
-        if not pc_match:
-            continue
-        target = next((candidate for candidate in range(index + 1, min(index + 12, len(lines)))
-                       if re.fullmatch(r'    \w+\(rdram, ctx\);\n', lines[candidate])), None)
-        if target is None:
-            raise ValueError(f'{source}: changed gsworld call anchor at {pc_match[1]}')
-        pc = int(pc_match[1], 16)
-        lines.insert(target, f'    tooie_scene_world_call_started(0x{pc:08X}u);\n')
-        lines.insert(target + 2, f'    tooie_scene_world_call_finished(0x{pc:08X}u);\n')
-        count += 1
-    if count != 59:
-        raise ValueError(f'{source}: expected 59 original gsworld calls, found {count}')
-    include = '#include "funcs.h"\n'
-    if text.count(include) != 1:
-        raise ValueError(f'{source}: unexpected generated include layout for gsworld timing')
-    declarations = ('extern void tooie_scene_world_call_started(uint32_t);\n'
-                    'extern void tooie_scene_world_call_finished(uint32_t);\n')
-    text = text.replace(include, include + declarations, 1)
-    return text.replace(body, ''.join(lines), 1), count
-
-
-def apply_scene_nested_call_timing_hooks(text, source='<generated>'):
-    """Retain only each dominant world-setup parent's slowest direct child.
-
-    These are fixed direct calls inside func_800A5C28 and func_800F73C4, not a
-    general call profiler. The native observer discards all work outside an
-    active scene activation and stores one winner per parent.
-    """
-    targets = {
-        'func_800A5C28': (0x800A5C28, {
-            0x800A5C30, 0x800A5C3C, 0x800A5C44, 0x800A5C4C, 0x800A5C54,
-            0x800A5C5C, 0x800A5C64, 0x800A5C6C, 0x800A5C7C,
-        }),
-        'func_800F73C4': (0x800F73C4, {
-            0x800F7424, 0x800F742C, 0x800F743C, 0x800F744C, 0x800F7464,
-            0x800F7478, 0x800F7480, 0x800F7490, 0x800F74A4, 0x800F74C0,
-            0x800F74CC, 0x800F74D4, 0x800F74E8, 0x800F74F4, 0x800F7510,
-            0x800F7528, 0x800F7540, 0x800F754C, 0x800F7570,
-        }),
-    }
-    count = 0
-    processed = set()
-    for match in list(re.finditer(r'RECOMP_FUNC void (\w+)\([^\n]*\n.*?^;}\n', text, re.S | re.M)):
-        name, body = match[1], match[0]
-        if name not in targets:
-            continue
-        processed.add(name)
-        if 'tooie_scene_nested_call_started' in body:
-            raise ValueError(f'{source}: nested scene timing already present: {name}')
-        parent_pc, call_pcs = targets[name]
-        lines = body.splitlines(keepends=True)
-        local_count = 0
-        for index in range(len(lines) - 1, -1, -1):
-            pc_match = re.fullmatch(r'    // 0x([0-9A-F]+): jal .*\n', lines[index])
-            if not pc_match:
-                continue
-            child_pc = int(pc_match[1], 16)
-            if child_pc not in call_pcs:
-                continue
-            target = next((candidate for candidate in range(index + 1, min(index + 14, len(lines)))
-                           if re.fullmatch(r'    \w+\(rdram, ctx\);\n', lines[candidate])), None)
-            if target is None:
-                raise ValueError(f'{source}: changed nested scene call anchor at {child_pc:08X}')
-            lines.insert(target, f'    tooie_scene_nested_call_started(0x{parent_pc:08X}u, 0x{child_pc:08X}u);\n')
-            lines.insert(target + 2, f'    tooie_scene_nested_call_finished(0x{parent_pc:08X}u, 0x{child_pc:08X}u);\n')
-            local_count += 2
-        if local_count != 2 * len(call_pcs):
-            raise ValueError(f'{source}: expected {len(call_pcs)} nested scene calls in {name}, found {local_count // 2}')
-        text = text.replace(body, ''.join(lines), 1)
-        count += local_count
-    expected = sum(len(targets[name][1]) for name in processed)
-    if count and count != 2 * expected:
-        raise ValueError(f'{source}: incomplete nested scene call coverage: {count // 2}/{expected}')
-    if count:
-        include = '#include "funcs.h"\n'
-        if text.count(include) != 1:
-            raise ValueError(f'{source}: unexpected generated include layout for nested scene timing')
-        text = text.replace(include, include +
-            'extern void tooie_scene_nested_call_started(uint32_t, uint32_t);\n'
-            'extern void tooie_scene_nested_call_finished(uint32_t, uint32_t);\n', 1)
-    return text, count
-
-
-def apply_guest_update_observer(text, source='<generated>'):
-    """Report the original guest-update entry and whether its wait was bypassed."""
-    matches = list(re.finditer(
-        r'RECOMP_FUNC void func_800A73F4\([^\n]*\n.*?^;}\n', text, re.S | re.M))
-    if not matches:return text,0
-    if len(matches)!=1:raise ValueError(f'{source}: duplicate guest-update owner')
-    body=matches[0][0]
-    hook='    tooie_guest_update_observed(MEM_H(0X80127634, 0) != 0);\n'
-    if hook in body:raise ValueError(f'{source}: guest-update observer already present')
-    entry='RECOMP_FUNC void func_800A73F4(uint8_t* rdram, recomp_context* ctx) {\n'
-    variables='    uint64_t hi = 0, lo = 0, result = 0;\n'
-    poll='    tooie_continuous_poll(rdram, ctx, 0x800A73F4u);\n'
-    variants=((entry+variables,entry+hook+variables),
-              (entry+poll+variables,entry+poll+hook+variables))
-    found=[pair for pair in variants if body.count(pair[0])==1]
-    if len(found)!=1:raise ValueError(f'{source}: changed guest-update entry anchor')
-    text=text.replace(body,body.replace(*found[0],1),1)
-    declaration='extern void tooie_guest_update_observed(int wait_bypassed);\n'
-    scene_tail='extern void tooie_scene_activation_finished(void);\n'
-    if text.count(scene_tail)==1:
-        text=text.replace(scene_tail,scene_tail+'\n'+declaration,1)
-    else:
-        include='#include "funcs.h"\n'
-        if text.count(include)!=1:raise ValueError(f'{source}: unexpected generated include layout for guest update')
-        text=text.replace(include,include+declaration,1)
-    return text,1
-
-
-def apply_heap_realloc_safety_fix(text, source='<generated>'):
-    """Repair only the verified moving-growth over-copy and failed-pin paths.
-
-    The original subtraction at 0x8001B220 is the physical old payload
-    capacity. The allocation/copy path can request a larger aligned size, so
-    the generated memcpy length must not exceed that original capacity. A
-    failed allocation returns zero after the original pin setup; release that
-    pin before preserving the zero result. The repair preserves allocation
-    ordering and all shrink/in-place paths; it changes only the moving-copy
-    bound on a successful growth path.
-    """
-    matches = list(re.finditer(
-        r'RECOMP_FUNC void heap_realloc\([^\n]*\n.*?^;}\n', text, re.S | re.M))
-    if not matches:
-        return text, 0
-    if len(matches) != 1:
-        raise ValueError(f'{source}: duplicate heap_realloc')
-    body = matches[0][0]
-    if 'tooie_heap_realloc_old_capacity' in body:
-        raise ValueError(f'{source}: heap_realloc safety fix already present')
-    locals_anchor = '    uint64_t hi = 0, lo = 0, result = 0;\n    int c1cs = 0;\n'
-    capacity_anchor = ('    // 0x8001B220: subu        $t7, $t6, $a0\n'
-                       '    ctx->r15 = SUB32(ctx->r14, ctx->r4);\n')
-    failure_anchor = ('    // 0x8001B2FC: b           L_8001B374\n'
-                      '    // 0x8001B300: or          $v0, $zero, $zero\n'
-                      '    ctx->r2 = 0 | 0;\n'
-                      '        goto L_8001B374;\n')
-    copy_anchor = ('    // 0x8001B358: jal         0x80019E70\n'
-                   '    // 0x8001B35C: or          $a2, $v0, $zero\n'
-                   '    ctx->r6 = ctx->r2 | 0;\n'
-                   '    aligned8_memcpy(rdram, ctx);\n')
-    anchors = (locals_anchor, capacity_anchor, failure_anchor, copy_anchor)
-    if any(body.count(anchor) != 1 for anchor in anchors):
-        raise ValueError(f'{source}: changed heap_realloc safety anchor')
-    updated = body.replace(locals_anchor, locals_anchor +
-        '    uint32_t tooie_heap_realloc_old_capacity = 0;\n', 1)
-    updated = updated.replace(capacity_anchor, capacity_anchor +
-        '    tooie_heap_realloc_old_capacity = (uint32_t)ctx->r15;\n', 1)
-    updated = updated.replace(failure_anchor,
-        ('    // 0x8001B2FC: allocation failed; release the original pin before returning zero.\n'
-         '    ctx->r4 = 0 | 0;\n'
-         '    func_8001B864(rdram, ctx);\n' + failure_anchor), 1)
-    updated = updated.replace(copy_anchor,
-        ('    // 0x8001B358: jal         0x80019E70\n'
-         '    // 0x8001B35C: or          $a2, $v0, $zero\n'
-         '    ctx->r6 = ctx->r2 | 0;\n'
-         '    ctx->r6 = ctx->r6 < tooie_heap_realloc_old_capacity ? ctx->r6 : tooie_heap_realloc_old_capacity;\n'
-         '    aligned8_memcpy(rdram, ctx);\n'), 1)
-    return text.replace(body, updated, 1), 3
-
-
-def apply_game_delta_observer(text, source='<generated>'):
-    """Observe the game-delta word after replay input may replace it.
-
-    A7D30 supplies the ordinary accumulated-VI delta.  func_8001608C can then
-    replace that same word with glrecord byte four before the update uses it.
-    Sampling at the latter return makes health diagnostics describe the actual
-    game delta without changing either source of timing.
-    """
-    matches = list(re.finditer(
-        r'RECOMP_FUNC void func_800123F4\([^\n]*\n.*?^;}\n', text, re.S | re.M))
-    if not matches:
-        return text, 0
-    if len(matches) != 1:
-        raise ValueError(f'{source}: duplicate game-delta owner')
-    body = matches[0][0]
-    if 'tooie_game_delta_observed' in body:
-        raise ValueError(f'{source}: game-delta observer already present')
-    anchor = ('    func_8001608C(rdram, ctx);\n'
-              '        goto after_4;\n'
-              '    // 0x8001245C: nop\n\n'
-              '    after_4:\n')
-    if body.count(anchor) != 1:
-        raise ValueError(f'{source}: changed post-replay game-delta anchor')
-    # MEM_* requires a sign-extended guest base. A positive 0x8012C760 offset
-    # with zero base would address outside RDRAM on 64-bit hosts.
-    updated = body.replace(anchor, anchor +
-        '    tooie_game_delta_observed((uint32_t)MEM_W(0, (gpr)(int32_t)0x8012C760U));\n', 1)
-    include = '#include "funcs.h"\n'
-    if text.count(include) != 1:
-        raise ValueError(f'{source}: unexpected generated include layout for game delta')
-    text = text.replace(include, include +
-        'extern void tooie_game_delta_observed(uint32_t);\n', 1)
-    return text.replace(body, updated, 1), 1
-
-
-def apply_replay_timing_hooks(text, source='<generated>'):
-    """Pace replay input records at their recorded retrace divisor only.
-
-    func_8001608C first clears the published rate, then receives a record from glrecord, then D8FA0 consumes its
-    byte-4 tick count.  The following frame's core1 wait loop is the original
-    pacing owner.  Override only its two local divisor returns; never change
-    the global getter or virtual VI production used by ordinary gameplay.
-    """
-    begin = '    tooie_replay_timing_begin_record();\n'
-    record = ('    tooie_replay_timing_record_divisor('
-              '(uint32_t)MEM_W(0X50, ctx->r29), ctx->r2 != 0);\n')
-    entry = 'RECOMP_FUNC void func_8001608C(uint8_t* rdram, recomp_context* ctx) {\n'
-    variables = '    uint64_t hi = 0, lo = 0, result = 0;\n'
-    poll = '    tooie_continuous_poll(rdram, ctx, 0x8001608Cu);\n'
-    raw_call = ('    _glrecord_entrypoint_0(rdram, ctx);\n'
-                '        goto after_3;\n')
-    observed_call = ('    _glrecord_entrypoint_0(rdram, ctx);\n'
-                     '    tooie_overlay_callsite_pop();\n'
-                     '        goto after_3;\n')
-    targets = {
-        'func_8001608C': (
-            (((entry + variables, entry + begin + variables),
-              (entry + poll + variables, entry + poll + begin + variables)),
-             ((raw_call, raw_call.replace('        goto after_3;\n', record + '        goto after_3;\n')),
-              (observed_call, observed_call.replace('        goto after_3;\n', record + '        goto after_3;\n')))),
-            2),
-        'func_800151BC': (
-            (((('    after_4:\n'
-                '    // 0x8001520C: lui         $t6, 0x8008\n'),
-               ('    after_4:\n'
-                '    ctx->r2 = (gpr)(int32_t)tooie_replay_timing_scheduler_divisor((uint32_t)ctx->r2, 1);\n'
-                '    // 0x8001520C: lui         $t6, 0x8008\n')),),
-             ((('    after_6:\n'
-                '    // 0x8001524C: lui         $t0, 0x8008\n'),
-               ('    after_6:\n'
-                '    ctx->r2 = (gpr)(int32_t)tooie_replay_timing_scheduler_divisor((uint32_t)ctx->r2, 0);\n'
-                '    // 0x8001524C: lui         $t0, 0x8008\n')),)),
-            2),
-    }
-    count = 0
-    declarations = []
-    for match in list(re.finditer(r'RECOMP_FUNC void (\w+)\([^\n]*\n.*?^;}\n', text, re.S | re.M)):
-        name, body = match[1], match[0]
-        if name not in targets:
-            continue
-        if 'tooie_replay_timing_begin_record' in body or 'tooie_replay_timing_record_divisor' in body or 'tooie_replay_timing_scheduler_divisor' in body:
-            raise ValueError(f'{source}: replay timing hook already present: {name}')
-        anchor_groups, expected_count = targets[name]
-        if expected_count != len(anchor_groups):
-            raise AssertionError(f'{source}: malformed replay timing hook definition: {name}')
-        updated = body
-        for variants in anchor_groups:
-            matches = [(anchor, replacement) for anchor, replacement in variants
-                       if updated.count(anchor) == 1]
-            if len(matches) != 1:
-                raise ValueError(f'{source}: changed replay timing anchor: {name}')
-            anchor, replacement = matches[0]
-            updated = updated.replace(anchor, replacement, 1)
-        text = text.replace(body, updated, 1)
-        count += expected_count
-        declarations.append(name)
-    if declarations:
-        include = '#include "funcs.h"\n'
-        if text.count(include) != 1:
-            raise ValueError(f'{source}: unexpected generated include layout for replay timing')
-        hook_names = set(declarations)
-        c_declarations = ''
-        if 'func_8001608C' in hook_names:
-            c_declarations += ('extern void tooie_replay_timing_begin_record(void);\n'
-                               'extern void tooie_replay_timing_record_divisor(uint32_t, int);\n')
-        if 'func_800151BC' in hook_names:
-            c_declarations += 'extern uint32_t tooie_replay_timing_scheduler_divisor(uint32_t, int);\n'
-        text = text.replace(include, include + c_declarations, 1)
-    return text, count
-
-
-def apply_native_aspect_hook(text, source='<generated>'):
-    """Scale only func_80015D14's completed, game-owned widescreen aspect.
-
-    r24 still contains the original signed widescreen flag loaded at 80015D28.
-    Passing it to the host helper leaves original 4:3 and scripted 4:3 cutscene
-    projection untouched. func_80015CE8 subsequently forwards f0 to CA510,
-    the original camera projection/frustum rebuild owner.
-    """
-    matches = list(re.finditer(
-        r'RECOMP_FUNC void func_80015D14\([^\n]*\n.*?^;}\n', text, re.S | re.M))
-    if not matches:
-        return text, 0
-    if len(matches) != 1:
-        raise ValueError(f'{source}: duplicate viewport-aspect owner')
-    body = matches[0][0]
-    if 'tooie_widescreen_adjust_projection_aspect' in body:
-        raise ValueError(f'{source}: native-aspect hook already present')
-    raw_anchor = ('L_80015D4C:\n'
-                  '    // 0x80015D4C: jr          $ra\n')
-    polled_anchor = ('L_80015D4C:\n'
-                     '    tooie_continuous_poll(rdram, ctx, 0x80015D4Cu);\n'
-                     '    // 0x80015D4C: jr          $ra\n')
-    anchors = [anchor for anchor in (raw_anchor, polled_anchor)
-               if body.count(anchor) == 1]
-    if len(anchors) != 1:
-        raise ValueError(f'{source}: changed viewport-aspect return anchor')
-    anchor = anchors[0]
-    updated = body.replace(anchor,
-        anchor.replace('    // 0x80015D4C: jr          $ra\n',
-                       '    ctx->f2.fl = tooie_widescreen_adjust_projection_aspect(\n'
-                       '        ctx->f2.fl, ctx->r24 != 0);\n'
-                       '    // 0x80015D4C: jr          $ra\n'), 1)
-    include = '#include "funcs.h"\n'
-    if text.count(include) != 1:
-        raise ValueError(f'{source}: unexpected generated include layout for native aspect')
-    text = text.replace(include, include +
-        'extern float tooie_widescreen_adjust_projection_aspect(float, int);\n', 1)
-    return text.replace(body, updated, 1), 1
+    for name, pc, hook in _REPLAY_TIMING_HOOKS:
+        bodies = re.findall(r'RECOMP_FUNC void ' + name + r'\([^\n]*\n.*?^;}\n', text, re.S | re.M)
+        call = '    ' + hook + '\n'
+        expected = int(bool(bodies))
+        if len(bodies) > 1 or text.count(call) != expected:
+            raise ValueError(f'{source}: replay hook count/owner changed: {name}:{pc:08X}')
+        if bodies and (bodies[0].count(call + f'    // 0x{pc:08X}:') != 1 or
+                       (pc == 0x800160F8 and bodies[0].count('    after_3:\n' + call) != 1)):
+            raise ValueError(f'{source}: replay hook PC/continuation changed: {name}:{pc:08X}')
+        count += expected
+    return count
 
 
 def apply_actor_draw_distance_hooks(text, source='<generated>'):
@@ -1331,48 +1097,6 @@ def apply_hud_counter_rect_hook(text, source='<generated>'):
         'extern void tooie_hud_counter_rect_begin(uint8_t*, recomp_context*);\n'
         'extern void tooie_hud_counter_rect_end(uint8_t*, recomp_context*);\n', 1)
     return text.replace(body, updated, 1), 2
-
-
-def apply_hud_ortho_hook(text, source='<generated>'):
-    """Normalize both native 2D ortho branches to the selected HUD width.
-
-    func_800E42F0 is shared by sprite and text submission. Its original
-    4:3 and anamorphic-widescreen branches load different horizontal extents;
-    both must be corrected at their guOrtho seam so paired art/text agree.
-    """
-    matches = list(re.finditer(
-        r'RECOMP_FUNC void func_800E42F0\([^\n]*\n.*?^;}\n', text, re.S | re.M))
-    if not matches:
-        return text, 0
-    if len(matches) != 1:
-        raise ValueError(f'{source}: duplicate HUD ortho owner')
-    body = matches[0][0]
-    if 'tooie_hud_ortho_adjust' in body:
-        raise ValueError(f'{source}: HUD ortho hook already present')
-    anchors = (
-        ('    // 0x800E4360: jal         0x8002DE04\n'
-         '    // 0x800E4364: swc1        $f10, 0x1C($sp)\n'
-         '    MEM_W(0X1C, ctx->r29) = ctx->f10.u32l;\n'
-         '    guOrtho(rdram, ctx);\n'),
-        ('    // 0x800E43B0: jal         0x8002DE04\n'
-         '    // 0x800E43B4: swc1        $f6, 0x1C($sp)\n'
-         '    MEM_W(0X1C, ctx->r29) = ctx->f6.u32l;\n'
-         '    guOrtho(rdram, ctx);\n'),
-    )
-    for anchor in anchors:
-        if body.count(anchor) != 1:
-            raise ValueError(f'{source}: changed HUD ortho callsite')
-        body = body.replace(anchor, anchor.replace(
-            '    guOrtho(rdram, ctx);\n',
-            '    tooie_hud_ortho_adjust(rdram, ctx);\n'
-            '    guOrtho(rdram, ctx);\n'), 1)
-    include = '#include "funcs.h"\n'
-    declaration = 'extern void tooie_hud_ortho_adjust(uint8_t*, recomp_context*);\n'
-    if text.count(include) != 1 or declaration in text:
-        raise ValueError(f'{source}: unexpected generated include layout for HUD ortho')
-    text = text.replace(include, include + declaration, 1)
-    original = matches[0][0]
-    return text.replace(original, body, 1), 2
 
 
 def apply_egg_reticle_ortho_hook(text, source='<generated>'):
@@ -1504,8 +1228,8 @@ _MENU_BODIES={
     'func_808013C8_chgameselect':('78ac57f94c00f4d2d8cb19d8a356e2eb23a08e39720b2d8d2503937d84a6eff8',(0x8080140C,)),
 }
 
-def observe_menu(text,source='<generated>',section_index=58):
-    """Eleven before-instruction snapshots; complete pinned bodies include producers/delay slots."""
+def verify_menu_source(text,source='<generated>',section_index=58):
+    """Validate declared snapshots and original metadata-bound complete bodies."""
     found=set();count=0
     for match in list(re.finditer(r'RECOMP_FUNC void (\w+)\([^\n]*\n.*?^;}\n',text,re.S|re.M)):
         name,body=match[1],match[0]
@@ -1513,6 +1237,12 @@ def observe_menu(text,source='<generated>',section_index=58):
         if name in found:raise ValueError(f'{source}: duplicate menu function {name}')
         found.add(name);expected,sites=_MENU_BODIES[name]
         if section_index is None:raise ValueError(f'{source}: menu function lacks selected section metadata')
+        if len(re.findall(r'\btooie_observe_menu\s*\(',body))!=len(sites):
+            raise ValueError(f'{source}: menu hook identifier count changed in {name}')
+        for pc in sites:
+            call=f'    tooie_observe_menu(rdram, ctx, 0x{pc:08X}u);\n'
+            if body.count(call)!=1:raise ValueError(f'{source}: menu call changed in {name}:{pc:08X}')
+            body=body.replace(call,'',1);count+=1
         # Only the compiler's selected-section ordinal is variable. Bind every
         # own-section relocation to the supplied .chgameselect metadata index,
         # then canonicalize that integer for hashing; emit original bytes.
@@ -1521,16 +1251,32 @@ def observe_menu(text,source='<generated>',section_index=58):
             return match[1]+'58'+match[3]
         canonical=re.sub(r'(RELOC_(?:HI16|LO16)\()(\d+)(,)',canonical_reloc,body)
         if hashlib.sha256(canonical.encode()).hexdigest()!=expected:raise ValueError(f'{source}: changed original menu body {name}')
-        updated=body
+    return count
+
+
+def verify_menu_hooks(text,source='<generated>'):
+    """Require owner-local instruction order and the final label poll seam."""
+    found=set();expected=0
+    for match in re.finditer(r'RECOMP_FUNC void (\w+)\([^\n]*\n.*?^;}\n',text,re.S|re.M):
+        name,body=match[1],match[0]
+        if name not in _MENU_BODIES:continue
+        if name in found:raise ValueError(f'{source}: duplicate menu function {name}')
+        found.add(name);sites=_MENU_BODIES[name][1];expected+=len(sites)
         for pc in sites:
-            anchor=f'    // 0x{pc:08X}:'
-            if updated.count(anchor)!=1:raise ValueError(f'{source}: ambiguous menu instruction {name}:{pc:08X}')
-            updated=updated.replace(anchor,f'    tooie_observe_menu(rdram, ctx, 0x{pc:08X}u);\n'+anchor,1);count+=1
-        text=text.replace(body,updated,1)
-    return text,count
+            call=f'    tooie_observe_menu(rdram, ctx, 0x{pc:08X}u);\n'
+            if body.count(call+f'    // 0x{pc:08X}:')!=1:
+                raise ValueError(f'{source}: menu hook instruction order changed in {name}:{pc:08X}')
+        if name=='func_808006A0_chgameselect' and body.count(
+                'L_8080085C:\n    tooie_continuous_poll(rdram, ctx, 0x8080085Cu);\n'
+                '    tooie_observe_menu(rdram, ctx, 0x8080085Cu);\n')!=1:
+            raise ValueError(f'{source}: menu label poll order changed')
+    if len(re.findall(r'\btooie_observe_menu\s*\(',text))!=expected:
+        raise ValueError(f'{source}: menu hook global identifier count changed')
 
 
-def instrument(directory, sections):
+def instrument(directory, sections, *, guest_native_aspect=True):
+    if guest_native_aspect is not True:
+        raise ValueError('guest-native aspect composition is required; legacy writers are retired')
     addresses={f['name']: f['vram'] for s in sections for f in s['functions']}
     menu_indices=[i for i,s in enumerate(sections) if s.get('name')=='.chgameselect']
     if len(menu_indices)>1:raise ValueError('duplicate selected chgameselect section')
@@ -1538,80 +1284,72 @@ def instrument(directory, sections):
     stubs={f['name']:f['vram'] for s in sections for f in s['functions'] if f['name'].startswith('_') and '_entrypoint_' in f['name'] and f['size']==8}
     counts={'entries':0,'labels':0,'observed_syscall_callsites':0,'si_completion_observations':0,
             'observed_indirect_jalr':0,'observed_indirect_tail_jr':0,'observed_direct_lookup':0,
-            'corrected_saved_ra_returns':[],'global_settings_observations':0,'widescreen_profile_hooks':0,'graphics_observations':0,'title_observations':0,'map_actor_list_observations':0,'menu_observations':0,'save_progress_pause_hooks':0,'game_feature_hooks':0,'first_person_analog_hooks':0,'free_camera_hooks':0,'camera_interpolation_hooks':0,'scene_observer_hooks':0,'guest_update_observers':0,'world_call_timing_hooks':0,'nested_scene_call_timing_hooks':0,'heap_realloc_safety_fixes':0,'game_delta_observers':0,'replay_timing_hooks':0,'native_aspect_hooks':0,'actor_draw_distance_hooks':0,'hud_counter_layout_hooks':0,'hud_counter_rect_hooks':0,'hud_ortho_hooks':0,'egg_reticle_ortho_hooks':0,'cutscene_skip_input_hooks':0,'music_volume_hooks':0}
+            'widescreen_profile_hooks':0,'graphics_observations':0,'title_observations':0,'map_actor_list_observations':0,'menu_observations':0,'save_progress_pause_hooks':0,'pause_snapshot_capture_hooks':0,'game_feature_hooks':0,'first_person_analog_hooks':0,'free_camera_hooks':0,'scene_observer_hooks':0,'guest_update_observers':0,'game_delta_observers':0,'replay_timing_hooks':0,'native_aspect_hooks':0,'actor_draw_distance_hooks':0,'hud_counter_layout_hooks':0,'hud_counter_rect_hooks':0,'egg_reticle_ortho_hooks':0,'cutscene_skip_input_hooks':0,'music_volume_hooks':0}
     counts['practice_form_hooks']=0
     counts['model_interpolation_hooks']=0
     counts['nest_visibility_hooks']=0
+    counts['nest_projection_hooks']=0
     counts['intro_model_draw_hooks']=0
     counts['backpack_model_draw_hooks']=0
+    counts['backpack_body_draw_hooks']=0
+    counts['gpu_node_draw_hooks']=0
+    counts['camera_early_update_hooks']=0
     counts['camera_pod_recreation_hooks']=0
-    rewrites={
-        '    ctx->r15 = MEM_W(ctx->r14, -0X4E0C);': '    ctx->r15 = tooie_uncached_word(rdram, (uint32_t)ADD32(ctx->r14, -0X4E0C));',
-        '    ctx->r25 = MEM_W(ctx->r24, -0X1E40);': '    ctx->r25 = tooie_uncached_word(rdram, (uint32_t)ADD32(ctx->r24, -0X1E40));',
-    }
-    rewritten={key:0 for key in rewrites}
     overlay_counts={'capture':0,'publish':0,'free':0,'pi_status':0,'rom_key':0}
+    overlay_companion_counts={'delta':0,'validate':0}
     for path in sorted(Path(directory).glob('*.c')):
-        text, corrected=correct_saved_ra_returns(path.read_text(), str(path))
-        counts['corrected_saved_ra_returns'].extend(corrected)
-        text,settings_count=observe_global_settings(text,str(path))
-        counts['global_settings_observations']+=settings_count
-        text,widescreen_count=apply_widescreen_profile(text,str(path))
+        text=path.read_text()
+        if re.search(r'\btooie_observe_global_settings\b', text):
+            raise ValueError(f'{path}: retired global settings observer remains')
+        widescreen_count=verify_widescreen_profile_source(text,str(path))
         counts['widescreen_profile_hooks']+=widescreen_count
         text,graphics_count=observe_graphics(text,str(path))
         counts['graphics_observations']+=graphics_count
         text,title_count=observe_title(text,str(path))
         counts['title_observations']+=title_count
-        text,map_list_count=observe_map_actor_list(text,str(path))
-        counts['map_actor_list_observations']+=map_list_count
-        text,menu_count=observe_menu(text,str(path),menu_section_index)
-        counts['menu_observations']+=menu_count
+        counts['map_actor_list_observations']+=verify_map_actor_list_source(text,str(path))
+        counts['menu_observations']+=verify_menu_source(text,str(path),menu_section_index)
         text,save_progress_count=apply_save_progress_pause_hook(text,str(path))
         counts['save_progress_pause_hooks']+=save_progress_count
         text,game_feature_count=apply_game_feature_hooks(text,str(path))
         counts['game_feature_hooks']+=game_feature_count
+        text,camera_early_count=apply_camera_early_update_hook(text,str(path))
+        counts['camera_early_update_hooks']+=camera_early_count
         text,practice_form_count=apply_practice_form_hooks(text,str(path))
         counts['practice_form_hooks']+=practice_form_count
         text,first_person_analog_count=apply_first_person_analog_hooks(text,str(path))
         counts['first_person_analog_hooks']+=first_person_analog_count
         text,free_camera_count=apply_free_camera_hooks(text,str(path))
         counts['free_camera_hooks']+=free_camera_count
-        text,camera_interpolation_count=apply_camera_interpolation_hook(text,str(path))
-        counts['camera_interpolation_hooks']+=camera_interpolation_count
         text,camera_pod_recreation_count=apply_camera_pod_recreation_hook(text,str(path))
         counts['camera_pod_recreation_hooks']+=camera_pod_recreation_count
         text,model_interpolation_count=apply_model_interpolation_hooks(text,str(path))
         counts['model_interpolation_hooks']+=model_interpolation_count
         text,nest_visibility_count=apply_nest_visibility_hooks(text,str(path))
         counts['nest_visibility_hooks']+=nest_visibility_count
+        text,nest_projection_count=apply_nest_projection_hooks(text,str(path))
+        counts['nest_projection_hooks']+=nest_projection_count
         text,intro_model_draw_count=apply_intro_model_draw_hooks(text,str(path))
         counts['intro_model_draw_hooks']+=intro_model_draw_count
         text,backpack_model_draw_count=apply_backpack_model_draw_hooks(text,str(path))
         counts['backpack_model_draw_hooks']+=backpack_model_draw_count
+        text,backpack_body_draw_count=apply_backpack_body_draw_hooks(text,str(path))
+        counts['backpack_body_draw_hooks']+=backpack_body_draw_count
+        text,gpu_node_draw_count=apply_gpu_node_draw_hooks(text,str(path))
+        counts['gpu_node_draw_hooks']+=gpu_node_draw_count
         text,scene_observer_count=apply_scene_observer_hooks(text,str(path))
         counts['scene_observer_hooks']+=scene_observer_count
-        text,guest_update_count=apply_guest_update_observer(text,str(path))
-        counts['guest_update_observers']+=guest_update_count
-        text,world_call_count=apply_gsworld_call_timing_hooks(text,str(path))
-        counts['world_call_timing_hooks']+=world_call_count
-        text,nested_scene_call_count=apply_scene_nested_call_timing_hooks(text,str(path))
-        counts['nested_scene_call_timing_hooks']+=nested_scene_call_count
-        text,heap_realloc_safety_count=apply_heap_realloc_safety_fix(text,str(path))
-        counts['heap_realloc_safety_fixes']+=heap_realloc_safety_count
-        text,game_delta_count=apply_game_delta_observer(text,str(path))
+        game_delta_count=verify_game_delta_observer(text,str(path))
         counts['game_delta_observers']+=game_delta_count
-        text,native_aspect_count=apply_native_aspect_hook(text,str(path))
+        native_aspect_count=verify_guest_native_aspect_source(text,str(path))
         counts['native_aspect_hooks']+=native_aspect_count
-        text,replay_timing_count=apply_replay_timing_hooks(text,str(path))
-        counts['replay_timing_hooks']+=replay_timing_count
+        counts['replay_timing_hooks']+=verify_replay_timing_hooks(text,str(path))
         text,actor_distance_count=apply_actor_draw_distance_hooks(text,str(path))
         counts['actor_draw_distance_hooks']+=actor_distance_count
         text,hud_counter_layout_count=apply_hud_counter_layout_hook(text,str(path))
         counts['hud_counter_layout_hooks']+=hud_counter_layout_count
         text,hud_counter_rect_count=apply_hud_counter_rect_hook(text,str(path))
         counts['hud_counter_rect_hooks']+=hud_counter_rect_count
-        text,hud_ortho_count=apply_hud_ortho_hook(text,str(path))
-        counts['hud_ortho_hooks']+=hud_ortho_count
         text,egg_reticle_ortho_count=apply_egg_reticle_ortho_hook(text,str(path))
         counts['egg_reticle_ortho_hooks']+=egg_reticle_ortho_count
         text,cutscene_skip_count=apply_cutscene_skip_input_hook(text,str(path))
@@ -1622,11 +1360,9 @@ def instrument(directory, sections):
         observations=callsite_observations(lines, stubs, str(path))
         starts={}
         ends={}
-        timing_start=re.compile(r'\s*tooie_scene_(?:world_call|nested_call)_started\(.*\);\s*')
-        timing_finish=re.compile(r'\s*tooie_scene_(?:world_call|nested_call)_finished\(.*\);\s*')
         for call_index, observation in observations.items():
-            start=call_index-1 if call_index and timing_start.fullmatch(lines[call_index-1]) else call_index
-            end=call_index+1 if call_index+1<len(lines) and timing_finish.fullmatch(lines[call_index+1]) else call_index
+            start=call_index-1 if call_index and lines[call_index-1] == '    tooie_model_gpu_node_begin(rdram, ctx);\n' else call_index
+            end=call_index+1 if call_index+1<len(lines) and lines[call_index+1] == '    tooie_model_gpu_node_end(rdram, ctx);\n' else call_index
             if start in starts or end in ends:raise ValueError(f'{path}: overlapping observed call wrappers')
             starts[start]=observation;ends[end]=observation
         result=[]
@@ -1639,19 +1375,20 @@ def instrument(directory, sections):
                 call_pc, kind=starts[index]
                 result.append(f'    tooie_overlay_callsite_push(0x{call_pc:08X}u);\n')
                 counts['observed_syscall_callsites' if kind=='direct_stub' else 'observed_'+kind]+=1
-            if line.rstrip('\n') in rewrites:
-                key=line.rstrip('\n');line=rewrites[key]+'\n';rewritten[key]+=1
             if current_name=='func_80082088':
                 if line.strip()=='ctx->r10 = MEM_W(ctx->r9, 0X0);':
-                    line='    ctx->r10 = tooie_overlay_hardware_word((uint32_t)ctx->r9);\n';overlay_counts['pi_status']+=1
+                    overlay_counts['pi_status']+=1
                 if line.strip()=='ctx->r21 = MEM_W(ctx->r21, 0X40);':
                     line='    ctx->r21 = tooie_overlay_hardware_word((uint32_t)ADD32(ctx->r21,0X40));\n';overlay_counts['rom_key']+=1
-                if line.strip()=='return;':
-                    result.append('    tooie_validate_overlay(rdram, tooie_overlay_header, tooie_overlay_delta);\n')
-                    result.append('    tooie_overlay_after_relocate(rdram, tooie_overlay_header, tooie_overlay_delta);\n')
+                if line.strip()=='uint32_t tooie_overlay_header=(uint32_t)ctx->r4;':
+                    overlay_counts['capture']+=1
+                if line.strip()=='int32_t tooie_overlay_delta=(int32_t)ctx->r5;':
+                    overlay_companion_counts['delta']+=1
+                if line.strip()=='tooie_validate_overlay(rdram, tooie_overlay_header, tooie_overlay_delta);':
+                    overlay_companion_counts['validate']+=1
+                if line.strip()=='tooie_overlay_after_relocate(rdram, tooie_overlay_header, tooie_overlay_delta);':
                     overlay_counts['publish']+=1
-            if current_name=='ovl_unload' and line.strip()=='heap_free(rdram, ctx);':
-                result.append('    tooie_overlay_before_free(rdram, (uint32_t)ctx->r4);\n')
+            if current_name=='ovl_unload' and line.strip()=='tooie_overlay_before_free(rdram, (uint32_t)ctx->r4);':
                 overlay_counts['free']+=1
             si_pc=re.match(r'\s*// 0x(8001DFB0|8001DFC8|8001E1B0):',line)
             if si_pc:
@@ -1667,25 +1404,22 @@ def instrument(directory, sections):
                 current=addresses.get(name,0x80000400 if name=='recomp_entrypoint' else 0)
                 result.append(f'    tooie_continuous_poll(rdram, ctx, 0x{current:08X}u);\n')
                 counts['entries']+=1
-                if name=='func_80082088':
-                    result.append('    uint32_t tooie_overlay_header=(uint32_t)ctx->r4;\n    int32_t tooie_overlay_delta=(int32_t)ctx->r5;\n')
-                    overlay_counts['capture']+=1
             elif re.match(r'^L_[0-9A-Fa-f]+:',line):
                 pc=int(line.split(':')[0][2:],16)
                 result.append(f'    tooie_continuous_poll(rdram, ctx, 0x{pc:08X}u);\n')
                 counts['labels']+=1
-        path.write_text(''.join(result))
-    assert all(value==1 for value in rewritten.values()),rewritten
+        text = ''.join(result)
+        counts['guest_update_observers'] += verify_guest_update_observer(text, str(path))
+        counts['pause_snapshot_capture_hooks'] += verify_pause_snapshot_capture_hook(text, str(path))
+        verify_map_actor_list_hook(text, str(path))
+        verify_menu_hooks(text, str(path))
+        path.write_text(text)
     expected_si=2*int('func_8001DEE8' in addresses)+int('func_8001E170' in addresses)
     assert counts['si_completion_observations']==expected_si,counts
-    counts['scoped_uncached_reads']=sum(rewritten.values())
-    # PC80082144 is emitted twice for the branch-likely delay slot, plus the
-    # initial PC80082138 read: three generated expressions for two instructions.
-    assert overlay_counts=={'capture':1,'publish':1,'free':1,'pi_status':3,'rom_key':1},overlay_counts
-    expected_saved_ra=sorted(set(addresses)&set(_SAVED_RA_RETURNS))
-    assert sorted(counts['corrected_saved_ra_returns'])==expected_saved_ra,counts['corrected_saved_ra_returns']
-    expected_settings=int('func_80800168_glglobalsettings' in addresses)+4*int('glglobalsettings_entrypoint_1' in addresses)
-    assert counts['global_settings_observations']==expected_settings,counts
+    # Canonical instructions replace both PI loads, including delay-slot copies.
+    # Any remaining raw MMIO expression must fail generation.
+    assert overlay_counts=={'capture':1,'publish':1,'free':1,'pi_status':0,'rom_key':1},overlay_counts
+    assert overlay_companion_counts=={'delta':1,'validate':1},overlay_companion_counts
     assert counts['widescreen_profile_hooks']==int('func_80800034_glglobalsettings' in addresses),counts
     expected_graphics=len(set(addresses)&{'func_80014A88','func_80013E34','func_80013EF0','func_80013FE4','func_800146D8'})
     assert counts['graphics_observations']==expected_graphics,counts
@@ -1694,6 +1428,7 @@ def instrument(directory, sections):
     assert counts['map_actor_list_observations']==int('gspropsDll_entrypoint_1' in addresses),counts
     assert counts['menu_observations']==sum(len(value[1]) for name,value in _MENU_BODIES.items() if name in addresses),counts
     assert counts['save_progress_pause_hooks']==int('gcnewpause_entrypoint_2' in addresses),counts
+    assert counts['pause_snapshot_capture_hooks']==int('func_800C0F8C' in addresses),counts
     counts['expected_game_feature_hooks']=sum(int(name in addresses) for name in (
         'bainput_update','func_80800018_glcutDll','func_800DA0B4','func_800DA188','func_800DAC10','func_800A4878'))
     assert counts['game_feature_hooks']==counts['expected_game_feature_hooks'],counts
@@ -1703,28 +1438,32 @@ def instrument(directory, sections):
     assert counts['first_person_analog_hooks']==counts['expected_first_person_analog_hooks'],counts
     counts['expected_free_camera_hooks']=2*int('func_800E9F20' in addresses)
     assert counts['free_camera_hooks']==counts['expected_free_camera_hooks'],counts
-    counts['expected_camera_interpolation_hooks']=int('func_800E42B4' in addresses)
-    assert counts['camera_interpolation_hooks']==counts['expected_camera_interpolation_hooks'],counts
-    counts['expected_model_interpolation_hooks']=5*int('func_800DE498' in addresses)
+    counts['expected_model_interpolation_hooks']=6*int('func_800DE498' in addresses)
     assert counts['model_interpolation_hooks']==counts['expected_model_interpolation_hooks'],counts
     counts['expected_nest_visibility_hooks']=int('func_80800898_chnests' in addresses)
     assert counts['nest_visibility_hooks']==counts['expected_nest_visibility_hooks'],counts
+    counts['expected_nest_projection_hooks']=6*int('func_80800D8C_chnests' in addresses)
+    assert counts['nest_projection_hooks']==counts['expected_nest_projection_hooks'],counts
+    counts['expected_backpack_body_draw_hooks']=2*int('func_80092444' in addresses)
+    assert counts['backpack_body_draw_hooks']==counts['expected_backpack_body_draw_hooks'],counts
+    counts['expected_gpu_node_draw_hooks']=2*int('func_800DE2A4' in addresses)
+    assert counts['gpu_node_draw_hooks']==counts['expected_gpu_node_draw_hooks'],counts
+    counts['expected_camera_early_update_hooks']=int('func_800A4878' in addresses)
+    assert counts['camera_early_update_hooks']==counts['expected_camera_early_update_hooks'],counts
     counts['expected_intro_model_draw_hooks']=6*int('func_80803A78_chintrochar' in addresses)
     assert counts['intro_model_draw_hooks']==counts['expected_intro_model_draw_hooks'],counts
     counts['expected_scene_observer_hooks']=int('func_800EA05C' in addresses)+12*int('func_800A72A4' in addresses)
     assert counts['scene_observer_hooks']==counts['expected_scene_observer_hooks'],counts
     counts['expected_guest_update_observers']=int('func_800A73F4' in addresses)
     assert counts['guest_update_observers']==counts['expected_guest_update_observers'],counts
-    counts['expected_world_call_timing_hooks']=59*int('gsworldDll_entrypoint_2' in addresses)
-    assert counts['world_call_timing_hooks']==counts['expected_world_call_timing_hooks'],counts
-    counts['expected_nested_scene_call_timing_hooks']=56*int('func_800A5C28' in addresses and 'func_800F73C4' in addresses)
-    assert counts['nested_scene_call_timing_hooks']==counts['expected_nested_scene_call_timing_hooks'],counts
     counts['expected_game_delta_observers']=int('func_800123F4' in addresses)
     assert counts['game_delta_observers']==counts['expected_game_delta_observers'],counts
     counts['expected_replay_timing_hooks']=(
         2*int('func_8001608C' in addresses)+2*int('func_800151BC' in addresses))
     assert counts['replay_timing_hooks']==counts['expected_replay_timing_hooks'],counts
-    counts['expected_native_aspect_hooks']=int('func_80015D14' in addresses)
+    counts['guest_native_aspect']=True
+    counts['guest_native_aspect_replacement_required']=int('func_80015D14' in addresses)
+    counts['expected_native_aspect_hooks']=0
     assert counts['native_aspect_hooks']==counts['expected_native_aspect_hooks'],counts
     counts['expected_actor_draw_distance_hooks']=2*int('func_80101970' in addresses)
     assert counts['actor_draw_distance_hooks']==counts['expected_actor_draw_distance_hooks'],counts
@@ -1732,8 +1471,6 @@ def instrument(directory, sections):
     assert counts['hud_counter_layout_hooks']==counts['expected_hud_counter_layout_hooks'],counts
     counts['expected_hud_counter_rect_hooks']=2*int('scinfobar_entrypoint_24' in addresses)
     assert counts['hud_counter_rect_hooks']==counts['expected_hud_counter_rect_hooks'],counts
-    counts['expected_hud_ortho_hooks']=2*int('func_800E42F0' in addresses)
-    assert counts['hud_ortho_hooks']==counts['expected_hud_ortho_hooks'],counts
     counts['expected_egg_reticle_ortho_hooks']=int('baeggcursor_entrypoint_1' in addresses)
     assert counts['egg_reticle_ortho_hooks']==counts['expected_egg_reticle_ortho_hooks'],counts
     counts['expected_cutscene_skip_input_hooks']=int('func_808005AC_chintroticker' in addresses)

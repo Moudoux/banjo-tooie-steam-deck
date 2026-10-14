@@ -1,0 +1,307 @@
+# Maintained baseline raw condition (session06 condition 4666dfce); prepare_baseline_raw.py binds paths.
+[input]
+entrypoint = 2147484672
+functions_per_output_file = 50
+recomp_include = "#include \"recomp.h\""
+
+[patches]
+ignored = [ "boot___osException", "boot_handle_CpU", "boot___osDispatchThread", "boot_osWritebackDCache", "boot_osInvalICache", "boot_osUnmapTLBAll", "boot_osMapTLBRdb", "boot___osGetCause", "boot___osProbeTLB", "func_8001DDC0", "ovl_entrypoint_alternate", "boot_osInitialize", "boot___osPiRawStartDma", "boot_osPiGetStatus", "tooie_core1_osInitialize", "rom_read_word", "heap_realloc",]
+[[patches.hook]]
+func = "func_80000450"
+before_vram = 2147484952
+text = "baseline_observe_and_publish_core1(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_80012030"
+before_vram = 2147557476
+text = "baseline_observe_core1_init_and_stop(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_800124EC"
+before_vram = 2147558636
+text = "baseline_stop_at_main_entry(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_8001DE64"
+before_vram = 2147606156
+text = "baseline_stop_after_cic_reads(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_80012214"
+before_vram = 2147557944
+text = "baseline_stop_after_crc_init(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_80012214"
+before_vram = 2147557952
+text = "baseline_observe_vi_creation(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_8001546C"
+before_vram = 2147570912
+text = "baseline_stop_after_vi_handler(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_80012214"
+before_vram = 2147558076
+text = "baseline_observe_before_core2_loader(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_80012214"
+before_vram = 2147558084
+text = "baseline_observe_and_publish_core2(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_80012214"
+before_vram = 2147558164
+text = "baseline_observe_before_scheduler_init(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_80012214"
+before_vram = 2147558172
+text = "baseline_reject_main_after_scheduler_start(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_80014A88"
+before_vram = 2147568292
+text = "baseline_stop_before_scheduler_receive(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_80014A88"
+before_vram = 2147568364
+text = "baseline_stop_after_scheduler_vi(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_80012214"
+before_vram = 2147558196
+text = "baseline_stop_before_audio(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_80016810"
+before_vram = 2147575872
+text = "baseline_observe_joy_stopped(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_8001662C"
+before_vram = 2147575400
+text = "baseline_observe_joy_receive(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_80012214"
+before_vram = 2147558204
+text = "baseline_hold_after_audio_init(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_800129FC"
+before_vram = 2147560020
+text = "baseline_completed_pcm(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_80082088"
+before_vram = 2148016440
+text = "ctx->r10 = baseline_overlay_hardware_word((uint32_t)ctx->r9);"
+
+[[patches.hook]]
+func = "func_80082088"
+before_vram = 2148016452
+text = "ctx->r10 = baseline_overlay_hardware_word((uint32_t)ctx->r9);"
+
+[[patches.hook]]
+func = "func_80082088"
+before_vram = 2148016456
+text = "ctx->r21 = baseline_overlay_hardware_word((uint32_t)(ctx->r21 + 0x40));"
+
+[[patches.hook]]
+func = "func_80012214"
+before_vram = 2147558296
+text = "baseline_first_overlay_returned(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_800A72A4"
+text = "baseline_stop_before_preworld_unload(rdram, ctx);"
+before_vram = 2148168528
+
+[[patches.hook]]
+func = "ovl_unload"
+text = "baseline_overlay_boundary_refusal(rdram, ctx, 0x800819E4);"
+before_vram = 2148014564
+
+[[patches.hook]]
+func = "defragment_overlays"
+text = "baseline_overlay_boundary_refusal(rdram, ctx, 0x80081CC0);"
+before_vram = 2148015296
+
+[[patches.hook]]
+func = "func_800151BC"
+text = "baseline_first_sync_enter(rdram, ctx);"
+
+[[patches.hook]]
+func = "ovl_unload"
+before_vram = 2148014708
+text = "baseline_alternate_before_free(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_800DA0D8"
+before_vram = 2148376820
+text = "baseline_alternate_returned(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_80021574"
+before_vram = 2147620388
+text = "baseline_audio_callable(rdram, ctx, 0x80021624);"
+
+[[patches.hook]]
+func = "func_8002241C"
+before_vram = 2147624376
+text = "baseline_audio_callable(rdram, ctx, 0x800225B8);"
+
+[[patches.hook]]
+func = "func_8002241C"
+before_vram = 2147624708
+text = "baseline_audio_callable(rdram, ctx, 0x80022704);"
+
+[[patches.hook]]
+func = "func_80023008"
+before_vram = 2147628100
+text = "baseline_audio_callable(rdram, ctx, 0x80023444);"
+
+[[patches.hook]]
+func = "func_80023008"
+before_vram = 2147628172
+text = "baseline_audio_callable(rdram, ctx, 0x8002348C);"
+
+[[patches.hook]]
+func = "func_80023008"
+before_vram = 2147628580
+text = "baseline_audio_callable(rdram, ctx, 0x80023624);"
+
+[[patches.hook]]
+func = "func_80023008"
+before_vram = 2147628652
+text = "baseline_audio_callable(rdram, ctx, 0x8002366C);"
+
+[[patches.hook]]
+func = "func_8002A6A4"
+before_vram = 2147657508
+text = "baseline_audio_callable(rdram, ctx, 0x8002A724);"
+
+[[patches.hook]]
+func = "func_8002C230"
+before_vram = 2147664552
+text = "baseline_audio_callable(rdram, ctx, 0x8002C2A8);"
+
+[[patches.hook]]
+func = "func_8002CE70"
+before_vram = 2147667624
+text = "baseline_audio_callable(rdram, ctx, 0x8002CEA8);"
+
+[[patches.hook]]
+func = "func_800A72A4"
+before_vram = 2148168536
+text = "baseline_bulk_returned(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_800EA0CC"
+before_vram = 2148442380
+text = "baseline_resource_preparation(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_800A72A4"
+before_vram = 2148168552
+text = "baseline_world_returned(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_808000E8_gldbDll"
+before_vram = 2155872512
+text = "baseline_resource_cic_returned(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_8001A6C0"
+before_vram = 2147591872
+text = "baseline_overlay_boundary_refusal(rdram, ctx, 0x8001A6C0);"
+
+[[patches.hook]]
+func = "func_800A9D90"
+before_vram = 2148179368
+text = "baseline_overlay_boundary_refusal(rdram, ctx, 0x800A9DA8);"
+
+[[patches.hook]]
+func = "func_800151BC"
+before_vram = 2147570148
+text = "baseline_first_sync_promotion(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_800151BC"
+before_vram = 2147570636
+text = "baseline_overlay_boundary_refusal(rdram, ctx, 0x800153CC);"
+
+[[patches.hook]]
+func = "func_800A7840"
+before_vram = 2148169904
+text = "baseline_first_sync_returned(rdram, ctx);"
+
+[[patches.hook]]
+func = "defragment_overlays"
+before_vram = 2148015344
+text = "baseline_overlay_move_returned(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_800A7840"
+before_vram = 2148169960
+text = "baseline_first_graphics_submit(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_800142F0"
+before_vram = 2147566320
+text = "baseline_observe_graphics_dp(rdram, ctx);"
+
+[[patches.hook]]
+func = "func_800C2AB8"
+before_vram = 2148281168
+text = "if (ctx->r19 != 0) baseline_sfx_sweep_service(rdram, ctx);"
+
+[[patches.instruction]]
+func = "func_8001DE64"
+vram = 2147606128
+value = 1007583280
+
+[[patches.instruction]]
+func = "func_8001DE64"
+vram = 2147606144
+value = 1008238640
+
+[[patches.instruction]]
+func = "func_80082088"
+vram = 2148016440
+value = 0
+
+[[patches.instruction]]
+func = "func_80082088"
+vram = 2148016452
+value = 0
+
+[[patches.instruction]]
+func = "func_80082088"
+vram = 2148016456
+value = 0
+
+[[patches.instruction]]
+func = "func_800137D4"
+vram = 2147563500
+value = 65011720
+
+[[patches.instruction]]
+func = "func_800137F4"
+vram = 2147563536
+value = 65011720
+
+[[patches.instruction]]
+func = "func_80013A5C"
+vram = 2147564148
+value = 65011720
+
+[[patches.instruction]]
+func = "func_80013A7C"
+vram = 2147564184
+value = 65011720
+

@@ -1,0 +1,156 @@
+{
+  "schema": 1,
+  "name": "rt64_owner_index_guard",
+  "delta_revision": 2,
+  "upstream": {
+    "dependency": "rt64",
+    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "path": "src/hle/rt64_game_frame.cpp",
+    "sha256": "a9527bfcdb06b876a45f06a181ca76b6cf7869d01e2c06a0c81ed9f96f1dd87a",
+    "lines": 1042
+  },
+  "output": {
+    "filename": "rt64_game_frame.cpp",
+    "sha256": "d3592fef8e1a3e7031fba756529f7b1b25cf6c1933cb8799a771657fbf3055bb",
+    "lines": 1075
+  },
+  "operations": [
+    {
+      "original_start": 338,
+      "original_end": 338,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                const GameFrameMap::WorkloadMap &curWorkloadMap = frameMap.workloads[curFirstProj.workloadIndex];\n",
+        "                if (!curWorkloadMap.mapped) continue;\n"
+      ]
+    },
+    {
+      "original_start": 345,
+      "original_end": 345,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                    if (prevFirstProj.workloadIndex != curWorkloadMap.prevWorkloadIndex) continue;\n"
+      ]
+    },
+    {
+      "original_start": 414,
+      "original_end": 414,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "        if (!firstCurWorkloadMap.mapped ||\n",
+        "            firstCurWorkloadMap.prevWorkloadIndex != firstPrevProjIndices.workloadIndex) return;\n"
+      ]
+    },
+    {
+      "original_start": 433,
+      "original_end": 433,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "            if (curProjIndices.workloadIndex != firstCurProjIndices.workloadIndex) continue;\n"
+      ]
+    },
+    {
+      "original_start": 434,
+      "original_end": 438,
+      "original_sha256": "1f6da43d7706e5faab79063d82696461fa81aa48c3047e3510e2bc886d913414",
+      "replacement_lines": [
+        "            const uint32_t currentGroupIndex = curWorkload.drawData.viewProjTransformGroups[curProj.transformsIndex];\n",
+        "            const TransformGroup &currentGroup = curWorkload.drawData.transformGroups[currentGroupIndex];\n",
+        "            if (currentGroup.matrixId == G_EX_ID_IGNORE) {\n",
+        "                firstCurWorkloadMap.viewProjections[curProj.transformsIndex] = GameFrameMap::ViewProjectionMap();\n",
+        "                continue;\n",
+        "            }\n",
+        "\n",
+        "            // Reuse only the first anchor with the same effective projection policy.\n",
+        "            if (mappedViewProjIndex < UINT32_MAX) {\n",
+        "                const uint32_t anchorGroupIndex = firstCurWorkload.drawData.viewProjTransformGroups[mappedViewProjIndex];\n",
+        "                const TransformGroup &anchorGroup = firstCurWorkload.drawData.transformGroups[anchorGroupIndex];\n",
+        "                const auto compatibleProjection = [](const TransformGroup &a, const TransformGroup &b) {\n",
+        "                    if ((a.matrixId == G_EX_ID_IGNORE) || (b.matrixId == G_EX_ID_IGNORE)) return false;\n",
+        "                    if (a.matrixId != b.matrixId) return false;\n",
+        "                    if (a.matrixId == G_EX_ID_AUTO) return true;\n",
+        "                    return (a.decompose == b.decompose) &&\n",
+        "                        (a.positionInterpolation == b.positionInterpolation) &&\n",
+        "                        (a.rotationInterpolation == b.rotationInterpolation) &&\n",
+        "                        (a.scaleInterpolation == b.scaleInterpolation) &&\n",
+        "                        (a.skewInterpolation == b.skewInterpolation) &&\n",
+        "                        (a.perspectiveInterpolation == b.perspectiveInterpolation);\n",
+        "                };\n",
+        "                if (compatibleProjection(currentGroup, anchorGroup)) {\n",
+        "                    firstCurWorkloadMap.viewProjections[curProj.transformsIndex] = firstCurWorkloadMap.viewProjections[mappedViewProjIndex];\n",
+        "                    continue;\n",
+        "                }\n",
+        "            }\n"
+      ]
+    },
+    {
+      "original_start": 444,
+      "original_end": 450,
+      "original_sha256": "51caa9b6ac15d845e710f3c28d5af224f67ac250a9bbf0bb2aa3172a7ee63fc3",
+      "replacement_lines": [
+        "            {\n",
+        "                GameFrameMap::ViewProjectionMap &viewProjMap = firstCurWorkloadMap.viewProjections[curProj.transformsIndex];\n",
+        "                if (viewProjMap.mapped) {\n",
+        "                    if (mappedViewProjIndex == UINT32_MAX) mappedViewProjIndex = curProj.transformsIndex;\n",
+        "                    continue;\n",
+        "                }\n"
+      ]
+    },
+    {
+      "original_start": 452,
+      "original_end": 452,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                if (prevProjIndices.workloadIndex != firstPrevProjIndices.workloadIndex) continue;\n"
+      ]
+    },
+    {
+      "original_start": 497,
+      "original_end": 500,
+      "original_sha256": "4d12d3c7dec25222beed10ca36f4ddafca6b126f17784ef65f8361eb5465adb5",
+      "replacement_lines": [
+        "                if (viewProjMap.mapped && (mappedViewProjIndex == UINT32_MAX)) {\n",
+        "                    mappedViewProjIndex = curProj.transformsIndex;\n",
+        "                }\n"
+      ]
+    },
+    {
+      "original_start": 533,
+      "original_end": 533,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                const bool callOwnersMatch =\n",
+        "                    (curProjIndices.workloadIndex == firstCurProjIndices.workloadIndex) &&\n",
+        "                    (prevProjIndices.workloadIndex == firstPrevProjIndices.workloadIndex);\n"
+      ]
+    },
+    {
+      "original_start": 535,
+      "original_end": 536,
+      "original_sha256": "b0751697e9a5d3eee83ca36c173abd0ecdad5977fc9265c3f498d03240ce7c53",
+      "replacement_lines": [
+        "                if (callOwnersMatch && (curWorldMatrixCount == prevWorldMatrixCount) && curIt.second.doTransformMatching && prevIt->second.doTransformMatching) {\n"
+      ]
+    },
+    {
+      "original_start": 549,
+      "original_end": 550,
+      "original_sha256": "bf4cf97f5e9ca4fa2e6e95d9d5b719d02c89a10e14c4cd0049fedaa95b451332",
+      "replacement_lines": [
+        "                if (callOwnersMatch && (curCall.callDesc.tileCount == prevCall.callDesc.tileCount) && (curIt.second.doTileInterpolation && prevIt->second.doTileInterpolation)) {\n"
+      ]
+    },
+    {
+      "original_start": 565,
+      "original_end": 566,
+      "original_sha256": "ac77a484a6ed774f7e87509cd398b7b1cbf597fbc6b323cb7243e5f5f5a953eb",
+      "replacement_lines": [
+        "                if (callOwnersMatch && curUsesTextureGen && prevUsesTextureGen && (true && true)) { // TODO: Do look at matching condition.\n"
+      ]
+    }
+  ],
+  "integration_purpose": [
+    "workload owner and index guards",
+    "same-scene projection reuse eligibility and conservative ordinal fallback"
+  ]
+}

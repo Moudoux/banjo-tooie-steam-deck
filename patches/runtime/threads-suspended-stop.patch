@@ -1,0 +1,38 @@
+--- a/ultramodern/src/threads.cpp
++++ b/ultramodern/src/threads.cpp
+@@ -233,6 +233,12 @@
+ 
+     // If this is a game thread, insert the new thread into the running queue and then check the running queue.
+     if (thread_self) {
++        if (t->state == OSThreadState::STOPPED && t->queue != NULLPTR && t->queue != ultramodern::running_queue
++            && !ultramodern::thread_queue_empty(PASS_RDRAM t->queue)) {
++            fprintf(stderr, "osStartThread restart with competing waiters unsupported\n");
++            fflush(stderr);
++            throw std::runtime_error("osStartThread restart with competing waiters unsupported");
++        }
+         ultramodern::schedule_running_thread(PASS_RDRAM t_);
+         ultramodern::check_running_queue(PASS_RDRAM1);
+     }
+@@ -275,7 +281,21 @@
+         ultramodern::run_next_thread_and_wait(PASS_RDRAM1);
+     }
+     else {
++        if (!ultramodern::is_game_thread()) {
++            fprintf(stderr, "osStopThread nonself requires a guest caller\n");
++            fflush(stderr);
++            throw std::runtime_error("osStopThread nonself requires a guest caller");
++        }
++        OSThread* t = TO_PTR(OSThread, t_);
++        if (t->state == OSThreadState::STOPPED) return;
++        if ((t->state != OSThreadState::QUEUED && t->state != OSThreadState::BLOCKED)
++            || t->queue == NULLPTR || t->context == nullptr
++            || !ultramodern::thread_queue_remove(PASS_RDRAM t->queue, t_)) {
++            fprintf(stderr, "osStopThread target is not in a suspended queue\n");
++            fflush(stderr);
++            throw std::runtime_error("osStopThread target is not in a suspended queue");
++        }
++        t->state = OSThreadState::STOPPED;
+-        assert(false);
+     }
+ }
+ 

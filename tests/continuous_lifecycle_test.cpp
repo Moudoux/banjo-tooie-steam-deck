@@ -15,10 +15,18 @@ constexpr int workers=40;
 constexpr uint32_t object_base=0x80001000,entry=0x80400000;
 std::atomic_int entries{0};
 bool inject_failure=false;
+bool external_wait=false;
+std::atomic_bool entering_external_wait{false},external_wait_returned{false};
 void guest_entry(uint8_t* rdram,recomp_context*) {
     entries.fetch_add(1);
     if (inject_failure) throw std::runtime_error("Injected continuous guest failure");
     if (osGetThreadId(rdram,0)==workers-1) {
+        if (external_wait) {
+            entering_external_wait.store(true);
+            ultramodern::wait_for_external_message(rdram);
+            external_wait_returned.store(true);
+            return;
+        }
         while (true) {
             tooie::lifecycle::poll();
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -30,10 +38,16 @@ void require(bool value,const char* message) { if (!value) throw std::runtime_er
 int main(int argc,char** argv) {
     if (argc!=2) return 2;
     std::string mode=argv[1];
-    if (mode!="normal" && mode!="parked" && mode!="failure" && mode!="create-stop" && mode!="timer-empty" && mode!="timer-long") return 2;
+    if (mode!="normal" && mode!="parked" && mode!="failure" && mode!="create-stop" && mode!="external-wait"
+#ifndef TOOIE_BASELINE_LIFECYCLE_NO_TIMERS
+        && mode!="timer-empty" && mode!="timer-long"
+#endif
+    ) return 2;
     inject_failure=mode=="failure";
+    external_wait=mode=="external-wait";
     std::vector<uint8_t> memory(8*1024*1024);
     auto* rdram=memory.data();
+#ifndef TOOIE_BASELINE_LIFECYCLE_NO_TIMERS
     if (mode=="timer-empty" || mode=="timer-long") {
         tooie::lifecycle::enable();
         ultramodern::init_timers(rdram);
@@ -51,6 +65,7 @@ int main(int argc,char** argv) {
         std::cout<<"PASS continuous lifecycle "<<mode<<": producer joined in "<<elapsed.count()<<"ms\n";
         return 0;
     }
+#endif
     recomp::register_game({.rom_hash=0,.internal_name="TEST",.display_name="Continuous lifecycle test",.game_id=u8"continuous.test"});
     recomp::start_game(u8"continuous.test","");
     recomp::overlays::add_loaded_function(int32_t(entry),guest_entry);
@@ -60,15 +75,17 @@ int main(int argc,char** argv) {
     try {
     for (int i=0;i<workers;i++)
         osCreateThread(rdram,int32_t(object_base+i*0x80),i,int32_t(entry),0,int32_t(0x80010000+i*0x100),1);
-    if (mode=="normal") {
+    if (mode=="normal" || external_wait) {
         // Original libultra preserves insertion order among equal priorities.
         // Start worker0 directly; the final queued worker39 is the poller.
         for (int i=1;i<workers;i++) ultramodern::schedule_running_thread(rdram,int32_t(object_base+i*0x80));
         osStartThread(rdram,int32_t(object_base));
         auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
-        while (entries.load()!=workers && std::chrono::steady_clock::now()<deadline)
+        while ((entries.load()!=workers || (external_wait && !entering_external_wait.load()))
+               && std::chrono::steady_clock::now()<deadline)
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         require(entries.load()==workers,"Natural scheduler chain did not run every worker");
+        if (external_wait) require(entering_external_wait.load(),"External wait call was not reached");
     } else if (inject_failure) {
         osStartThread(rdram,int32_t(object_base));
         auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
@@ -88,6 +105,10 @@ int main(int argc,char** argv) {
     tooie::lifecycle::request_stop();
     if (!tooie::lifecycle::wait_for_producers(std::chrono::seconds(3))) {
         std::cerr<<"FAIL: Guest producers did not unwind; memory retained until process exit\n";
+        if (external_wait) std::cerr<<"external-wait enter="<<entering_external_wait.load()
+            <<" return="<<external_wait_returned.load()<<" failure="<<bool(tooie::lifecycle::failure())
+            <<" producers="<<tooie::lifecycle::counts().producers<<" entries="<<entries.load()
+            <<" test_failure="<<bool(test_failure)<<"\n";
         std::_Exit(70);
     }
     exited.store(true);
@@ -104,6 +125,10 @@ int main(int argc,char** argv) {
     require(counts.created==workers && counts.producers==0 && counts.enqueued==workers && counts.deleted==workers,
             "Scalable lifecycle did not reclaim every worker exactly once");
     require(inject_failure==bool(tooie::lifecycle::failure()),"Unexpected exception status");
+    if (external_wait) {
+        require(entering_external_wait.load() && !external_wait_returned.load(),"Empty external wait returned normally");
+        std::cout<<"external-wait enter=1 return=0 failure=0 producers="<<counts.producers<<"\n";
+    }
     std::cout<<"PASS continuous lifecycle "<<mode<<": created="<<counts.created<<" enqueued="<<counts.enqueued
              <<" deleted="<<counts.deleted<<" entries="<<entries.load()<<"\n";
 }

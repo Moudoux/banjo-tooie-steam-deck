@@ -4,7 +4,7 @@ from io import BytesIO
 import hashlib,json,zlib
 from elftools.elf.elffile import ELFFile
 
-def prepare_core2_reference(app,evidence, *, rom_path=None, decompressed_rom_path=None, elf_path=None):
+def prepare_core2_reference(app,evidence, *, rom_path=None, decompressed_rom_path=None, elf_path=None, generated_dir=None):
     proj=app.parent
     rom_path=Path(rom_path) if rom_path else proj/'banjo-tooie/baserom.us.z64'
     decompressed_rom_path=Path(decompressed_rom_path) if decompressed_rom_path else proj/'banjo-tooie/decompressed.us.z64'
@@ -38,8 +38,9 @@ def prepare_core2_reference(app,evidence, *, rom_path=None, decompressed_rom_pat
         bss_start=symbols['core2_BSS_START'],bss_end=symbols['core2_BSS_END'],sha256=hashlib.sha256(expected).hexdigest()),
         compressed_start=start,compressed_end=end,consumed_end=offset,dma_padding_hex=rom[offset:end].hex(),streams=streams,checksums=[c for s in streams for c in s['crc']],
         elf_sha256=hashlib.sha256(elf_path.read_bytes()).hexdigest(),rom_sha256=hashlib.sha256(rom).hexdigest())
-    (app/'generated/core2-reference.json').write_text(json.dumps(record,indent=2)+'\n')
-    (app/'generated/core2-expected.bin').write_bytes(expected)
+    output=generated_dir or app/'generated'
+    (output/'core2-reference.json').write_text(json.dumps(record,indent=2)+'\n')
+    (output/'core2-expected.bin').write_bytes(expected)
     (evidence/'core2-reference.json').write_text(json.dumps(record,indent=2)+'\n')
     return record
 

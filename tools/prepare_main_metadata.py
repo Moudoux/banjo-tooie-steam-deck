@@ -4,7 +4,7 @@ from io import BytesIO
 import hashlib,json
 from elftools.elf.elffile import ELFFile
 
-def prepare_main_metadata(app: Path, evidence: Path, *, elf_path: Path | None = None):
+def prepare_main_metadata(app: Path, evidence: Path, *, elf_path: Path | None = None, generated_dir: Path | None = None):
     path=elf_path or app.parent/'banjo-tooie/build/us/banjotooie_decompressed.elf'
     with BytesIO(path.read_bytes()) as f:
         elf=ELFFile(f)
@@ -30,7 +30,7 @@ def prepare_main_metadata(app: Path, evidence: Path, *, elf_path: Path | None = 
     assert values['main_stack_size']==0x2400
     header='#pragma once\n#include <cstdint>\nnamespace tooie::main_meta {\n'
     header+=''.join(f'inline constexpr uint32_t {k}=0x{v:08X}u;\n' for k,v in values.items())+'}\n'
-    dest=app/'generated/main_metadata.hpp'
+    dest=(generated_dir or app/'generated')/'main_metadata.hpp'
     dest.write_text(header)
     evidence.mkdir(parents=True,exist_ok=True)
     (evidence/'main-metadata.json').write_text(json.dumps(dict(elf=str(path.resolve()),elf_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),constants=values,instruction_checks={hex(k):hex(v) for k,v in instructions.items()},header_sha256=hashlib.sha256(dest.read_bytes()).hexdigest()),indent=2)+'\n')

@@ -13,13 +13,16 @@ import subprocess
 
 PIN = 'ca568b6ad79b9029d14077f0c3ffa757727c5559'
 CLEANUP_SHA = '70582b56f42f0ad6935cb9821f7582a788a12da9f3dff5aa48a67109a9501f74'
+BASELINE_THREADS_SHA = '64ddcfdd413bd1a893ab00bae1b7b2ad08f251af446687abd605fa0ae09dabde'
+BASELINE_COMPOSED_SHA = '1dd1f42bd82ff50226e5ba2d0824ae1d3f343e08f518d0e208a8feb2adb9c48e'
+CLEANUP_PATCH_SHA = '9b4261af055d9677c061065c1d7588e79fcec74f679dac6cf12d3c069e2319fb'
 def sha(data): return hashlib.sha256(data).hexdigest()
 def replace(text, old, new, count=1):
     if text.count(old) != count:
         raise RuntimeError(f'Expected {count} exact contexts, got {text.count(old)}: {old[:120]!r}')
     return text.replace(old,new)
 
-def threads(text):
+def threads(text, baseline_threads_only=False):
     text = '#include "runtime_lifecycle.hpp"\n'+text
     text = '#ifdef TOOIE_PERSISTENT_RUNTIME_EXPERIMENT\n#include "persistent_state_runtime.hpp"\n#include "persistent_state_scheduler.hpp"\n#endif\n'+text
     text = replace(text,'    thread_context->running.wait();',
@@ -101,7 +104,8 @@ def threads(text):
     }''')
     text=replace(text,'    context->initialized.wait();','    context->initialized.wait();\n    if (tooie::lifecycle::enabled()) tooie::lifecycle::launched(context);')
     at='extern "C" void osStopThread(RDRAM_ARG PTR(OSThread) t_) {'
-    text=replace(text,at,at+'''
+    if not baseline_threads_only:
+        text=replace(text,at,at+'''
     if (tooie::lifecycle::enabled()) {
         if (t_ == NULLPTR) t_ = thread_self;
         if (t_ == NULLPTR) throw std::runtime_error("osStopThread self requires a running guest worker");
@@ -195,6 +199,47 @@ extern "C" bool tooie_persistent_external_import(const std::vector<tooie::persis
 '''
     return text
 
+BASELINE_TIMER_STOP = '''
+void tooie::lifecycle::stop_and_join_timer() {
+    if (timer_context.thread.joinable()) {
+        timer_context.action_queue.enqueue(ContinuousTimerStop{});
+        timer_context.thread.join();
+    }
+}
+'''
+
+def baseline_timer(text):
+    # Keep the upstream epoch and arithmetic; the shared worker uses steady_clock.
+    text = '#include "runtime_lifecycle.hpp"\n#include <type_traits>\n' + text
+    text = replace(text, '// Start time for the program',
+        'static_assert(std::is_same_v<std::chrono::high_resolution_clock, std::chrono::steady_clock>, "Baseline timer requires the pinned MSVC clock alias");\n// Start time for the program')
+    text = replace(text, 'using Action = std::variant<AddTimerAction, RemoveTimerAction>;',
+        'struct ContinuousTimerStop {};\nusing Action = std::variant<AddTimerAction, RemoveTimerAction, ContinuousTimerStop>;')
+    text = replace(text, '    timer_context.thread.detach();', '')
+    from owned_timer import ordinary
+    return ordinary(text + BASELINE_TIMER_STOP)
+
+
+def materialize_baseline_timer(runtime_root, output_root):
+    source = runtime_root / 'ultramodern/src/timer.cpp'
+    destinations = [output_root / 'timer.cpp', output_root / 'manifest.json']
+    for destination in destinations:
+        if destination.resolve().is_relative_to(runtime_root.resolve()):
+            raise RuntimeError('Baseline timer output overlaps pinned runtime')
+    revision = subprocess.check_output(['git', '-C', str(runtime_root), 'rev-parse', 'HEAD'], text=True).strip()
+    original = source.read_bytes()
+    if revision != PIN or sha(original) != '5919412bafcde237d911d1110059c39863b2a09baedba782d366d4804a32f72d':
+        raise RuntimeError('Baseline timer requires exact pinned upstream input')
+    data = baseline_timer(source.read_text()).encode()
+    output_root.mkdir(parents=True, exist_ok=True)
+    output = destinations[0]
+    if not output.exists() or output.read_bytes() != data:
+        output.write_bytes(data)
+    manifest = dict(runtime_pin=PIN, scope='Baseline ordinary 1x copied timer; no product clock policy',
+        materializer_sha256=sha(Path(__file__).read_bytes()), timer_recipe_sha256=sha(Path(__file__).with_name('owned_timer.py').read_bytes()),
+        sources=[dict(original=str(source), original_sha256=sha(original), output=str(output), output_sha256=sha(data))])
+    destinations[1].write_text(json.dumps(manifest, indent=2) + '\n')
+
 def timer(text):
     text='#include "runtime_lifecycle.hpp"\n#include "virtual_clock.hpp"\n'+text
     text=replace(text,'using Action = std::variant<AddTimerAction, RemoveTimerAction>;',
@@ -253,18 +298,12 @@ uint64_t time_now() {
 }''')
     text=replace(text,'    timer_context.thread.detach();',
         '    if (!tooie::lifecycle::enabled()) timer_context.thread.detach();')
-    text+='''
-void tooie::lifecycle::stop_and_join_timer() {
-    if (timer_context.thread.joinable()) {
-        timer_context.action_queue.enqueue(ContinuousTimerStop{});
-        timer_context.thread.join();
-    }
-}
-'''
-    return text
+    text += BASELINE_TIMER_STOP
+    from owned_timer import ordinary
+    return ordinary(text)
 
 def events(text):
-    text='#include "runtime_lifecycle.hpp"\n#include "runtime_dp.hpp"\n#include "virtual_clock.hpp"\n#include "camera_interpolation.hpp"\n'+text
+    text='#include "runtime_lifecycle.hpp"\n#include "runtime_dp.hpp"\n#include "virtual_clock.hpp"\n#include "camera_interpolation.hpp"\n#include "model_interpolation.hpp"\n'+text
     # Keep early SP exactly where the pinned runtime sends it. Tooie can submit
     # the next RSP task while RDP is frozen for a framebuffer boundary. Admit
     # parsing only after unfreeze, and recheck after an already-admitted parser
@@ -411,12 +450,24 @@ std::atomic_uint32_t display_refresh_rate''')
     // Set all other tasks as the RSP task''', '''    // Bind a camera-cut request to this exact copied display list. The
     // renderer consumes it only when the same task reaches send_dl.
     if (task->t.type == M_GFXTASK) {
-        // Association is optional. The camera layer records a bounded FIFO and
-        // disables interpolation on overflow or mismatch; a graphics task is
-        // never rejected for a presentation-only enhancement.
-        (void)tooie_camera_interpolation_bind_task(static_cast<uint32_t>(task->t.data_ptr),
+        // Bind construction policy from the exact root, before queueing it.
+        const auto model_binding = tooie::model_interpolation::bind_task_submission(
+            static_cast<uint32_t>(task->t.data_ptr), static_cast<uint32_t>(task->t.data_size));
+        if (model_binding.status == tooie::model_interpolation::SubmissionStatus::PublicationLost)
+            throw tooie::model_interpolation::PublicationLoss{};
+        (void)tooie_camera_interpolation_bind_task(rdram, static_cast<uint32_t>(task->t.data_ptr),
             static_cast<uint32_t>(task->t.data_size));
-        events_context.action_queue.enqueue(SpTaskAction{ *task });
+        bool published = false;
+        try {
+            published = events_context.action_queue.enqueue(SpTaskAction{ *task });
+        } catch (...) {
+            tooie::model_interpolation::publication_failed(model_binding);
+            throw;
+        }
+        if (!published) {
+            tooie::model_interpolation::publication_failed(model_binding);
+            throw tooie::model_interpolation::PublicationLoss{};
+        }
     }
     // Set all other tasks as the RSP task''')
     # Immediate startup can beat VI's first iteration. Seed the same baseline
@@ -431,6 +482,11 @@ std::atomic_uint32_t display_refresh_rate''')
         "        // If the game hasn't started yet, set a dummy VI mode and origin.")
     text=replace(text,'        events_context.vi.update_vi();',
         '        events_context.vi.update_vi();\n        }')
+    # Both scalar framebuffer readers share the VI writer's state mutex.
+    for getter in ['Next', 'Current']:
+        anchor = f'extern "C" PTR(void) osViGet{getter}Framebuffer() {{\n'
+        text = replace(text, anchor,
+            anchor + '    std::lock_guard lock{ events_context.message_mutex };\n')
     # Partial preinit failures must still allow all started event threads to join.
     for name in ['events_context.sp.gfx_thread','events_context.vi.thread','events_context.sp.task_thread']:
         text=replace(text,f'    {name}.join();',f'    if ({name}.joinable()) {name}.join();')
@@ -463,6 +519,7 @@ def dp(text):
     update_bit(after, ctx->r4, RDPStatusBit::Freeze);
     update_bit(after, ctx->r4, RDPStatusBit::Flush);
     rdp_state.store(after, std::memory_order_release);
+    if ((before & 2u) && !(after & 2u)) tooie::dp::changed.notify_all();
     if (tooie::lifecycle::enabled() && ((before ^ after) & 2u)) {
         if (after & 2u) ++tooie::dp::freeze_sets;
         else ++tooie::dp::freeze_clears;
@@ -495,10 +552,10 @@ def translation(text):
         const auto self = ultramodern::this_thread();
         if (!ultramodern::thread_queue_empty(PASS_RDRAM ultramodern::running_queue)) {
             const auto candidate = ultramodern::thread_queue_peek(PASS_RDRAM ultramodern::running_queue);
-            // Queue insertion is priority ordered but puts equal priority at
-            // the head. Pop the older equal-priority candidate first so yield
-            // is FIFO at equal priority; a lower-priority candidate cannot
-            // preempt this caller.
+            // The selected queue inserts after existing equal-priority peers.
+            // Pop the ready head before requeueing self: this preserves the
+            // original enqueue-self/dispatch FIFO order. A lower-priority
+            // candidate cannot preempt this caller.
             if (TO_PTR(OSThread, candidate)->priority >= TO_PTR(OSThread, self)->priority) {
                 const auto next = ultramodern::thread_queue_pop(PASS_RDRAM ultramodern::running_queue);
                 ultramodern::schedule_running_thread(PASS_RDRAM self);
@@ -561,38 +618,173 @@ def saving(text):
 }''')
     return text
 
+def standard_start(text):
+    # Sole product child of the exact pinned source. Baseline never selects it.
+    if sha(text.encode()) != 'af9c6f983fb1620ff5b971836d7792ef0b83a47e77010ab89ddf2fa1fb87e143':
+        raise RuntimeError('Product standard-start source pin mismatch')
+    text = '#include "continuous_host.hpp"\n#include "runtime_lifecycle.hpp"\n#include "platform_support.hpp"\n#include <atomic>\n#include <exception>\n' + text
+    text = replace(text, '    recomp::mods::initialize_mods();\n    recomp::mods::scan_mods();\n', '')
+    allocation_begin = '    // Allocate rdram without comitting it.'
+    allocation_end = '    recomp::register_heap_exports();'
+    if text.count(allocation_begin) != 1 or text.count(allocation_end) != 1:
+        raise RuntimeError('Product RDRAM allocation anchors changed')
+    allocation = text[text.index(allocation_begin):text.index(allocation_end)]
+    text = replace(text, allocation, '''    uint8_t* rdram;
+    try {
+        rdram = tooie::platform::reserve_rdram(allocation_size, mem_size);
+    } catch (...) {
+        tooie::lifecycle::fail(std::current_exception());
+        ultramodern::error_handling::message_box("Failed to allocate memory!");
+        return;
+    }
+
+''')
+    text = replace(text, '''    std::thread game_thread{[](ultramodern::renderer::WindowHandle window_handle, uint8_t* rdram) {
+        debug_printf("[Recomp] Starting\\n");
+
+        ultramodern::set_native_thread_name("Game Start Thread");
+
+        ultramodern::preinit(rdram, window_handle);
+
+        recomp_context context{};
+
+        // Loop until the game starts.
+        while (!wait_for_game_started(rdram, &context)) {}
+    }, window_handle, rdram};
+
+''',
+        '''    std::atomic_bool startup_done{false};
+    std::thread game_thread{[&startup_done](ultramodern::renderer::WindowHandle window_handle, uint8_t* rdram) {
+        try {
+            debug_printf("[Recomp] Starting\\n");
+            ultramodern::set_native_thread_name("Game Start Thread");
+            ultramodern::preinit(rdram, window_handle);
+            recomp_context context{};
+            while (!tooie::lifecycle::stopping() && !wait_for_game_started(rdram, &context)) {}
+        } catch (const ultramodern::thread_terminated&) {
+        } catch (...) {
+            tooie::lifecycle::fail(std::current_exception());
+        }
+        startup_done.store(true, std::memory_order_release);
+    }, window_handle, rdram};
+
+''')
+    text = replace(text, '''    while (!exited) {
+        ultramodern::sleep_milliseconds(1);
+        if (gfx_callbacks.update_gfx != nullptr) {
+            gfx_callbacks.update_gfx(gfx_data);
+        }
+    }
+
+''',
+        '''    try {
+        while (!exited && !tooie::lifecycle::stopping()) {
+            ultramodern::sleep_milliseconds(1);
+            if (gfx_callbacks.update_gfx != nullptr) {
+                gfx_callbacks.update_gfx(gfx_data);
+            }
+        }
+    } catch (...) {
+        tooie::lifecycle::fail(std::current_exception());
+    }
+
+''')
+    return replace(text, '''    graphics_shutdown_ready.signal();
+
+    game_thread.join();
+    ultramodern::join_event_threads();
+    ultramodern::join_thread_cleaner_thread();
+    ultramodern::join_saving_thread();
+\x20\x20\x20\x20
+    // Free rdram.
+    bool free_failed;
+#ifdef _WIN32
+    // VirtualFree returns zero on failure.
+    free_failed = (VirtualFree(rdram, 0, MEM_RELEASE) == 0);
+#else
+    // munmap returns -1 on failure.
+    free_failed = (munmap(rdram, allocation_size) == -1);
+#endif
+
+    if (free_failed) {
+        printf("Failed to free rdram\\n");
+    }''',
+        '    tooie::finish_standard_runtime(game_thread, startup_done);\n    // Retain RDRAM to process exit after the shared product terminal owner.\n')
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('--runtime',required=True,type=Path)
-    p.add_argument('--cleanup-threads',required=True,type=Path)
+    p.add_argument('--cleanup-threads',type=Path)
     p.add_argument('--output-directory',required=True,type=Path)
+    baseline=p.add_mutually_exclusive_group()
+    baseline.add_argument('--baseline-timer',action='store_true')
+    baseline.add_argument('--baseline-threads-only',action='store_true')
+    baseline.add_argument('--baseline-external-wait',action='store_true')
+    baseline.add_argument('--baseline-selected-runtime',action='store_true')
     a=p.parse_args()
+    if a.baseline_selected_runtime:
+        import sys
+        sys.dont_write_bytecode = True
+        from prepare_runtime_baseline_selected import materialize
+        materialize(Path(__file__).resolve().parents[1], a.runtime, a.output_directory)
+        return
+    if a.baseline_timer:
+        materialize_baseline_timer(a.runtime, a.output_directory)
+        return
+    if a.cleanup_threads is None:
+        p.error('--cleanup-threads is required outside --baseline-timer')
+    baseline_mode=a.baseline_threads_only or a.baseline_external_wait
     runtime_root=a.runtime.resolve()
     output_root=a.output_directory.resolve()
     protected_input=a.cleanup_threads.resolve()
+    names=['threads'] if baseline_mode else ['threads','mesgqueue','timer','events','pi','ultra_translation','dp','recomp']
+    if a.baseline_external_wait: names.append('mesgqueue')
+    cleanup_patch=Path(__file__).resolve().parents[1]/'patches/runtime/producer-quiescent-cleanup.patch'
     # Validate every destination before making any change, including existing
     # output-file symlinks. Preserve immutable refs and the approved input layer.
     destinations=[output_root/'manifest.json']
-    for name in ['threads','mesgqueue','timer','events','pi','ultra_translation','dp']:
+    for name in names:
         destinations.extend([output_root/f'{name}.cpp',output_root/f'{name}.patch'])
     for destination in destinations:
         resolved=destination.resolve()
         if resolved==runtime_root or runtime_root in resolved.parents or resolved==protected_input:
             raise RuntimeError('Continuous output overlaps protected input/reference: '+str(resolved))
+        if baseline_mode and resolved==cleanup_patch.resolve():
+            raise RuntimeError('Baseline output overlaps pinned cleanup patch: '+str(resolved))
     revision=subprocess.check_output(['git','-C',str(a.runtime),'rev-parse','HEAD'],text=True).strip()
     if revision!=PIN: raise RuntimeError('Continuous runtime pin mismatch: '+revision)
-    if sha(a.cleanup_threads.read_bytes())!=CLEANUP_SHA: raise RuntimeError('Continuous overlay requires exact approved cleanup source')
+    expected_input=BASELINE_THREADS_SHA if baseline_mode else CLEANUP_SHA
+    if sha(a.cleanup_threads.read_bytes())!=expected_input: raise RuntimeError('Continuous overlay requires exact approved cleanup source')
+    threads_input=a.cleanup_threads.read_text()
+    if baseline_mode:
+        if sha(cleanup_patch.read_bytes())!=CLEANUP_PATCH_SHA:
+            raise RuntimeError('Baseline cleanup patch pin mismatch')
+        patch_lines=cleanup_patch.read_text().splitlines(True)
+        hunks=[i for i,line in enumerate(patch_lines) if line.startswith('@@ ')]
+        if len(hunks)!=1: raise RuntimeError('Baseline cleanup requires one exact hunk')
+        hunk=patch_lines[hunks[0]+1:]
+        if sum(line.startswith(' ') for line in hunk)!=4 or any(line[0] not in ' +-' for line in hunk):
+            raise RuntimeError('Baseline cleanup requires its unique four-line drain context')
+        before=''.join(line[1:] for line in hunk if line[0] in ' -')
+        after=''.join(line[1:] for line in hunk if line[0] in ' +')
+        threads_input=replace(threads_input,before,after)
+        if sha(threads_input.encode())!=BASELINE_COMPOSED_SHA:
+            raise RuntimeError('Baseline composed cleanup source pin mismatch')
     outputs=[]
-    for name,transform in [('threads',threads),('mesgqueue',messages),('timer',timer),('events',events),('pi',saving),('ultra_translation',translation),('dp',dp)]:
-        component='librecomp' if name in {'pi','ultra_translation','dp'} else 'ultramodern'
+    for name,transform in [('threads',threads),('mesgqueue',messages),('timer',timer),('events',events),('pi',saving),('ultra_translation',translation),('dp',dp),('recomp',standard_start)]:
+        if name not in names: continue
+        component='librecomp' if name in {'pi','ultra_translation','dp','recomp'} else 'ultramodern'
         source=a.runtime/component/'src'/f'{name}.cpp'
         original=source.read_bytes()
         # Compare worktree bytes to immutable Git object, normalizing only CRLF.
         pinned=subprocess.check_output(['git','-C',str(a.runtime),'show',f'{PIN}:{component}/src/{name}.cpp'])
         if original.replace(b'\r\n',b'\n')!=pinned.replace(b'\r\n',b'\n'):
             raise RuntimeError('Reference worktree drift: '+str(source))
+        if a.baseline_external_wait and name=='mesgqueue' and sha(original)!= '720db0e01ed2d874710b180292bd3ee9480c742a99bc574c4ce87e8f42949d21':
+            raise RuntimeError('Baseline external message source pin mismatch')
         input_path=a.cleanup_threads if name=='threads' else source
-        data=transform(input_path.read_text()).encode()
+        input_text=threads_input if name=='threads' else input_path.read_text()
+        data=(threads(input_text,True) if baseline_mode and name=='threads' else transform(input_text)).encode()
         output=a.output_directory/f'{name}.cpp'
         output.parent.mkdir(parents=True,exist_ok=True)
         if not output.exists() or output.read_bytes()!=data: output.write_bytes(data)
@@ -600,6 +792,8 @@ def main():
         patch_path=output.with_suffix('.patch')
         if not patch_path.exists() or patch_path.read_bytes()!=patch: patch_path.write_bytes(patch)
         outputs.append(dict(original=str(source),original_sha256=sha(original),input=str(input_path),input_sha256=sha(input_path.read_bytes()),output=str(output),output_sha256=sha(data),patch=str(patch_path),patch_sha256=sha(patch)))
-    (a.output_directory/'manifest.json').write_text(json.dumps(dict(runtime_pin=PIN,scope='Opt-in continuous lifecycle; bounded diagnostics retain original paths',materializer_sha256=sha(Path(__file__).read_bytes()),sources=outputs),indent=2)+'\n')
+        if baseline_mode and name=='threads':
+            outputs[-1].update(cleanup_patch=str(cleanup_patch),cleanup_patch_sha256=CLEANUP_PATCH_SHA,composed_input_sha256=BASELINE_COMPOSED_SHA)
+    (a.output_directory/'manifest.json').write_text(json.dumps(dict(runtime_pin=PIN,scope='Opt-in continuous lifecycle; bounded diagnostics retain original paths',materializer_sha256=sha(Path(__file__).read_bytes()),timer_recipe_sha256=sha(Path(__file__).with_name('owned_timer.py').read_bytes()) if not baseline_mode else None,sources=outputs),indent=2)+'\n')
 
 if __name__=='__main__': main()

@@ -1,0 +1,25 @@
+#pragma once
+#include "../wrapper_state.h"
+
+/* Shared guest/native command contract; no game memory layout is inferred here. */
+#define TOOIE_GFX_ORIGINAL_BYTES 0x76C0u
+#define TOOIE_GFX_LABEL_BYTES 25600u
+#define TOOIE_GFX_POOL_BYTES (8u + TOOIE_GFX_ORIGINAL_BYTES + TOOIE_GFX_LABEL_BYTES)
+#define TOOIE_GFX_POOL_COMMANDS (TOOIE_GFX_POOL_BYTES / 8u)
+#define TOOIE_FAMILY_BIRTH_COUNT 200u
+#define TOOIE_FAMILY_MAX_BIRTH 0x03FFFFFFu
+#define TOOIE_FAMILY_ID_BASE 0x10000000u
+#define TOOIE_POLICY_WORD0 0x00000000u
+#define TOOIE_POLICY_MAGIC 0x54500100u
+#define TOOIE_POLICY_UNLABELLED 1u
+#define TOOIE_POLICY_MODEL_LABELS 2u
+#define TOOIE_POLICY_ORIGINAL_MOTION 3u
+#define TOOIE_POLICY_IMPORT_ADDRESS 0x8F000000u
+
+struct TooieFamilyBirthState {
+    unsigned int births[TOOIE_FAMILY_BIRTH_COUNT];
+    unsigned int cursor;
+    struct TooieWrapperState wrapper;
+};
+_Static_assert(__builtin_offsetof(struct TooieFamilyBirthState, wrapper) == 804 &&
+    sizeof(struct TooieFamilyBirthState) == 1168, "unchanged birth prefix/new wrapper suffix");

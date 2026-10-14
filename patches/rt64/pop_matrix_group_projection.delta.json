@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "name": "rt64_pop_matrix_group_projection",
+  "delta_revision": 1,
+  "upstream": {
+    "dependency": "rt64",
+    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "path": "src/gbi/rt64_gbi_extended.cpp",
+    "sha256": "54eeb28949d180270c6abd9fa0c28531a8ab3098c0bd824c99c7849225e74792",
+    "lines": 445
+  },
+  "output": {
+    "filename": "rt64_gbi_extended.cpp",
+    "sha256": "7f8d1c491b4c606e0c3eb651ab01112a6cdde434844f51948d9f5431805d2e60",
+    "lines": 445
+  },
+  "operations": [
+    {
+      "original_start": 158,
+      "original_end": 159,
+      "original_sha256": "1b1bf87ea34be9c3cbd9652eaa65f2ff2bba2c818e236a5f062ea60fb835bf67",
+      "replacement_lines": [
+        "            const uint8_t proj = (*dl)->p1(8, 1);\n"
+      ]
+    }
+  ]
+}

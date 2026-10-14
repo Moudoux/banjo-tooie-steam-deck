@@ -1,8 +1,9 @@
 """Avoid rebuilding byte-identical regenerated files; never suppress a change."""
 import hashlib,os
-def capture_output_times(app):
+def capture_output_times(app, generated_dir=None, config_dir=None):
     result={}
-    for directory in [app/'generated',app/'config']:
+    for directory in [generated_dir or app/'generated',config_dir or app/'config']:
+        if not directory.exists():continue
         for path in directory.iterdir():
             if path.is_file():
                 stat=path.stat()

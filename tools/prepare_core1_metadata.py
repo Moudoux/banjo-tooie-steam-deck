@@ -11,7 +11,8 @@ from elftools.elf.elffile import ELFFile
 
 
 def prepare_core1_metadata(app: Path, evidence: Path, *, elf_path: Path | None = None,
-                           baseline_symbols: Path | None = None):
+                           baseline_symbols: Path | None = None,
+                           generated_dir: Path | None = None):
     elf_path = elf_path or app.parent / 'banjo-tooie/build/us/banjotooie_decompressed.elf'
     with BytesIO(elf_path.read_bytes()) as stream:
         elf = ELFFile(stream)
@@ -85,7 +86,7 @@ def prepare_core1_metadata(app: Path, evidence: Path, *, elf_path: Path | None =
     header = '#pragma once\n#include <cstdint>\nnamespace tooie::core1_meta {\n'
     header += ''.join(f'inline constexpr uint32_t {key} = 0x{value:08X}u;\n' for key, value in values.items())
     header += '}\n'
-    output = app / 'generated/core1_metadata.hpp'
+    output = (generated_dir or app / 'generated') / 'core1_metadata.hpp'
     output.parent.mkdir(exist_ok=True)
     output.write_text(header)
     evidence.mkdir(parents=True, exist_ok=True)

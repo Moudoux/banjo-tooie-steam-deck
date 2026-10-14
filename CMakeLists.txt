@@ -23,6 +23,13 @@ elseif(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<CONFIG:MinSizeRel>>:/pathmap:${CMAKE_CURRENT_SOURCE_DIR}=/src>"
         "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<CONFIG:MinSizeRel>>:/pathmap:${CMAKE_BINARY_DIR}=/build>")
 endif()
+# Player release of the maintained baseline engine.
+set(TOOIE_PLAYER_VERSION "${PROJECT_VERSION}-alpha.4")
+option(TOOIE_BASELINE "Build the selected baseline engine" OFF)
+if(TOOIE_BASELINE)
+    include(cmake/Baseline.cmake)
+    return()
+endif()
 include(cmake/Dependencies.cmake)
 
 # Isolated persistence architecture proof; never linked into the player binary.

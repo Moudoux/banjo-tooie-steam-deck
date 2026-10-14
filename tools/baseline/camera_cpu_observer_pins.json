@@ -1,0 +1,19 @@
+{
+  "camera": {
+    "patch": "baseline_queue_camera_observer_01.patch",
+    "patch_sha256": "81570132f56dc50c9734b9a8c03ff5c21642afef9ab87598dafa534e1f8e23bb",
+    "hunks": 3,
+    "output_sha256": "83476656816e8e7044151b9adbfb048a8f1b0299b5565da2f58628e654d24712"
+  },
+  "combined": {
+    "patch": "baseline_queue_combined_observer_02.patch",
+    "patch_sha256": "6bd29f61801a303a1ad3d05f7c98d3e73884e224c2dc3743a2a4ab2a9f615e7f",
+    "hunks": 3,
+    "output_sha256": "7c4c1259a2ec55c3cb923f60aec4009c8aa60ebd99b52c1f13df9f2a2b3a107d"
+  },
+  "input_sha256": "6e53030e8899c42347b51e67879fcb9679ad487ac067c192612c432d85bca4a4",
+  "camera_inl_sha256": "039514412a312227a6b3e06227c70e456f898654e916ac4de4e0199f8c4c1fce",
+  "honey_inl_sha256": "b39d0fc819f6b33f3e054938c6360c7bf4306601c52288df0cf9dc6be3fb6051",
+  "honey_only_output_sha256": "3e0aefd9c1a9ba117c0af76f2d95b8f3735a3b72ceee2acdba38560406515a54",
+  "shadow_header_sha256": "6e2ef6d4aea8901c526ddb913fe262d38bca1d5de7247c921ab628672e7470e3"
+}

@@ -1,0 +1,7 @@
+--- a/events.cpp
++++ b/events.cpp
+@@ -555,3 +555,4 @@
+ extern "C" PTR(void) osViGetNextFramebuffer() {
++    std::lock_guard lock{ events_context.message_mutex };
+     return events_context.vi.get_next_state()->framebuffer;
+ }

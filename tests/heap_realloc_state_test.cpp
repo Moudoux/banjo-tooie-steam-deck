@@ -1,5 +1,5 @@
-// Executes the exact materialized generated heap_realloc body, extracted at
-// build time. The fixture covers only the repaired allocator paths and ABI.
+// Executes the sole canonical patch-origin heap_realloc body, extracted at
+// build time. The fixture covers the repaired allocator paths and guest ABI.
 #include "recomp.h"
 
 #include <array>
@@ -7,6 +7,7 @@
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 extern "C" {
@@ -17,7 +18,6 @@ void func_8001BD30(uint8_t*, recomp_context*);
 void aligned8_memcpy(uint8_t*, recomp_context*);
 void heap_free(uint8_t*, recomp_context*);
 }
-void tooie_continuous_poll(uint8_t*, recomp_context*, uint32_t);
 
 #include "heap_realloc_fixture.inc"
 
@@ -37,6 +37,7 @@ struct Calls {
     uint32_t alloc_size = 0, copy_dst = 0, copy_src = 0, copy_size = 0;
     uint32_t free_ptr = 0;
     std::vector<uint32_t> pins;
+    std::vector<std::string> order;
 } calls;
 
 uint32_t u32(gpr value) { return static_cast<uint32_t>(value); }
@@ -64,6 +65,9 @@ recomp_context context(uint32_t request) {
     ctx.r5 = request;
     ctx.r16 = 0x16161616;
     ctx.r17 = 0x17171717;
+    ctx.r18 = 0x18181818; ctx.r19 = 0x19191919; ctx.r20 = 0x20202020;
+    ctx.r21 = 0x21212121; ctx.r22 = 0x22222222; ctx.r23 = 0x23232323;
+    ctx.r28 = 0x28282828; ctx.r30 = 0x30303030;
     ctx.r29 = guest(0x8007F000);
     ctx.r31 = guest(0x80045678);
     return ctx;
@@ -72,6 +76,9 @@ recomp_context context(uint32_t request) {
 void check_abi(const recomp_context& before, const recomp_context& after) {
     require(after.r16 == before.r16, "s0 was not restored");
     require(after.r17 == before.r17, "s1 was not restored");
+    require(after.r18 == before.r18 && after.r19 == before.r19 && after.r20 == before.r20 &&
+            after.r21 == before.r21 && after.r22 == before.r22 && after.r23 == before.r23 &&
+            after.r28 == before.r28 && after.r30 == before.r30, "callee-saved guest registers changed");
     require(after.r29 == before.r29, "stack pointer was not restored");
     require(after.r31 == before.r31, "return address was not restored");
 }
@@ -91,6 +98,8 @@ void move_growth() {
     for (uint32_t i = 0; i < capacity; ++i) MEM_B(guest(kOld + i), 0) = static_cast<uint8_t>(0x20 + i);
     fill(ram.data(), kOld + capacity, 0x20, 0xE7);
     fill(ram.data(), kNew, request, 0xCC);
+    put_word(rdram, kOld - 4, 0x001122D8);
+    put_word(rdram, kNew - 4, 0x33445547);
     std::array<uint8_t, capacity> expected{};
     for (uint32_t i = 0; i < capacity; ++i) expected[i] = byte(ram.data(), kOld + i);
     auto ctx = context(request), before = ctx;
@@ -106,6 +115,9 @@ void move_growth() {
         require(byte(ram.data(), kNew + i) == 0xCC, "destination extension was overwritten");
     require(calls.frees == 1 && calls.free_ptr == kOld, "old allocation was not freed exactly once");
     require(calls.pins == std::vector<uint32_t>({kOld, 0}), "move growth pin lifecycle mismatch");
+    require(word(rdram,kNew - 4)==0x3344554B, "moving growth flags or unrelated new header bits changed");
+    require(calls.order==std::vector<std::string>({"pin","alloc","align","copy","free","unpin"}),
+            "moving growth call order changed");
     check_abi(before, ctx);
 }
 
@@ -128,6 +140,7 @@ void allocation_failure() {
     require(calls.pins == std::vector<uint32_t>({kOld, 0}), "failed growth left old allocation pinned");
     for (uint32_t i = 0; i < snapshot.size(); ++i)
         require(byte(ram.data(), kOld - 16 + i) == snapshot[i], "failed growth changed old block");
+    require(calls.order==std::vector<std::string>({"pin","alloc","unpin"}), "failure call order changed");
     check_abi(before, ctx);
 }
 
@@ -143,6 +156,7 @@ void shrink_in_place() {
             "shrink resize mismatch");
     require(calls.pins.empty() && calls.alloc == 0 && calls.copies == 0 && calls.frees == 0,
             "shrink entered growth path");
+    require(calls.order==std::vector<std::string>({"resize"}), "shrink call order changed");
     check_abi(before, ctx);
 }
 
@@ -155,11 +169,12 @@ void adjacent_growth() {
     const uint32_t next = kOld + capacity;
     const uint32_t next_next = kOld - 16 + 16 + request + 0x20;
     put_word(ram.data(), next + 4, next_next);
-    put_word(ram.data(), next + 16, kFreeNext);
-    put_word(ram.data(), next + 20, kFreePrev);
+    put_word(ram.data(), next + 16, kFreePrev);
+    put_word(ram.data(), next + 20, kFreeNext);
     put_word(ram.data(), kFreeNext + 16, next);
     put_word(ram.data(), kFreePrev + 20, next);
     put_word(ram.data(), next_next, next);
+    put_word(rdram, 0x8003F750, 0x20);
     auto ctx = context(request), before = ctx;
     heap_realloc(ram.data(), &ctx);
     require(u32(ctx.r2) == kOld, "adjacent growth moved allocation");
@@ -168,30 +183,41 @@ void adjacent_growth() {
     require(calls.pins == std::vector<uint32_t>({kOld, 0}), "adjacent growth pin lifecycle mismatch");
     require(calls.alloc == 0 && calls.copies == 0 && calls.frees == 0,
             "adjacent growth entered move path");
+    require(word(rdram,kFreeNext+16)==kFreePrev && word(rdram,kFreePrev+20)==kFreeNext,
+            "adjacent free-list unlink differs");
+    require(word(rdram,kOld-12)==next_next && word(rdram,next_next)==kOld-16,
+            "adjacent block-list splice differs");
+    require(word(rdram,0x8003F750)==0x20+next_next-next, "adjacent heap accounting differs");
+    require(calls.order==std::vector<std::string>({"pin","resize","unpin"}), "adjacent call order changed");
     check_abi(before, ctx);
 }
 } // namespace
 
-void tooie_continuous_poll(uint8_t*, recomp_context*, uint32_t) {}
 extern "C" void heap_resize_block(uint8_t*, recomp_context* ctx) {
+    calls.order.push_back("resize");
     ++calls.resize; calls.resize_header = u32(ctx->r4); calls.resize_size = u32(ctx->r5);
 }
 extern "C" void func_8001B864(uint8_t*, recomp_context* ctx) {
+    calls.order.push_back(ctx->r4 ? "pin" : "unpin");
     calls.pins.push_back(u32(ctx->r4));
 }
 extern "C" void heap_alloc(uint8_t*, recomp_context* ctx) {
+    calls.order.push_back("alloc");
     ++calls.alloc; calls.alloc_size = u32(ctx->r4); ctx->r2 = guest(calls.allocation_result);
 }
 extern "C" void func_8001BD30(uint8_t*, recomp_context* ctx) {
+    calls.order.push_back("align");
     ctx->r2 = (u32(ctx->r4) + 15u) & ~15u;
 }
 extern "C" void aligned8_memcpy(uint8_t* rdram, recomp_context* ctx) {
+    calls.order.push_back("copy");
     ++calls.copies;
     calls.copy_dst = u32(ctx->r4); calls.copy_src = u32(ctx->r5); calls.copy_size = u32(ctx->r6);
     for (uint32_t i = 0; i < calls.copy_size; ++i)
         MEM_B(guest(calls.copy_dst + i), 0) = MEM_BU(guest(calls.copy_src + i), 0);
 }
 extern "C" void heap_free(uint8_t*, recomp_context* ctx) {
+    calls.order.push_back("free");
     ++calls.frees; calls.free_ptr = u32(ctx->r4);
 }
 

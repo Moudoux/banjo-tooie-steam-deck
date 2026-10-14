@@ -76,29 +76,21 @@ bool profile_override_active() noexcept {
     return widescreen_profile_override_latched.load(std::memory_order_acquire);
 }
 
-uint32_t resolve_global_setting(uint32_t game_value) noexcept {
-    if (!profile_override_active()) return game_value;
-    return latched_enabled() ? 1U : 0U;
-}
-
-float adjust_projection_aspect(float original_aspect, bool game_widescreen) noexcept {
-    if (!game_widescreen || !latched_enabled()) return original_aspect;
-    if (latched_native_aspect() == NativeAspect::Ratio16x9) return original_aspect;
-    constexpr double original_native_aspect = 16.0 / 9.0;
-    return static_cast<float>(original_aspect *
-        (latched_aspect_ratio() / original_native_aspect));
+uint32_t latched_settings_word() noexcept {
+    if (!profile_override_active()) return 0;
+    return 1U | (latched_enabled() ? 2U : 0U) |
+           (static_cast<uint32_t>(normalize_aspect(latched_native_aspect())) << 2);
 }
 
 } // namespace tooie::widescreen
 
-extern "C" void tooie_widescreen_apply_profile(recomp_context* ctx) {
-    // The following call remains the game-owned lifecycle: overlay 699 invokes
-    // set_widescreen(a0) and then its own GFLAG_BB9 setter.
-    ctx->r4 = tooie::widescreen::resolve_global_setting(ctx->r4);
+extern "C" uint32_t tooie_widescreen_latched_settings_word(void) {
+    return tooie::widescreen::latched_settings_word();
 }
 
-extern "C" float tooie_widescreen_adjust_projection_aspect(
-    float original_aspect, int game_widescreen) {
-    return tooie::widescreen::adjust_projection_aspect(
-        original_aspect, game_widescreen != 0);
+extern "C" void tooie_get_latched_widescreen_settings(
+    uint8_t*, recomp_context* ctx) {
+    ctx->r2 = static_cast<gpr>(static_cast<int32_t>(
+        tooie::widescreen::latched_settings_word()));
 }
+

@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "name": "minimum_host_external_rt64_inspector",
+  "delta_revision": 1,
+  "upstream": {
+    "dependency": "rt64",
+    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "path": "src/gui/rt64_inspector.h",
+    "sha256": "7db4de56ee5ad491dcdf1fe2afc2d8b3dd37b0bdfe0dff52e74d9047fce357c3",
+    "lines": 43
+  },
+  "output": {
+    "filename": "rt64_inspector.h",
+    "sha256": "09202ba37e1026e1b37cf3692388fffa32505edcca26ad041cd4ef658ad29bc2",
+    "lines": 44
+  },
+  "operations": [
+    {
+      "original_start": 32,
+      "original_end": 32,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "        Inspector(RenderDevice *device, const RenderSwapChain *swapChain, UserConfiguration::GraphicsAPI graphicsAPI, SDL_Window *sdlWindow, bool externalMouseDisplay);\n"
+      ]
+    }
+  ]
+}

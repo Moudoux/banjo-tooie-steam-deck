@@ -1,0 +1,39 @@
+--- a/dp.cpp
++++ b/dp.cpp
+@@ -1,4 +1,5 @@
+ #include "recomp.h"
++#include "dp-freeze.hpp"
+ 
+ enum class RDPStatusBit {
+     XbusDmem = 0,
+@@ -27,18 +28,25 @@
+     }
+ }
+ 
+-uint32_t rdp_state = 1 << (int)RDPStatusBit::BufferReady;
+ 
+ extern "C" void osDpSetNextBuffer_recomp(uint8_t* rdram, recomp_context* ctx) {
+     assert(false);
+ }
+ 
+ extern "C" void osDpGetStatus_recomp(uint8_t* rdram, recomp_context* ctx) {
+-    ctx->r2 = rdp_state;
++    ctx->r2 = ultramodern::detail::dp_freeze::get_status();
+ }
+ 
+ extern "C" void osDpSetStatus_recomp(uint8_t* rdram, recomp_context* ctx) {
+-    update_bit(rdp_state, ctx->r4, RDPStatusBit::XbusDmem);
+-    update_bit(rdp_state, ctx->r4, RDPStatusBit::Freeze);
+-    update_bit(rdp_state, ctx->r4, RDPStatusBit::Flush);
++    namespace gate = ultramodern::detail::dp_freeze;
++    bool unfreeze;
++    {
++        std::lock_guard lock(gate::admission_mutex);
++        const uint32_t before = gate::status;
++        update_bit(gate::status, ctx->r4, RDPStatusBit::XbusDmem);
++        update_bit(gate::status, ctx->r4, RDPStatusBit::Freeze);
++        update_bit(gate::status, ctx->r4, RDPStatusBit::Flush);
++        unfreeze = (before & 2u) && !(gate::status & 2u);
++    }
++    if (unfreeze) gate::changed.notify_all();
+ }

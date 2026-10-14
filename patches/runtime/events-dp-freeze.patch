@@ -1,0 +1,24 @@
+--- a/events.cpp
++++ b/events.cpp
+@@ -1,3 +1,4 @@
++#include "dp-freeze.hpp"
+ #include <thread>
+ #include <atomic>
+ #include <chrono>
+@@ -367,6 +368,7 @@
+                 // is finished as well, so sending this early shouldn't be an issue in most cases.
+                 // If this causes issues then the logic can be replaced with responding to yield requests.
+                 sp_complete();
++                if (!ultramodern::detail::dp_freeze::wait_and_run([] {})) break;
+                 ultramodern::measure_input_latency();
+ 
+                 PTR(u64) displaylist = task_action->task.t.data_ptr;
+@@ -376,7 +378,7 @@
+                 renderer_context->send_dl(&task_action->task);
+                 [[maybe_unused]] auto renderer_end = std::chrono::high_resolution_clock::now();
+ 
+-                dp_complete();
++                if (!ultramodern::detail::dp_freeze::wait_and_run([] { dp_complete(); })) break;
+                 // TODO hook the parsed event up to the actual parsing point when a callback is added to RT64.
+                 ultramodern::extensions::on_displaylist_parsed(displaylist);
+                 ultramodern::extensions::on_displaylist_completed(displaylist);

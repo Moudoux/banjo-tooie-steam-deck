@@ -3,7 +3,6 @@
 // report failure without the upstream assertion or a forged completion event.
 #include "tooie_audio_rsp.hpp"
 #include "platform_support.hpp"
-#include "librecomp/rsp.hpp"
 #include "audio_identity.hpp"
 #include <cstring>
 #include <mutex>
@@ -18,7 +17,6 @@ namespace tooie::audio_rsp {
 namespace {
 constexpr uint32_t rdram_size = 0x800000;
 std::mutex task_mutex;
-std::once_flag initialized;
 Log logger;
 Failure failure_handler;
 uint64_t task_sequence = 0;
@@ -59,8 +57,16 @@ bool fail(const std::string& reason) noexcept {
     try { if (failure_handler) failure_handler(reason); } catch (...) {}
     return false;
 }
-void init() {
-    std::call_once(initialized, [] { recomp::rsp::constants_init(); });
+Recognition task_shape(const OSTask* task) {
+    if (!task) return {false, "null audio task or RDRAM"};
+    const auto& t = task->t;
+    if (t.type != 2) return {false, "unsupported RSP task type"};
+    if (t.flags != 0 || t.ucode_size != 0x1000 || t.ucode_data_size != 0x800 || t.ucode_boot_size != 0xD0)
+        return {false, "audio OSTask shape differs from core1 n_aspMain task"};
+    if (!range(t.data_ptr, t.data_size) || t.data_size == 0 || (t.data_size & 7))
+        return {false, "audio command list is empty, unaligned or outside original RDRAM"};
+    if (!range(t.ucode_data, 0xF80)) return {false, "audio initial DMEM DMA exceeds RDRAM"};
+    return {true, {}};
 }
 RspExitReason execute(uint8_t* rdram, uint32_t ucode) {
     RspContext context{};
@@ -82,14 +88,16 @@ RspExitReason execute(uint8_t* rdram, uint32_t ucode) {
     }
     return result;
 }
-bool run(uint8_t* rdram, const OSTask* task) {
+RspExitReason run(uint8_t* rdram, uint32_t ucode) {
     std::lock_guard lock(task_mutex); // The pinned vector runtime owns global DMEM.
-    ++task_sequence;
     try {
-        const auto recognition = recognize_task(rdram, task);
-        if (!recognition.supported) return fail(recognition.reason);
-        init();
-        const auto& t = task->t;
+        OSTask task;
+        std::memcpy(&task, dmem + 0xFC0, sizeof(task));
+        if (uint32_t(task.t.ucode) != ucode)
+            throw std::runtime_error("stock audio ucode differs from loaded OSTask");
+        const auto recognition = recognize_task(rdram, &task);
+        if (!recognition.supported) throw std::runtime_error(recognition.reason);
+        const auto& t = task.t;
         if (log_success_detail()) {
             log("audio_rsp_task", {{"task_sequence", task_sequence}, {"type", t.type}, {"flags", t.flags},
                 {"ucode", t.ucode}, {"ucode_size", t.ucode_size}, {"ucode_sha256", identity::code_sha256},
@@ -98,30 +106,46 @@ bool run(uint8_t* rdram, const OSTask* task) {
                 {"boot_sha256", identity::boot_sha256}, {"data_ptr", t.data_ptr}, {"data_size", t.data_size},
                 {"command_sha256", guest_sha256(rdram, t.data_ptr, t.data_size)}});
         }
-        // Same load layout as pinned librecomp/src/rsp.cpp. Its fixed 0xF80
-        // data load exceeds OSTask.ucode_data_size=0x800; range checked above.
-        std::memcpy(dmem + 0xFC0, task, sizeof(OSTask));
-        dma_rdram_to_dmem(rdram, 0, t.ucode_data, 0xF7F);
         const auto result = execute(rdram, t.ucode);
         if (log_success_detail()) {
             log("audio_rsp_exit", {{"task_sequence", task_sequence}, {"exit_reason", static_cast<int>(result)},
                 {"broke", result == RspExitReason::Broke}});
         }
-        if (result != RspExitReason::Broke) return fail("Tooie audio RSP did not exit with Broke");
-        return true;
-    } catch (const std::exception& e) { return fail(e.what()); }
-      catch (...) { return fail("unknown exception in Tooie audio RSP"); }
+        if (result != RspExitReason::Broke)
+            throw std::runtime_error("Tooie audio RSP did not exit with Broke");
+        return result;
+    } catch (const std::exception& e) {
+        fail(e.what());
+        throw;
+    } catch (...) {
+        fail("unknown exception in Tooie audio RSP");
+        throw;
+    }
+}
+RspUcodeFunc* get_rsp_microcode(const OSTask* task) {
+    std::lock_guard lock(task_mutex);
+    ++task_sequence; // One attempt; stock DMA runs after this lock is released.
+    try {
+        const auto recognition = task_shape(task);
+        if (!recognition.supported) {
+            fail(recognition.reason);
+            return nullptr;
+        }
+        return run;
+    } catch (const std::exception& e) {
+        fail(e.what());
+        return nullptr;
+    } catch (...) {
+        fail("unknown exception in Tooie audio RSP");
+        return nullptr;
+    }
 }
 }
 Recognition recognize_task(const uint8_t* rdram, const OSTask* task) {
     if (!rdram || !task) return {false, "null audio task or RDRAM"};
+    const auto recognition = task_shape(task);
+    if (!recognition.supported) return recognition;
     const auto& t = task->t;
-    if (t.type != 2) return {false, "unsupported RSP task type"};
-    if (t.flags != 0 || t.ucode_size != 0x1000 || t.ucode_data_size != 0x800 || t.ucode_boot_size != 0xD0)
-        return {false, "audio OSTask shape differs from core1 n_aspMain task"};
-    if (!range(t.data_ptr, t.data_size) || t.data_size == 0 || (t.data_size & 7))
-        return {false, "audio command list is empty, unaligned or outside original RDRAM"};
-    if (!range(t.ucode_data, 0xF80)) return {false, "audio initial DMEM DMA exceeds RDRAM"};
     if (!matches(rdram, t.ucode, identity::code)) return {false, "unknown audio microcode or overlay bytes"};
     if (!matches(rdram, t.ucode_data, identity::data)) return {false, "unknown audio microcode data"};
     if (!matches(rdram, t.ucode_boot, identity::boot)) return {false, "unknown RSP boot bytes"};
@@ -140,5 +164,5 @@ void configure(Log log_callback, Failure failure_callback, bool detailed_logging
     task_sequence = 0;
     detailed_success_logging = detailed_logging;
 }
-ultramodern::rsp::callbacks_t callbacks() { return {init, run}; }
+recomp::rsp::callbacks_t callbacks() { return {get_rsp_microcode}; }
 }

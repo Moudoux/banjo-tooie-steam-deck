@@ -1,0 +1,74 @@
+--- a/recomp.cpp
++++ b/recomp.cpp
+@@ -1,1 +1,2 @@
+-#include <cstdio>
++#include <cstdio>
++#include "runtime_lifecycle.hpp"
+@@ -554,8 +555,8 @@
+-void ultramodern::quit() {
+-    exited.store(true);
+-    GameStatus desired = GameStatus::None;
+-    game_status.compare_exchange_strong(desired, GameStatus::Quit);
+-    game_status.notify_all();
+-    std::lock_guard<std::mutex> lock(current_game_mutex);
+-    current_game.reset();
+-}
++void ultramodern::quit() {
++    tooie::lifecycle::request_stop();
++    fprintf(stderr, "baseline terminal-fence stop-before-exited=%d\n", !exited.load());
++    exited.store(true);
++    GameStatus desired = GameStatus::None;
++    game_status.compare_exchange_strong(desired, GameStatus::Quit);
++    game_status.notify_all();
++}
+@@ -871,1 +872,2 @@
+-    recomp::register_heap_exports();
++    tooie::lifecycle::enable(false);
++    recomp::register_heap_exports();
+@@ -897,19 +899,27 @@
+-    game_thread.join();
+-    ultramodern::join_event_threads();
+-    ultramodern::join_thread_cleaner_thread();
+-    ultramodern::join_saving_thread();
+-    
+-    // Free rdram.
+-    bool free_failed;
+-#ifdef _WIN32
+-    // VirtualFree returns zero on failure.
+-    free_failed = (VirtualFree(rdram, 0, MEM_RELEASE) == 0);
+-#else
+-    // munmap returns -1 on failure.
+-    free_failed = (munmap(rdram, allocation_size) == -1);
+-#endif
+-
+-    if (free_failed) {
+-        printf("Failed to free rdram\n");
+-    }
+-}
++    game_thread.join();
++    fprintf(stderr, "baseline terminal-fence startup-joined=1\n");
++    if (!tooie::lifecycle::wait_for_shutdown_quiescence(std::chrono::seconds{3})) {
++        const auto counts = tooie::lifecycle::counts();
++        tooie::lifecycle::fail(std::make_exception_ptr(std::runtime_error("Terminal guest fence timed out")));
++        fprintf(stderr, "baseline terminal-fence timeout retained=1 created=%zu producers=%zu enqueued=%zu deleted=%zu failure=1\n",
++            counts.created, counts.producers, counts.enqueued, counts.deleted);
++        return;
++    }
++    fprintf(stderr, "baseline terminal-fence guest-quiescent=1\n");
++    ultramodern::join_event_threads();
++    ultramodern::join_thread_cleaner_thread();
++    ultramodern::join_saving_thread();
++    const auto counts = tooie::lifecycle::counts();
++    if (tooie::lifecycle::failure() || counts.producers || counts.created != counts.enqueued || counts.created != counts.deleted) {
++        tooie::lifecycle::fail(std::make_exception_ptr(std::runtime_error("Terminal guest fence final ownership failed")));
++        fprintf(stderr, "baseline terminal-fence failed retained=1 created=%zu producers=%zu enqueued=%zu deleted=%zu failure=1\n",
++            counts.created, counts.producers, counts.enqueued, counts.deleted);
++        return;
++    }
++    tooie::lifecycle::stop_and_join_timer();
++    std::lock_guard<std::mutex> lock(current_game_mutex);
++    current_game.reset();
++    fprintf(stderr, "baseline terminal-fence success events=1 cleaner=1 saver=1 reset=1 retained=1 created=%zu producers=%zu enqueued=%zu deleted=%zu failure=0\n",
++        counts.created, counts.producers, counts.enqueued, counts.deleted);
++    // One-session baseline retains RDRAM until terminal process exit.
++}

@@ -22,11 +22,8 @@ NativeAspect configured_native_aspect() noexcept;
 NativeAspect latched_native_aspect() noexcept;
 double latched_aspect_ratio() noexcept;
 bool profile_override_active() noexcept;
-uint32_t resolve_global_setting(uint32_t game_value) noexcept;
-
-// Multiplies the original game's completed widescreen aspect. Callers must
-// pass the live original widescreen flag from func_80015D14; original 4:3 and
-// scripted 4:3 cutscene projections are returned unchanged.
-float adjust_projection_aspect(float original_aspect, bool game_widescreen) noexcept;
+// Canonical transport: inactive0; active bit0, enabled bit1, enum bits2..3.
+// Reads session-latched preferences only; no guest access or projection math.
+uint32_t latched_settings_word() noexcept;
 
 } // namespace tooie::widescreen

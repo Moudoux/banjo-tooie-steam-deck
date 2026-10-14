@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 #include "SDL.h"
 
@@ -15,7 +16,10 @@ enum class Action : std::uint8_t {
 };
 enum class Device : std::uint8_t { Keyboard, Button, AxisPositive, AxisNegative };
 struct Binding { Device device = Device::Keyboard; int code = -1; };
-enum class ControllerType : std::uint8_t { N64, DualSense, Xbox, NintendoPro, Steam, Other };
+enum class BindingLayer : std::uint8_t { Base, Modified };
+enum class ModifierSoloBehavior : std::uint8_t { PassThrough, ModifierOnly };
+// Keep existing persisted enum values stable; new labels are appended.
+enum class ControllerType : std::uint8_t { N64, DualSense, Xbox, NintendoPro, Steam, Other, DualShock, GameCube, SteamDeck };
 struct ControllerInfo {
     SDL_JoystickID instance = -1;
     std::string guid, name; // Legacy identity and hardware product name (SDL fallback).
@@ -38,12 +42,17 @@ struct MenuGamepadState { bool connected = false; std::uint32_t buttons = 0; flo
 const char* action_name(Action action) noexcept;
 Binding get_binding(Action action, Device device, unsigned slot = 0);
 void set_binding(Action action, Binding binding, unsigned slot = 0);
+Binding get_binding(Action action, Device device, BindingLayer layer, unsigned slot = 0);
+void set_binding(Action action, Binding binding, BindingLayer layer, unsigned slot = 0);
 void reset_bindings();
 std::string binding_label(Binding binding);
 std::string binding_label_for_type(Binding binding, ControllerType type);
 const char* controller_type_name(ControllerType type) noexcept;
 void begin_capture(Action action, Device device, unsigned slot = 0);
+void begin_capture(Action action, Device device, unsigned slot, BindingLayer layer);
 void cancel_capture() noexcept;
+// SDL baseline owner: release capture only, preserving focus/menu release guards.
+void abandon_baseline_capture() noexcept;
 bool capture_active() noexcept;
 CaptureStatus capture_status() noexcept;
 bool input_suppressed() noexcept;
@@ -63,6 +72,13 @@ bool create_controller_profile(std::string name);
 bool select_controller_profile(std::string name);
 bool rename_controller_profile(std::string name);
 void reset_active_controller_profile();
+bool delete_controller_profile(std::string name);
+Binding get_modifier_binding();
+void set_modifier_binding(Binding binding);
+ModifierSoloBehavior get_modifier_solo_behavior();
+void set_modifier_solo_behavior(ModifierSoloBehavior behavior);
+bool set_trigger_thresholds(int press_percent, int release_percent);
+std::pair<int, int> get_trigger_thresholds();
 std::string preferred_guid();
 void set_preferred_guid(std::string guid);
 void initialize_settings(const std::filesystem::path& config_root);
@@ -71,6 +87,8 @@ void handle_event(const SDL_Event& event);
 void tick(SDL_Window* window, bool gameplay, bool menu_open);
 Snapshot snapshot() noexcept;
 std::uint16_t consume_transient_buttons() noexcept;
+// SDL owner consumes mapped edges/held activity once per Player publication.
+bool consume_mapped_activity() noexcept;
 MenuGamepadState menu_gamepad_state() noexcept;
 bool game_input_disabled() noexcept;
 #ifdef TOOIE_PERSISTENT_RUNTIME_EXPERIMENT

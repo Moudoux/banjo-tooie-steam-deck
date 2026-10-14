@@ -1,0 +1,17 @@
+{
+  "origin": "hook-leaves-object-02",
+  "definitions": [
+    "tooie_camera_construction_begin",
+    "tooie_camera_construction_end",
+    "tooie_camera_de498_ignore"
+  ],
+  "imports": [
+    "D_8007BCD0",
+    "D_8007BEDA",
+    "D_80127658",
+    "D_8012D508",
+    "tooie_camera_main",
+    "tooie_camera_state",
+    "tooie_render_bridge_state"
+  ]
+}

@@ -16,6 +16,12 @@ bool same_projection_prefix(const Workload& current, const Workload& previous,
         if (f < pair && a.projectionCount != b.projectionCount) return false;
         if (f == pair && (projection >= a.projectionCount ||
             projection >= b.projectionCount)) return false;
+        // Only perspective passes have stable camera ordinals. The pause HUD
+        // inserts orthographic counter views mid-list while retaining the same
+        // type prefix, so its slot number is not a persistent element identity.
+        // Projection::Type::Perspective is 1 in the pinned RT64 dependency.
+        if (f == pair && (static_cast<uint32_t>(a.projections[projection].type) != 1U ||
+            static_cast<uint32_t>(b.projections[projection].type) != 1U)) return false;
         const uint32_t count = f < pair ? a.projectionCount : projection + 1;
         for (uint32_t p = 0; p < count; ++p)
             if (a.projections[p].type != b.projections[p].type) return false;

@@ -1,0 +1,135 @@
+{
+  "schema": 1,
+  "name": "minimum_host_external_imgui_impl_sdl2_custom",
+  "delta_revision": 1,
+  "upstream": {
+    "dependency": "rt64",
+    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "path": "src/imgui/imgui_impl_sdl2_custom.cpp",
+    "sha256": "0cbdad6e8bc7f6a67c3a375dd88b492e142e4272eba03c86b42910034170e3f8",
+    "lines": 630
+  },
+  "output": {
+    "filename": "imgui_impl_sdl2_custom.cpp",
+    "sha256": "9bb9ad2006b89e63d8d73775f2baadcd13807c78f35727ea7024c6458f4408a0",
+    "lines": 654
+  },
+  "operations": [
+    {
+      "original_start": 121,
+      "original_end": 121,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "    bool                    ExternalMouseDisplay; // SDL owner supplies events/display; render thread only translates.\n"
+      ]
+    },
+    {
+      "original_start": 390,
+      "original_end": 391,
+      "original_sha256": "a265f423c8c1ebd729ae0a0cec1125dadd0e7e1246704afabcb79c92cf008cd1",
+      "replacement_lines": [
+        "static bool ImGui_ImplSDL2_Init(SDL_Window* window, SDL_Renderer* renderer, bool external_mouse_display = false)\n"
+      ]
+    },
+    {
+      "original_start": 399,
+      "original_end": 400,
+      "original_sha256": "296e32b7a1c9f48b35eefe71369eca48ae51fb4e205c1459fb3d84280a670c84",
+      "replacement_lines": [
+        "    const char* sdl_backend = external_mouse_display ? nullptr : SDL_GetCurrentVideoDriver();\n"
+      ]
+    },
+    {
+      "original_start": 402,
+      "original_end": 403,
+      "original_sha256": "57a5b4e6b402f62533260bc550605ce7ed338b37268b80b50e43a68abdf96efd",
+      "replacement_lines": [
+        "        if (sdl_backend && strncmp(sdl_backend, global_mouse_whitelist[n], strlen(global_mouse_whitelist[n])) == 0)\n"
+      ]
+    },
+    {
+      "original_start": 410,
+      "original_end": 412,
+      "original_sha256": "bcb447f72931e4b9f9a10b410810facf2fec0d6b4042dba204ca9ac201e65e57",
+      "replacement_lines": [
+        "    if (!external_mouse_display) io.BackendFlags |= ImGuiBackendFlags_HasMouseCursors;       // We can honor GetMouseCursor() values (optional)\n",
+        "    if (!external_mouse_display) io.BackendFlags |= ImGuiBackendFlags_HasSetMousePos;        // We can honor io.WantSetMousePos requests (optional, rarely used)\n"
+      ]
+    },
+    {
+      "original_start": 416,
+      "original_end": 416,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "    bd->ExternalMouseDisplay = external_mouse_display;\n",
+        "    if (external_mouse_display)\n",
+        "    {\n",
+        "        io.BackendFlags &= ~(ImGuiBackendFlags_HasMouseCursors | ImGuiBackendFlags_HasSetMousePos);\n",
+        "        io.SetClipboardTextFn = nullptr;\n",
+        "        io.GetClipboardTextFn = nullptr;\n",
+        "        io.SetPlatformImeDataFn = nullptr;\n",
+        "        io.ClipboardUserData = nullptr;\n",
+        "        return true;\n",
+        "    }\n",
+        "\n"
+      ]
+    },
+    {
+      "original_start": 509,
+      "original_end": 509,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "bool ImGui_ImplSDL2_InitForOther(SDL_Window* window, bool external_mouse_display)\n",
+        "{\n",
+        "    return ImGui_ImplSDL2_Init(window, nullptr, external_mouse_display);\n",
+        "}\n",
+        "\n"
+      ]
+    },
+    {
+      "original_start": 517,
+      "original_end": 519,
+      "original_sha256": "b52c0196de2c935adc97957b1d221899d7807f74043a33c2921fab496d188dd3",
+      "replacement_lines": [
+        "    if (!bd->ExternalMouseDisplay)\n",
+        "        for (ImGuiMouseCursor cursor_n = 0; cursor_n < ImGuiMouseCursor_COUNT; cursor_n++)\n",
+        "            SDL_FreeCursor(bd->MouseCursors[cursor_n]);\n"
+      ]
+    },
+    {
+      "original_start": 589,
+      "original_end": 602,
+      "original_sha256": "f3f209fb8b7d3f001d3cda2856fc5d7ccc509674d1de01a864d6b3b4fa856f32",
+      "replacement_lines": [
+        "    if (!bd->ExternalMouseDisplay)\n",
+        "    {\n",
+        "        // Setup display size (every frame to accommodate for window resizing)\n",
+        "        int w, h;\n",
+        "        int display_w, display_h;\n",
+        "        SDL_GetWindowSize(bd->Window, &w, &h);\n",
+        "        if (SDL_GetWindowFlags(bd->Window) & SDL_WINDOW_MINIMIZED)\n",
+        "            w = h = 0;\n",
+        "        if (bd->Renderer != nullptr)\n",
+        "            SDL_GetRendererOutputSize(bd->Renderer, &display_w, &display_h);\n",
+        "        else\n",
+        "            SDL_GL_GetDrawableSize(bd->Window, &display_w, &display_h);\n",
+        "        io.DisplaySize = ImVec2((float)w, (float)h);\n",
+        "        if (w > 0 && h > 0)\n",
+        "            io.DisplayFramebufferScale = ImVec2((float)display_w / w, (float)display_h / h);\n",
+        "    }\n"
+      ]
+    },
+    {
+      "original_start": 619,
+      "original_end": 621,
+      "original_sha256": "c34b2749fb79bb9e69f56429b43d456a543143121409168bbcd5cb6379224cdf",
+      "replacement_lines": [
+        "    if (!bd->ExternalMouseDisplay)\n",
+        "    {\n",
+        "        ImGui_ImplSDL2_UpdateMouseData();\n",
+        "        ImGui_ImplSDL2_UpdateMouseCursor();\n",
+        "    }\n"
+      ]
+    }
+  ]
+}
