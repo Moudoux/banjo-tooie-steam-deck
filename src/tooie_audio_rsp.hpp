@@ -11,7 +11,7 @@ struct Recognition {
     bool supported;
     std::string reason;
 };
-// Read-only verification against original-ROM-derived comparison identities.
+// Read-only verification against original-ROM-derived size/guest-order SHA-256 identities.
 // rdram points to the runtime's word-swapped, original 8 MiB accessible memory.
 Recognition recognize_task(const uint8_t* rdram, const OSTask* task);
 // A pure description of the two translated IMEM permutations; -1 rejects an

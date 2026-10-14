@@ -29,11 +29,11 @@ def main():
         core+=block
     if core!=decomp[0x1E29B60:0x1E29B60+len(core)]:raise RuntimeError('original/decompressed core1 mismatch')
     out.mkdir(parents=True,exist_ok=True);evidence.mkdir(parents=True,exist_ok=True);identities={}
-    header=['// Generated from the local user-owned ROM; do not commit.','#pragma once','#include <array>','#include <cstdint>','namespace tooie::audio_rsp::identity {']
+    # Sizes and SHA-256 identities only; the ROM-derived bytes never enter the executable.
+    header=['// Generated from the local user-owned ROM; do not commit.','#pragma once','#include <cstddef>','namespace tooie::audio_rsp::identity {']
     for name,offset,size,vram in [('code',0x1E4F3B0,0x17D0,0x80037880),('data',0x1E59B40,0x740,0x80042010),('boot',0x1E50B80,0xD0,0x80039050)]:
         data=core[offset-0x1E29B60:offset-0x1E29B60+size];identities[name]=dict(decompressed_rom_offset=hex(offset),size=size,guest_symbol=hex(vram),sha256=sha(data))
-        header += [f'inline constexpr char {name}_sha256[] = "{sha(data)}";',f'inline constexpr std::array<uint8_t, {size}> {name} = {{']
-        header += ['    '+', '.join(f'0x{x:02x}' for x in data[i:i+16])+',' for i in range(0,size,16)];header.append('};')
+        header += [f'inline constexpr char {name}_sha256[] = "{sha(data)}";',f'inline constexpr std::size_t {name}_size = {size:#x};']
     header.append('}');(out/'audio_identity.hpp').write_text('\n'.join(header)+'\n')
     config={'text_offset':0x1E4F3B0,'text_size':0xF80,'text_address':0x04001080,'rom_file_path':str(a.decompressed_rom.resolve()),
         'output_file_path':str(out/'tooie_audio_rsp_generated.cpp'),'output_function_name':'tooie_n_aspMain_mission',

@@ -34,18 +34,18 @@ bool range(uint32_t address, size_t count) {
     const uint32_t physical = address & 0x1FFFFFFFu;
     return (address & 7) == 0 && physical < rdram_size && count <= rdram_size - physical;
 }
-template<size_t N>
-bool matches(const uint8_t* rdram, uint32_t address, const std::array<uint8_t, N>& expected) {
-    if (!range(address, N)) return false;
-    const uint32_t physical = address & 0x1FFFFFFFu;
-    for (size_t i = 0; i < N; ++i) if (rdram[(physical + i) ^ 3] != expected[i]) return false;
-    return true;
-}
 std::string guest_sha256(const uint8_t* rdram, uint32_t address, size_t size) {
     std::vector<uint8_t> canonical(size);
     const uint32_t physical = address & 0x1FFFFFFFu;
     for (size_t i = 0; i < size; ++i) canonical[i] = rdram[(physical + i) ^ 3];
     return platform::digest(canonical, true);
+}
+// Identity is size plus guest-order SHA-256; the ROM-derived bytes are never embedded.
+static_assert(identity::code_size == 0x17D0 && identity::data_size == 0x740 && identity::boot_size == 0xD0,
+    "audio identity extents differ from the core1 n_aspMain code/data/boot ranges");
+bool matches(const uint8_t* rdram, uint32_t address, size_t size, const char* expected_sha256) {
+    if (!range(address, size)) return false;
+    return guest_sha256(rdram, address, size) == expected_sha256;
 }
 void log(const char* event, const nlohmann::json& data) {
     if (logger) logger(event, data);
@@ -146,9 +146,9 @@ Recognition recognize_task(const uint8_t* rdram, const OSTask* task) {
     const auto recognition = task_shape(task);
     if (!recognition.supported) return recognition;
     const auto& t = task->t;
-    if (!matches(rdram, t.ucode, identity::code)) return {false, "unknown audio microcode or overlay bytes"};
-    if (!matches(rdram, t.ucode_data, identity::data)) return {false, "unknown audio microcode data"};
-    if (!matches(rdram, t.ucode_boot, identity::boot)) return {false, "unknown RSP boot bytes"};
+    if (!matches(rdram, t.ucode, identity::code_size, identity::code_sha256)) return {false, "unknown audio microcode or overlay bytes"};
+    if (!matches(rdram, t.ucode_data, identity::data_size, identity::data_sha256)) return {false, "unknown audio microcode data"};
+    if (!matches(rdram, t.ucode_boot, identity::boot_size, identity::boot_sha256)) return {false, "unknown RSP boot bytes"};
     return {true, "Tooie NTSC-U n_aspMain with both known overlays"};
 }
 int overlay_index(uint32_t imem, uint32_t offset, uint32_t length) noexcept {
