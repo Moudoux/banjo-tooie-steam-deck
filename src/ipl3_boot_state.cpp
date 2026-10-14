@@ -1,8 +1,10 @@
 #include "ipl3_boot_state.hpp"
 #include "ipl3_shape.hpp"
+#include "platform_support.hpp"
 #include <array>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace tooie::boot {
 ScatterReport apply_ipl3_scatter(std::span<const uint8_t> rom, std::span<uint8_t> rdram) {
@@ -14,9 +16,13 @@ ScatterReport apply_ipl3_scatter(std::span<const uint8_t> rom, std::span<uint8_t
     // Narrow equivalent of the original pre-entry DMA chain, not an IPL3
     // interpreter. Pin its producer instructions; the application separately
     // verifies the entire original ROM identity before this function is called.
-    // Instruction words are generated locally from the validated user ROM.
-    for(auto [offset,instruction]:detail::ipl3_shape)
-        if(word(offset)!=instruction) throw std::runtime_error("IPL3: changed scatter producer instructions");
+    // Offsets plus the SHA-256 of their big-endian ROM words; no instruction bytes are embedded.
+    std::vector<uint8_t> shape;
+    shape.reserve(detail::ipl3_shape_offsets.size()*4);
+    for(uint32_t offset:detail::ipl3_shape_offsets)
+        shape.insert(shape.end(),rom.begin()+offset,rom.begin()+offset+4);
+    if(platform::digest(shape,true)!=detail::ipl3_shape_sha256)
+        throw std::runtime_error("IPL3: changed scatter producer instructions");
 
     // CPU copies ROM554..887 to physical4..337. The original RSP bootstrap
     // reads physical1E8..3D7 into IMEM1120..130F. The scatter consumes only

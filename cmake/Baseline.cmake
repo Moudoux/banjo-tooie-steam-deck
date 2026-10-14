@@ -456,6 +456,9 @@ if(TOOIE_BASELINE_VI_CONTROLLER_CYCLE)
     endif()
     # Configure identity only: adapters.cpp checks this SHA-256 over guest-order memory; the bytes are never embedded.
     target_sources(TooieBaseline PRIVATE src/ipl3_boot_state.cpp)
+    if(NOT TOOIE_BASELINE_VI_CONTROLLER_CYCLE AND NOT TOOIE_BASELINE_CORE1_PUBLICATION)
+        target_sources(TooieBaseline PRIVATE src/platform_support.cpp)
+    endif()
     file(SHA256 "${CMAKE_SOURCE_DIR}/src/si_adapter.cpp" _baseline_si_cpp_sha)
     file(SHA256 "${CMAKE_SOURCE_DIR}/src/si_adapter.hpp" _baseline_si_hpp_sha)
     if(NOT _baseline_si_cpp_sha STREQUAL "20f8c0f51edf53360b41630bc6c901e87ffcef42bc9a09948444a7abe682d806" OR
