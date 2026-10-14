@@ -218,7 +218,12 @@ int main(int argc, char** argv) {
         // Game identity and the unmodified raw entry/registry are supported startup inputs.
         const recomp::GameEntry game{
             .rom_hash = 0x00F70DE5F2D70EA2,
-            .internal_name = "BANJO TOOIE", .display_name = "Banjo-Tooie baseline",
+            .internal_name = "BANJO TOOIE",
+#ifdef BASELINE_PLAYER
+            .display_name = "Banjo-Tooie: Encore",
+#else
+            .display_name = "Banjo-Tooie baseline",
+#endif
             .game_id = u8"bt.n64.us.1.0", .mod_game_id = "",
             .save_type = recomp::SaveType::Eep16k, .thumbnail_bytes = {}, .is_enabled = true,
             .decompression_routine = nullptr, .has_compressed_code = true,
