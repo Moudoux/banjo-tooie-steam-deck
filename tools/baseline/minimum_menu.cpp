@@ -37,13 +37,15 @@ void controls(const Snapshot& snapshot) {
     }
     static int device=0;
     ImGui::Combo("Binding type",&device,"Keyboard\0Controller\0");
+    const bool capturable=device==0 || std::any_of(snapshot.controllers.begin(),snapshot.controllers.end(),[](const auto& pad){return pad.selected;});
+    if(!capturable)ImGui::TextUnformatted("Connect or select a controller to change its bindings.");
     if(snapshot.capture.active) {
-        ImGui::TextUnformatted(snapshot.capture.arming?"Release the controls, then press a new binding.":"Press the new binding.");
+        ImGui::TextUnformatted(snapshot.capture.arming?"Release the controls, then press a new binding. Escape cancels.":"Press the new binding. Escape cancels.");
         ImGui::Text("%d seconds remaining",snapshot.capture.remaining_seconds);
         if(ImGui::Button("Cancel binding")){Request r;r.kind=RequestKind::CancelCapture;enqueue(std::move(r));}
     }
     if(ImGui::BeginTable("bindings",3,ImGuiTableFlags_Borders|ImGuiTableFlags_RowBg|ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Action");ImGui::TableSetupColumn("Primary");ImGui::TableSetupColumn("Secondary");ImGui::TableHeadersRow();
+        ImGui::TableSetupColumn("Action",ImGuiTableColumnFlags_WidthFixed);ImGui::TableSetupColumn("Primary",ImGuiTableColumnFlags_WidthStretch,1.f);ImGui::TableSetupColumn("Secondary",ImGuiTableColumnFlags_WidthStretch,1.f);ImGui::TableHeadersRow();
         for(unsigned action=0;action<snapshot.bindings.size();++action) {
             const auto& row=snapshot.bindings[action];ImGui::PushID(int(action));ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);ImGui::TextUnformatted(row.action.c_str());
@@ -56,10 +58,12 @@ void controls(const Snapshot& snapshot) {
                     if(!label.empty())label+=" / ";
                     label+=binding;
                 }
-                if(ImGui::Button(label.empty()?"Unbound":label.c_str(),ImVec2(-1,0))) {
+                ImGui::BeginDisabled(!capturable);
+                if(ImGui::Button(label.empty()?"Unbound":label.c_str(),ImVec2(-1,0)) && capturable) {
                     Request r;r.kind=RequestKind::Capture;r.action=tooie::input::Action(action);
                     r.device=device==0?tooie::input::Device::Keyboard:tooie::input::Device::Button;r.slot=slot;enqueue(std::move(r));
                 }
+                ImGui::EndDisabled();
                 ImGui::PopID();
             }
             ImGui::PopID();

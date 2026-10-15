@@ -81,8 +81,13 @@ settings**. **Resume** returns to the game and **Quit** exits.
 - **Controller profile** and **Binding type** (keyboard or controller). The
   controller view lists buttons and stick/trigger directions together.
 - To rebind, select an action's **Primary** or **Secondary** binding, release
-  all controls, then press the new input. **Cancel binding** stops a capture;
+  all controls, then press the new input before the countdown ends. Press
+  Escape or click **Cancel binding** to stop a capture and keep the old binding.
+  A controller cannot cancel: during a controller capture any press becomes the
+  new binding. With only a controller, wait for the countdown to end.
   **Reset bindings** restores the defaults.
+- Controller bindings can be changed only while a controller is selected;
+  otherwise the menu says **Connect or select a controller to change its bindings.**
 
 **Video**
 
