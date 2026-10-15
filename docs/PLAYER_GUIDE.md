@@ -29,7 +29,6 @@ file does not convert it. To check a file in PowerShell:
 ## Profile, saves and logs
 
 Saves, settings, logs and a copy of your ROM are kept in `%LOCALAPPDATA%\BanjoTooieEncore`.
-This folder name is retained from Alpha 4; no save migration is needed.
 Ordinary game saves are in its `saves` folder. Progress is kept only through
 the game's own saves. Back up the `saves` folder before switching versions.
 

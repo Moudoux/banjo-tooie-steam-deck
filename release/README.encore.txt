@@ -15,7 +15,6 @@ START
 
 SAVES AND SETTINGS
 Stored in %LOCALAPPDATA%\BanjoTooieEncore
-This existing folder name is retained so Alpha 4 progress stays available.
 If that folder has no game save yet and an Alpha 3 save is found in
 %LOCALAPPDATA%\BanjoTooieRecompiled\saves, you are asked once whether to
 copy it. The Alpha 3 save is never changed.

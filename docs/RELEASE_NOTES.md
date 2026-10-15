@@ -5,17 +5,13 @@
 - Fixed: Project name in the executable, dialogs and package. Run
   `BanjoTooieScurvyDogPort.exe`.
 
-The save folder remains `%LOCALAPPDATA%\BanjoTooieEncore`; no migration is
-needed. This release changes naming only.
+Saves and settings stay in the Alpha 4 profile folder; no migration is needed.
+This release changes naming only.
 
 ## 0.1.0-alpha.4
 
 - Changed: The player build now uses a new engine based on the recompiled
   original game code with a selected set of patches.
-- Changed: This release shipped with the incorrect name Banjo-Tooie: Encore,
-  corrected in Alpha 4.1. Its program is
-  `BanjoTooieEncore.exe`, and saves and settings are in
-  `%LOCALAPPDATA%\BanjoTooieEncore`.
 - Added: On first launch, a file picker asks for your ROM.
 - Added: One-time offer to copy an existing Alpha 3 save; the original is
   never changed.

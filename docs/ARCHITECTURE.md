@@ -172,10 +172,6 @@ The supported player is the `windows-encore` preset in [CMakePresets.json](../CM
 
 [CMakeLists.txt](../CMakeLists.txt) then includes [cmake/Baseline.cmake](../cmake/Baseline.cmake) and calls `return()`. Everything after that `return()` belongs to the old engine (`TooieRecompiled`). The player does not build it.
 
-`windows-encore` is a leftover internal preset spelling. It is not the project name, and saves do not depend on it.
-
-The profile folder `%LOCALAPPDATA%\BanjoTooieEncore` is a separate name. It stays stable so that existing saves keep working ([player_startup.cpp](../tools/baseline/player_startup.cpp), `product_folder`).
-
 | Layer | Where | Status |
 |---|---|---|
 | Player shell and host | `tools/baseline/main.cpp`, `player_startup.cpp`, `devices.cpp`, `minimum_*.cpp`, `adapters.cpp` | Selected |

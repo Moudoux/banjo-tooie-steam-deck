@@ -238,12 +238,12 @@ Microsoft Visual C++ x64 runtime.
 
 ## 7. Run a local test
 
-Started without arguments, the player uses the real profile in
-`%LOCALAPPDATA%\BanjoTooieEncore` and may offer to import an Alpha 3 save. For
-testing, use a separate profile instead:
+Started without arguments, the player uses your real player profile (see the
+[player guide](PLAYER_GUIDE.md#profile-saves-and-logs)) and may offer to import
+an Alpha 3 save. For testing, use a separate profile instead:
 
 ```powershell
-.\build\windows-dev\baseline\player-bin\BanjoTooieScurvyDogPort.exe --profile-dir build\encore-test-profile --rom baserom.us.z64
+.\build\windows-dev\baseline\player-bin\BanjoTooieScurvyDogPort.exe --profile-dir build\test-profile --rom baserom.us.z64
 ```
 
 The profile folder must be new, empty or an existing Scurvy Dog Port profile. Its
