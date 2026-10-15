@@ -58,6 +58,16 @@ void func_800DE448(uint8_t*, recomp_context*);
 namespace candidate {
 void func_800DE448(uint8_t*, recomp_context*);
 #ifdef TOOIE_PLAYER_STATE_ADDRESS
+void tooie_npc665_end_body(uint8_t*, recomp_context*);
+void tooie_cpu625_retire(uint8_t*, recomp_context*);
+void tooie_backpack621_retire(uint8_t*, recomp_context*);
+#ifdef TOOIE_NPC665_FIXTURE
+// Preserve the native checked-end contract using the exact selected guest body.
+void baseline_npc665_end_checked(uint8_t* rdram, recomp_context* ctx) {
+    tooie_npc665_end_body(rdram, ctx);
+    if(ctx->r2) throw std::runtime_error("NPC665 guest paid-close ownership tripwire");
+}
+#endif
 void tooie_player_begin(uint8_t*, recomp_context*);
 void tooie_player_bone_push(uint8_t*, recomp_context*);
 void tooie_player_bone_pop(uint8_t*, recomp_context*);
@@ -76,7 +86,9 @@ constexpr uint32_t actor=0x80111214, rotation=0x80212224, extra=0x80313234;
 constexpr uint32_t buffers=0x80414244, returned=0x80515254, model=0x80616264;
 constexpr uint32_t descriptor0=0x80717274, descriptor1=0x80718284;
 constexpr uint32_t descriptor2=0x80719294, descriptor3=0x8071A2A4;
-constexpr uint32_t callback=0x8071B2B4, stack=0x80818280, guard=512;
+constexpr uint32_t callback=0x8071B2B4, stack=0x80F00000, guard=512;
+static_assert(stack-guard>=0x80000000u && stack+32u<=0x81000000u,
+    "fixture stack/canaries fit guest RDRAM");
 constexpr uint32_t first_scale=0x41234567, second_scale=0xC2345678;
 constexpr uint32_t third_scale=0x43345679, position_mutation=0xA1B2C3D4;
 static_assert(TOOIE_DRAW_101808_FRAME_BYTES>0 && TOOIE_DRAW_DE448_FRAME_BYTES>0 &&
@@ -91,6 +103,8 @@ constexpr uint32_t player_component=0x80221000, player_pose=0x80222000;
 constexpr uint32_t player_dispatch=0x80223000, player_model=0x80617000;
 constexpr uint32_t player_pool=0x80300000, player_cursor=player_pool+0x100;
 constexpr uint32_t state=TOOIE_PLAYER_STATE_ADDRESS;
+static_assert(stack+32u<=state || stack-guard>=state+sizeof(TooieRenderBridgeState),
+    "fixture stack/canaries are disjoint from bridge globals");
 constexpr uint32_t pc=state+offsetof(TooieRenderBridgeState,player);
 int player_case=-1;
 static_assert(TOOIE_DRAW_DE448_FRAME_BYTES+TOOIE_PLAYER_BEGIN_FRAME_BYTES<guard &&

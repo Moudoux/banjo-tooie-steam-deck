@@ -46,8 +46,9 @@ def relocations(elf):
             and sec.name in {'.rel.recomp_patch', '.rel.text.silo_preflight', '.rel.silo_helper', '.rel.text.player_boundary', '.rel.player_helper', '.rel.text.actor_palette', '.rel.actor_helper'} for r in sec.iter_relocations()]
 
 
-def compile_objects(root, output, run, cpu_root=False, cpu625=False, lifecycle_only=False, npc665=False, shared=False, backpack621=False, honey_reference=HONEY_REFERENCE):
-    assert all(type(x) is bool for x in (cpu_root,cpu625,lifecycle_only,npc665,shared,backpack621))
+def compile_objects(root, output, run, cpu_root=False, cpu625=False, lifecycle_only=False, npc665=False, shared=False, backpack621=False, hand862=False, honey_reference=HONEY_REFERENCE):
+    assert all(type(x) is bool for x in (cpu_root,cpu625,lifecycle_only,npc665,shared,backpack621,hand862))
+    assert not hand862 or (cpu_root and backpack621), 'Hand862 is compiled only into the selected actor-palette 621 composition'
     assert honey_reference is None or type(honey_reference) is str
     source = root/'tools/baseline/guest/silo-candidate'
     compiler = root/'deps/LLVM-19.1.3-Windows-X64/bin/clang.exe'
@@ -96,7 +97,7 @@ def compile_objects(root, output, run, cpu_root=False, cpu625=False, lifecycle_o
         expected_imports['lifecycle'].add('tooie_backpack621_retire')
     for name, (filename, definitions) in owners.items():
         obj = output/(name+'.o')
-        command=flags+(['-DTOOIE_ACTOR_PALETTE='+str(int(cpu_root))] if name in ('actor','pair') else [])+(['-fno-jump-tables'] if name=='actor' else [])+['-c',win(source/filename),'-o',win(obj)]
+        command=flags+(['-DTOOIE_ACTOR_PALETTE='+str(int(cpu_root))] if name in ('actor','pair') else [])+(['-fno-jump-tables'] if name=='actor' else [])+(['-DTOOIE_HAND862=1'] if name=='actor' and hand862 else [])+['-c',win(source/filename),'-o',win(obj)]
         run(command, name+'-compile.log')
         with obj.open('rb') as stream:
             elf = ELFFile(stream); syms = symbols(elf)

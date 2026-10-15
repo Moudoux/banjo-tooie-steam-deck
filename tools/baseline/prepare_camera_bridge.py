@@ -447,7 +447,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
          assert not any((w>>26 in [15,32,33,35,36,37,40,41,43]) and ((w>>16&31)==28 if w>>26==15 else (w>>21&31)==28) for w in words), 'Compiled demo helper GP dependency'
       defs+=defined;objects[name]={'sha256':h(out/(name+'.o')),'definitions':defined,'imports':sorted(imports),'allocated_sections':sections,'compile_argv':[str(x) for x in command],'frames':frames}
     demo=None;shadow=None;pre=None;cpu=None;host=None;npc=None;backpack=None
-    selected_shared=held.compile_objects(root,out,run,cpu_root=actor_palette,cpu625=cpu625,npc665=npc665,shared=True,backpack621=backpack621)
+    selected_shared=held.compile_objects(root,out,run,cpu_root=actor_palette,cpu625=cpu625,npc665=npc665,shared=True,backpack621=backpack621,hand862=backpack621 and shadow_coefficients)
     lifecycle=selected_shared['lifecycle']
     if not npc665:
         for name in ('player','silo')+(() if backpack621 else ('bone','leaf')):

@@ -13,6 +13,9 @@ def extract(source: str, function: str = "heap_realloc") -> str:
                         "func_800EBED4", "func_8010A79C", "func_800A7840", "func_800E42F0", "func_800DCF48", "func_800DD998",
                         "func_80101808", "func_800DE448", "func_800DE498", "func_80092234", "func_80092898", "func_800F3880",
                         "tooie_actor_palette_begin", "tooie_actor_palette_end",
+                        "tooie_npc665_end_body", "tooie_cpu625_retire", "tooie_backpack621_retire",
+                        "tooie_backpack621_leaf_begin", "tooie_backpack621_leaf_end",
+                        "tooie_npc665_leaf_begin", "tooie_npc665_leaf_end",
                         "tooie_camera_construction_begin", "tooie_camera_construction_end", "tooie_camera_de498_ignore",
                         "func_8008B10C", "anctrl_setSmoothTransition", "tooie_silo_preflight", "tooie_player_begin", "tooie_player_end", "tooie_player_bone_push", "tooie_player_bone_pop", "tooie_player_leaf_begin", "tooie_player_leaf_end"):
         raise RuntimeError("unsupported focused fixture function")

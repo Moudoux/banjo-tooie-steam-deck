@@ -971,8 +971,8 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                 # Installed only after actual fullgraph/control/source/ELF acceptance.
                 set(_baseline_expected_image "d77f234a46e3976da068429e411bac68496d9aedff520e727c983491725aa0e2")
                 if(_baseline_shadow_coefficients STREQUAL "ON")
-                    # Same composition; only shadow_projection.o differs (TOOIE_SHADOW_COEFFICIENTS=1).
-                    set(_baseline_expected_image "7ec531fab27e02e3b0a46473dba78109dd6144f61230470fe3c12e59db6188ed")
+                    # Same composition; shadow_projection.o (TOOIE_SHADOW_COEFFICIENTS=1) and actor.o (TOOIE_HAND862=1) differ.
+                    set(_baseline_expected_image "197ff89208ef8df1e65a4ab74b1575a09049382e4858e736b54b7175e5f0c15c")
                 endif()
                 string(JSON _baseline_raw_b621_type TYPE "${_baseline_raw_binding}" backpack621)
                 string(JSON _baseline_raw_b621 GET "${_baseline_raw_binding}" backpack621)
@@ -1107,6 +1107,15 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
     if(TOOIE_BASELINE_SILO_CANDIDATE)
         list(APPEND _baseline_draw_fixture_functions tooie_player_begin tooie_player_bone_push tooie_player_bone_pop tooie_player_end func_80092898 func_800F3880)
     endif()
+    if(TOOIE_BASELINE_NPC665)
+        list(APPEND _baseline_draw_fixture_functions tooie_npc665_end_body)
+    endif()
+    if(TOOIE_BASELINE_CPU625)
+        list(APPEND _baseline_draw_fixture_functions tooie_cpu625_retire)
+    endif()
+    if(TOOIE_BASELINE_BACKPACK621)
+        list(APPEND _baseline_draw_fixture_functions tooie_backpack621_retire)
+    endif()
     if(TOOIE_BASELINE_CAMERA_IDENTITY)
         list(APPEND _baseline_draw_fixture_functions tooie_actor_palette_begin tooie_actor_palette_end func_8008B10C anctrl_setSmoothTransition)
     endif()
@@ -1123,6 +1132,9 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
     string(JSON _baseline_draw_frame GET "${_baseline_bridge_receipt}" pair_frames func_800DE448)
     add_executable(BaselineDrawBoundariesTest EXCLUDE_FROM_ALL tests/baseline_draw_boundaries_state_test.cpp
         "${_baseline_draw_fixture}" "${_baseline_original_owner_fixture}" "${_baseline_original_draw_fixture}")
+    if(TOOIE_BASELINE_NPC665)
+        target_compile_definitions(BaselineDrawBoundariesTest PRIVATE TOOIE_NPC665_FIXTURE=1)
+    endif()
     target_include_directories(BaselineDrawBoundariesTest PRIVATE "${_baseline_bridge_dir}" "${RUNTIME_RECOMP_INCLUDE}")
     target_compile_definitions(BaselineDrawBoundariesTest PRIVATE NOMINMAX
         "TOOIE_DRAW_101808_FRAME_BYTES=${_baseline_owner_frame}" "TOOIE_DRAW_DE448_FRAME_BYTES=${_baseline_draw_frame}")
@@ -1184,6 +1196,13 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
         set(_baseline_leaf_original_fixture "${_baseline_bridge_dir}/dd998_original_fixture.inc")
         set(_baseline_leaf_candidate_fixture "${_baseline_bridge_dir}/dd998_candidate_fixture.inc")
         set(_baseline_leaf_helpers_fixture "${_baseline_bridge_dir}/player_leaf_helpers_fixture.inc")
+        set(_baseline_leaf_helpers tooie_player_bone_push tooie_player_bone_pop tooie_player_leaf_begin tooie_player_leaf_end)
+        if(TOOIE_BASELINE_NPC665)
+            list(APPEND _baseline_leaf_helpers tooie_npc665_leaf_begin tooie_npc665_leaf_end)
+        endif()
+        if(TOOIE_BASELINE_BACKPACK621)
+            list(APPEND _baseline_leaf_helpers tooie_backpack621_leaf_begin tooie_backpack621_leaf_end)
+        endif()
         add_custom_command(OUTPUT "${_baseline_leaf_original_fixture}" "${_baseline_leaf_candidate_fixture}" "${_baseline_leaf_helpers_fixture}"
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/extract_heap_realloc.py"
                 "${_baseline_original_leaf}" "${_baseline_leaf_original_fixture}" func_800DD998
@@ -1191,7 +1210,7 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                 "${TOOIE_BASELINE_BOOT_PATCH_DIR}/boot.c" "${_baseline_leaf_candidate_fixture}" func_800DD998
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/extract_heap_realloc.py"
                 "${TOOIE_BASELINE_BOOT_PATCH_DIR}/boot.c" "${_baseline_leaf_helpers_fixture}"
-                tooie_player_bone_push tooie_player_bone_pop tooie_player_leaf_begin tooie_player_leaf_end
+                ${_baseline_leaf_helpers}
             DEPENDS tests/extract_heap_realloc.py "${TOOIE_BASELINE_BOOT_PATCH_DIR}/boot.c" "${_baseline_original_leaf}" VERBATIM)
         string(JSON _baseline_leaf_frame GET "${_baseline_bridge_receipt}" leaf_frame_bytes)
         string(JSON _baseline_leaf_helper_frame GET "${_baseline_bridge_receipt}" player_frames tooie_player_leaf_begin)

@@ -8,6 +8,12 @@
 #include <vector>
 #ifdef TOOIE_PLAYER_STATE_ADDRESS
 #include "../tools/baseline/guest/silo-candidate/render_bridge.h"
+extern "C" {
+void tooie_backpack621_leaf_begin(uint8_t*, recomp_context*);
+void tooie_backpack621_leaf_end(uint8_t*, recomp_context*);
+void tooie_npc665_leaf_begin(uint8_t*, recomp_context*);
+void tooie_npc665_leaf_end(uint8_t*, recomp_context*);
+}
 #include "player_leaf_helpers_fixture.inc"
 #endif
 #ifndef TOOIE_DD998_FRAME_BYTES
@@ -99,6 +105,7 @@ Result run(const Case& test,recomp_func_t* function,unsigned frame,bool labelled
         put(rdram,state+18584,1);put(rdram,pc,1);put(rdram,pc+28,1);
         put(rdram,pc+32,0x90000000);put(rdram,pc+36,buffers);
         put(rdram,pc+40,gfx-0x100);put(rdram,pc+48,gfx-24);put(rdram,pc+96,3);
+        put(rdram,pc+88,0x62A); // Effective model has 68 poses; required by real leaf helper.
         put(rdram,0x8007BCD0,gfx-0x100);half(rdram,0x8007BEDA,0);
     }
 #endif
@@ -176,6 +183,7 @@ void hybrid_helpers() {
         put(rdram,state+8,1);put(rdram,state+16,3792);put(rdram,state+28,1);put(rdram,state+18584,1);
         put(rdram,pc,1);put(rdram,pc+28,1);put(rdram,pc+32,0x90000000);put(rdram,pc+36,buffers);
         put(rdram,pc+40,base);put(rdram,pc+48,gfx-24);put(rdram,pc+96,3);
+        put(rdram,pc+88,0x62A); // Default helper setup uses the supported 68-pose effective model.
         put(rdram,0x8007BCD0,base);half(rdram,0x8007BEDA,0);
     };
     auto call=[&](recomp_func_t* fn,uint32_t arg=0) {

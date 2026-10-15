@@ -7,6 +7,15 @@
 #if !defined(TOOIE_ACTOR_PALETTE) || (TOOIE_ACTOR_PALETTE != 0 && TOOIE_ACTOR_PALETTE != 1)
 #error Explicit boolean TOOIE_ACTOR_PALETTE selection required
 #endif
+#ifndef TOOIE_HAND862
+#define TOOIE_HAND862 0
+#endif
+#if TOOIE_HAND862 != 0 && TOOIE_HAND862 != 1
+#error Explicit boolean TOOIE_HAND862 selection required
+#endif
+#if TOOIE_HAND862 && (!TOOIE_ACTOR_PALETTE || !TOOIE_BACKPACK621)
+#error Hand862 requires the selected actor-palette 621 composition
+#endif
 #define AC SS.palette_context
 #define REFUSE(reason) do { SS.silo_last_reason=(reason); silo_count(&SS.silo_refusals); return 0; } while (0)
 extern u32 D_8012C820, D_8012C850[], D_8012CA18;
@@ -72,6 +81,116 @@ SI u32 palette_leaf(u32 model, u32 poses, u32 leaves[2]) {
     return 0;
 }
 
+#if TOOIE_HAND862
+/* Selected file-select hand (selector 862) only, under the original loader/nonmutation premise.
+ * The produced 7076-byte header-0x40 model is type10 -> type10 -> type3 with one DD024 leaf list at
+ * 264. Its 234 commands load segment-5 matrices 0..13 in order, balance 14 single pops (depth <= 5),
+ * load 33 segment-1 vertex spans in [2392,7016) only under a pushed matrix, and call only the
+ * state-only segment-3 prefixes 0x0 (ordinals 14, 218) and 0x20 (ordinal 205). Checked live on every
+ * draw like palette_leaf; no hash, cache or layout. Triangle references are not simulated. */
+#define HAND862_MODEL_BYTES 7076u
+#define HAND862_GEOMETRY 7016u
+#define HAND862_DL_SECTION 256u
+#define HAND862_LIST 264u
+#define HAND862_VERTEX 2368u
+#define HAND862_VTX_BEGIN 2392u
+#define HAND862_ANIMATION 2136u
+#define HAND862_POSES 14u
+#define HAND862_COMMANDS 234u
+#define HAND862_VERTEX_LOADS 33u
+_Static_assert(HAND862_COMMANDS <= 256u && HAND862_LIST == HAND862_DL_SECTION + 8u &&
+    HAND862_LIST + HAND862_COMMANDS * 8u == HAND862_ANIMATION &&
+    HAND862_VTX_BEGIN == HAND862_VERTEX + 0x18u &&
+    HAND862_GEOMETRY + 2u * 24u + 12u == HAND862_MODEL_BYTES, "hand862 closed source extents");
+SI u32 hand862_list(u32 model) {
+    u32 i, w, a, op, n, end, offset, depth=0, matrices=0, pops=0, vertices=0, p=model+HAND862_LIST;
+    for (i=0; i<HAND862_COMMANDS; ++i, p+=8u) {
+        w=*(volatile u32*)p; a=*(volatile u32*)(p+4u); op=w>>24;
+        if (i==HAND862_COMMANDS-1u)
+            return w==0xDF000000u && !a && !depth && matrices==HAND862_POSES &&
+                pops==HAND862_POSES && vertices==HAND862_VERTEX_LOADS;
+        if (i==14u || i==205u || i==218u) {
+            if (w!=0xDE000000u || a!=(i==205u ? 0x03000020u : 0x03000000u)) return 0;
+        } else if (op==0xDAu) {
+            if (w!=0xDA380002u || a!=0x05000000u+matrices*64u || matrices>=HAND862_POSES || depth>=5u) return 0;
+            ++matrices; ++depth;
+        } else if (op==0xD8u) {
+            if (w!=0xD8380002u || a!=64u || !depth) return 0;
+            --depth; ++pops;
+        } else if (op==0x01u) {
+            /* F3DEX2 G_VTX: n in bits 12..19, v0+n in bits 1..7, all other operand bits zero. */
+            n=(w>>12)&0xFFu; end=(w>>1)&0x7Fu; offset=a&0xFFFFFFu;
+            if ((w&0x00F00F01u) || (a>>24)!=1u || !n || n>32u || end<n || end>32u || (offset&15u) ||
+                offset+n*16u>HAND862_GEOMETRY-HAND862_VTX_BEGIN || !depth || vertices>=HAND862_VERTEX_LOADS)
+                return 0;
+            ++vertices;
+        } else if (!(op==0x05u || op==0x06u || op==0xD7u || op==0xD9u ||
+            op==0xE2u || op==0xE3u || op==0xE6u || op==0xE7u || op==0xF0u ||
+            op==0xF2u || op==0xF3u || op==0xF5u || op==0xFCu || op==0xFDu)) return 0;
+    }
+    return 0;
+}
+/* Returns 0 when admissible (REENTRY is never produced here), otherwise an existing reason. */
+SI u32 hand862_check(u32 model, u32* source_out, u32* controller_out) {
+    u32 info, table, mode, list, pose, pool, controller, input;
+    s32 handle, stride, capacity;
+    /* Every other compound-OVERRIDE operand; only the stored callback differs by design. */
+    if (*(volatile u32*)(model+0x28u) || D_8012C820 || D_8012C838 || D_8012CEC4 ||
+        D_8012C948[14] || D_8012C948[26] || D_8012C948[28]) return TOOIE_BRIDGE_OVERRIDE;
+    /* The pure hand ActorInfo getter: packed actor 4AB and resource 862; no static or slot pin. */
+    info=(u32)func_80100368((Actor*)AC.actor);
+    if (!silo_range(info,8u,3u) || *(volatile u32*)info!=0x015804ABu ||
+        *(volatile u32*)(info+4u)!=0x08620001u) return TOOIE_BRIDGE_BIRTH;
+    if (!silo_range(model,HAND862_MODEL_BYTES,7u) || *(volatile u32*)(model+4u)!=HAND862_GEOMETRY ||
+        *(volatile u32*)(model+0xCu)!=HAND862_DL_SECTION || *(volatile u32*)(model+0x10u)!=HAND862_VERTEX ||
+        *(volatile u32*)(model+0x18u)!=HAND862_ANIMATION || *(volatile u32*)(model+0x2Cu) ||
+        *(volatile s16*)(model+HAND862_ANIMATION+4u)!=(s16)HAND862_POSES ||
+        D_8012C948[6]!=model+HAND862_DL_SECTION || D_8012C948[7]!=model+HAND862_VERTEX)
+        return TOOIE_BRIDGE_MODEL_DATA;
+    /* Decoded node fields only: type, relative next and the type3 list index. */
+    if (*(volatile u32*)(model+HAND862_GEOMETRY)!=10u || *(volatile u32*)(model+HAND862_GEOMETRY+4u)!=24u ||
+        *(volatile u32*)(model+HAND862_GEOMETRY+24u)!=10u || *(volatile u32*)(model+HAND862_GEOMETRY+28u)!=24u ||
+        *(volatile u32*)(model+HAND862_GEOMETRY+48u)!=3u || *(volatile u32*)(model+HAND862_GEOMETRY+52u) ||
+        *(volatile s16*)(model+HAND862_GEOMETRY+56u)) return TOOIE_BRIDGE_MODEL_DATA;
+    table=D_8012CF8C;
+    if (!silo_range(table,13u*4u,3u) || table!=*(volatile u32*)0x80123198u ||
+        *(volatile u32*)(table+3u*4u)!=0x800DD024u || *(volatile u32*)(table+10u*4u)!=0x800DD410u)
+        return TOOIE_BRIDGE_MODEL_DATA;
+    /* Current segment-3 binding table entry; both called prefixes are SETOTHERMODE_L then ENDDL. */
+    mode=D_8012C948[56];
+    if (mode>4u) return TOOIE_BRIDGE_MODEL_DATA;
+    list=*(volatile u32*)(0x80122DC8u+mode*8u+(D_8012C948[23]==255u ? 0u : 4u));
+    if (!silo_range(list,0x30u,7u) || !silo_shared(list,0xE2u) || !silo_shared(list+0x20u,0xE2u))
+        return TOOIE_BRIDGE_MODEL_DATA;
+    /* Draw-owned C968 is converted by original AE598 after this seam. Handle zero and C840 equality
+     * restrict the analyzed layout; neither proves producer provenance nor actor/storage identity. */
+    if (*(volatile s16*)(AC.descriptor+0x10u)) return TOOIE_BRIDGE_ANIMATION;
+    pose=(u32)D_8012C968;
+    if (pose!=*(volatile u32*)0x8012C840u || !silo_range(pose,0x50u,3u) ||
+        *(volatile u32*)pose!=HAND862_POSES || *(volatile u32*)(pose+4u)<HAND862_POSES ||
+        !silo_finite(pose+0x10u,(HAND862_POSES+1u)*16u) || !silo_finite((u32)D_8012CE58,16u))
+        return TOOIE_BRIDGE_ANIMATION;
+    /* Current input class is an opaque renewal key, not proof which construction branch ran.
+     * The original null-controller scope requires zero input; positive handles retain pool checks. */
+    input=*(volatile u32*)0x8012C824u;
+    handle=*(volatile s16*)(AC.actor+0x8Cu);
+    controller=0;
+    if (handle) {
+        pool=(u32)D_80136E70;
+        if (!silo_range(pool,4u,3u)) return TOOIE_BRIDGE_ANIMATION;
+        stride=*(volatile s16*)pool; capacity=*(volatile s16*)(pool+2u);
+        if (stride<0x30 || capacity<=1 || !silo_range(pool,4u+(u32)stride*(u32)capacity,3u) ||
+            handle<=0 || handle>=capacity) return TOOIE_BRIDGE_ANIMATION;
+        controller=(u32)func_80104200((s16)handle);
+        if (controller!=pool+4u+(u32)handle*(u32)stride || !silo_range(controller,0x30u,3u))
+            return TOOIE_BRIDGE_ANIMATION;
+    } else if (input) return TOOIE_BRIDGE_ANIMATION;
+    if (!hand862_list(model)) return TOOIE_BRIDGE_MODEL_DATA;
+    *source_out=input ? 2u : 1u; *controller_out=controller;
+    return 0;
+}
+
+#endif
 PALETTE u32 tooie_actor_palette_begin(struct TooieRenderBuffers* b,
     u32* local_gfx_cursor, u32 model, u32 camera_id) {
     u32 base, current, mtxbase, mtx, pose, poses, controller=0, class_slot, actor_data;
@@ -96,6 +215,17 @@ PALETTE u32 tooie_actor_palette_begin(struct TooieRenderBuffers* b,
     if (current<SS.last_end) {
         SS.poisoned=1; silo_count(&SS.poison_count); REFUSE(TOOIE_BRIDGE_CURSOR_DROP);
     }
+#if TOOIE_HAND862
+    /* Silent family discriminator; calls were already counted once above. */
+    if (D_8012C948[24]==0x801015D0u && D_8012C948[25]==AC.actor && D_8012CA18==0x862u &&
+        silo_range(model,0x40u,7u) && *(volatile u16*)(model+10u)==0x40u) {
+        /* Hand pose is the opaque input-class key 1/2; actual C968 remains untouched. */
+        u32 hand_reason=hand862_check(model,&pose,&controller);
+        if (hand_reason) REFUSE(hand_reason);
+        poses=HAND862_POSES; role=1u; leaves[0]=HAND862_LIST; leaves[1]=0;
+        goto hand862_admit;
+    }
+#endif
     if (!silo_range(model,0x40u,7u) || *(volatile u16*)(model+10u)!=0x40u ||
         *(volatile u32*)(model+0x28u) || D_8012C820 || D_8012C838 || D_8012CEC4 ||
         D_8012C948[14] || D_8012C948[26] || D_8012C948[28] ||
@@ -144,6 +274,9 @@ PALETTE u32 tooie_actor_palette_begin(struct TooieRenderBuffers* b,
     static_list=*(volatile u32*)(0x80122DC8u+mode*8u+(D_8012C948[23]==255u ? 0u : 4u));
     if (!silo_range(static_list,0x50u,7u) || !silo_shared(static_list+0x40u,0xE2u) ||
         !silo_shared(0x80123418u,0xD9u) || !silo_shared(0x80123428u,0xD9u)) REFUSE(TOOIE_BRIDGE_MODEL_DATA);
+#if TOOIE_HAND862
+hand862_admit:
+#endif
     mtxbase=D_8007BCD8[D_8007BEDA]; mtx=(u32)b->mtx;
     if (!silo_range(mtxbase,0x12C00u,7u) || mtx<mtxbase || mtx>mtxbase+0x12C00u ||
         ((mtx-mtxbase)&63u) || mtxbase+0x12C00u-mtx<(poses+2u)*64u ||
