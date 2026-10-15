@@ -69,3 +69,11 @@ Attribute commits truthfully: name an AI agent as author only for material it
 actually wrote, and keep the person who reviewed and integrated the work as
 committer. For work shared between a person and an agent, keep the person as
 author and credit the agent with a `Co-authored-by:` trailer.
+
+For shared work, use the applicable trailers after a blank line at the end
+of the commit message. Include both only when both agents contributed:
+
+```text
+Co-authored-by: Claude <noreply@anthropic.com>
+Co-authored-by: Codex <codex@openai.com>
+```
