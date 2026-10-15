@@ -36,7 +36,7 @@ void controls(const Snapshot& snapshot) {
         ImGui::EndCombo();
     }
     static int device=0;
-    ImGui::Combo("Binding type",&device,"Keyboard\0Controller button\0Positive axis\0Negative axis\0");
+    ImGui::Combo("Binding type",&device,"Keyboard\0Controller\0");
     if(snapshot.capture.active) {
         ImGui::TextUnformatted(snapshot.capture.arming?"Release the controls, then press a new binding.":"Press the new binding.");
         ImGui::Text("%d seconds remaining",snapshot.capture.remaining_seconds);
@@ -49,7 +49,13 @@ void controls(const Snapshot& snapshot) {
             ImGui::TableSetColumnIndex(0);ImGui::TextUnformatted(row.action.c_str());
             for(unsigned slot=0;slot<2;++slot) {
                 ImGui::TableSetColumnIndex(int(slot+1));ImGui::PushID(int(slot));
-                const auto& label=device==0?row.keyboard[slot]:row.controller[(device-1)*2+slot];
+                std::string label=device==0?row.keyboard[slot]:std::string{};
+                if(device!=0)for(unsigned kind=0;kind<3;++kind) {
+                    const auto& binding=row.controller[kind*2+slot];
+                    if(binding.empty() || binding=="Unbound")continue;
+                    if(!label.empty())label+=" / ";
+                    label+=binding;
+                }
                 if(ImGui::Button(label.empty()?"Unbound":label.c_str(),ImVec2(-1,0))) {
                     Request r;r.kind=RequestKind::Capture;r.action=tooie::input::Action(action);
                     r.device=device==0?tooie::input::Device::Keyboard:tooie::input::Device::Button;r.slot=slot;enqueue(std::move(r));
@@ -68,7 +74,7 @@ void video(const Snapshot& snapshot) {
     int resolution=prefs.resolution;
     if(ImGui::SliderInt("Resolution scale",&resolution,1,8,"%dx"))preference(Preference::Resolution,resolution);
     int rate=prefs.output_rate;
-    if(ImGui::Combo("Output rate",&rate,"Current\0Original\0Display\0Manual\0"))preference(Preference::OutputRate,rate);
+    if(ImGui::Combo("Output rate",&rate,"Default (Original)\0Original\0Display\0Manual\0"))preference(Preference::OutputRate,rate);
     if(rate==3) {
         int hz=prefs.manual_hz;if(ImGui::SliderInt("Manual rate",&hz,20,360,"%d Hz"))preference(Preference::ManualHz,hz);
     }

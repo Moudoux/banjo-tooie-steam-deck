@@ -196,9 +196,16 @@ int main(int argc, char** argv) {
         const auto player_arguments = baseline::player::parse_arguments(baseline::player::command_line());
         // Unattended QA reports every later failure in the log and exit code, never a dialog.
         if (player_arguments.qa) baseline::player::set_log_only_errors();
-        const auto player_profile = baseline::player::Profile::acquire(player_arguments.profile.empty() ?
-            baseline::player::default_profile_root() : player_arguments.profile);
+        auto profile_root = player_arguments.profile;
+        std::string migration_note;
+        if (profile_root.empty()) {
+            // Normal play only: copy the Alpha 4 default profile before its successor exists.
+            profile_root = baseline::player::default_profile_root();
+            migration_note = baseline::player::migrate_profile(baseline::player::previous_profile_root(), profile_root).note;
+        }
+        const auto player_profile = baseline::player::Profile::acquire(profile_root);
         baseline::player::open_log(player_profile.root());
+        if (!migration_note.empty()) std::fprintf(stderr, "%s\n", migration_note.c_str());
         const auto options = player_options(player_arguments, player_profile.root());
 #else
         const auto options = parse(argc, argv);

@@ -352,7 +352,7 @@ if(TOOIE_BASELINE_PLAYER)
     endif()
     # Small generated identity only; build reports belong to packaging.
     set(_player_generated "${CMAKE_BINARY_DIR}/baseline/player")
-    file(CONFIGURE OUTPUT "${_player_generated}/encore_version.hpp" CONTENT [[
+    file(CONFIGURE OUTPUT "${_player_generated}/player_version.hpp" CONTENT [[
 #pragma once
 namespace baseline::player::build {
 inline constexpr char product[] = "Banjo-Tooie: Scurvy Dog Port";

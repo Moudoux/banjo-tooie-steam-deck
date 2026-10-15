@@ -14,8 +14,15 @@ START
    9ec37fba6890362eba86fb855697a9cff1519275531b172083a1a6a045483583
 
 SAVES AND SETTINGS
-Stored in %LOCALAPPDATA%\BanjoTooieEncore
-If that folder has no game save yet and an Alpha 3 save is found in
+Stored in %LOCALAPPDATA%\BanjoTooieScurvyDogPort
+The first time this version starts and that folder does not exist yet,
+your Alpha 4/4.1 save, settings, controls and stored ROM are copied from
+%LOCALAPPDATA%\BanjoTooieEncore, which is only read and stays unchanged.
+This is a one-time copy; later progress in Alpha 4/4.1 is not synchronized.
+Close Alpha 4/4.1 first. An existing BanjoTooieScurvyDogPort folder, even an
+empty one, is always used as it is. A failed or interrupted copy can leave
+an unused BanjoTooieScurvyDogPort.migrating-... folder; you can delete it.
+If your profile has no game save yet and an Alpha 3 save is found in
 %LOCALAPPDATA%\BanjoTooieRecompiled\saves, you are asked once whether to
 copy it. The Alpha 3 save is never changed.
 Alpha 3 settings and practice states are not carried over.
@@ -28,6 +35,10 @@ Keyboard:   WASD move, J = A, K = B, Space = Z, Enter = Start,
 Controller: left stick moves, A = A, B = B, Start = Start,
             left trigger = Z, left/right shoulder = L/R,
             right stick = C buttons.
+
+VIDEO
+Output rate defaults to Original. Changing the output rate takes effect the
+next time you start the game. Default (Original) is the former Current choice.
 
 KNOWN ISSUES
 - Mayahem Temple can render black in the distance.

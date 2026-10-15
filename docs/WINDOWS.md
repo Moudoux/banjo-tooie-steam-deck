@@ -21,7 +21,7 @@ re-run end to end on a fresh machine. Report gaps in the issue tracker.
 The raw archive holds the 417 C translation units containing the recompiled game functions. Qualification records
 exactly which compile commands, sources, headers and objects produced it.
 Every later build and the packager refuse to continue if any of them change. On
-a fresh tree, `cmake --build --preset windows-encore` therefore fails until
+a fresh tree, `cmake --build --preset windows-player` therefore fails until
 step 5 has been done.
 
 Everything generated stays in ignored folders: `deps/`, `generated/`,
@@ -121,7 +121,7 @@ policy differs from the selected player build.
 Back in the Developer PowerShell:
 
 ```powershell
-cmake --preset windows-encore
+cmake --preset windows-player
 ```
 
 Configuration does the following:
@@ -130,7 +130,7 @@ Configuration does the following:
 - prepares the patched runtime sources inside the build folder;
 - fails if step 3 is incomplete.
 
-`windows-encore` uses `build/windows-dev`, the same folder as the older
+`windows-player` uses `build/windows-dev`, the same folder as the older
 `windows-dev` preset for the retired Recompiled frontend. Do not configure both
 presets in one checkout.
 
@@ -222,7 +222,7 @@ replace an existing qualification.
 ## 6. Build the player
 
 ```powershell
-cmake --build --preset windows-encore
+cmake --build --preset windows-player
 ```
 
 This builds the `TooieBaseline` target, whose output is named
@@ -247,14 +247,14 @@ an Alpha 3 save. For testing, use a separate profile instead:
 ```
 
 The profile folder must be new, empty or an existing Scurvy Dog Port profile. Its
-`encore.log` records startup details. To test a save import into that profile,
+`player.log` records startup details. To test a save import into that profile,
 add `--import-save` with the path to a copy of a save; the import offer is not
 shown with `--profile-dir`.
 
 ## Reusing or regenerating a build
 
 - **Reuse:** after editing native source, run `cmake --build --preset
-  windows-encore` again. The gates re-check the qualified archive on every
+  windows-player` again. The gates re-check the qualified archive on every
   build. If the raw sources, their headers or the archive change, the gate
   fails, and you need a fresh build folder.
 - **Guest C edits:** changes under `tools/baseline/guest/` need steps 3–6
@@ -263,7 +263,7 @@ shown with `--profile-dir`.
   `prepare_backpack621.py` (`SHADOW_COEFFICIENTS_IMAGE_SHA256`, checked by
   `prepare_camera_bridge.py`), `prepare_camera_bridge.py` (`render_bridge.c` source hash),
   `cmake/Baseline.cmake` (`_baseline_expected_image`), and
-  `release/encore-windows-files.json` (`guest`). Preparation refuses a changed
+  `release/player-windows-files.json` (`guest`). Preparation refuses a changed
   image until those pins are deliberately updated after reviewing the change.
   Do not replace a failing pin merely to make a build pass.
 - **Regenerate on purpose:** guest preparation and qualification never
@@ -280,26 +280,26 @@ archive.
 
 ## Packaging (maintainers)
 
-`release/encore-windows-files.json` declares the following:
+`release/player-windows-files.json` declares the following:
 
 - the release version and archive name;
 - the expected build options;
 - the selected guest image;
 - the exact list of packaged files.
 
-`tools/package_encore.py` never publishes anything. It requires all of the
+`tools/package_player.py` never publishes anything. It requires all of the
 following:
 
 - a clean, committed checkout with no untracked files;
-- a build folder configured from that checkout with the `windows-encore`
+- a build folder configured from that checkout with the `windows-player`
   options;
 - unmodified dependency checkouts.
 
 ```powershell
 git status --short --untracked-files=all
-python .\tools\package_encore.py receipt
-python .\tools\package_encore.py package --output-dir dist\scurvy-dog-alpha4.1
-python .\tools\package_encore.py verify --output-dir dist\scurvy-dog-alpha4.1
+python .\tools\package_player.py receipt
+python .\tools\package_player.py package --output-dir dist\scurvy-dog-alpha4.1
+python .\tools\package_player.py verify --output-dir dist\scurvy-dog-alpha4.1
 ```
 
 The `git status` command must print nothing.
@@ -307,7 +307,7 @@ The `git status` command must print nothing.
 - **`receipt`** runs a real build of the player target, which does nothing if
   the build is already current. It confirms that the source and build options
   did not change during that build, then reruns the archive, native and
-  guest-image checks. Finally it writes `encore-build-receipt.json` in the
+  guest-image checks. Finally it writes `player-build-receipt.json` in the
   build folder. It will not replace an existing receipt unless you pass
   `--replace-receipt`; do that only after a fresh clean build.
 - **`package`** recomputes the receipt and requires it to match the saved one.
@@ -319,9 +319,9 @@ The `git status` command must print nothing.
 An output folder inside the repository must be under `dist/`. For a new
 version, update the following together:
 
-- `release/encore-windows-files.json`;
+- `release/player-windows-files.json`;
 - the `TOOIE_PLAYER_VERSION` value in the top-level CMake configuration;
-- `release/README.encore.txt` (packaged as `README.txt`).
+- `release/README.txt` (packaged as `README.txt`).
 
 ### Comparing hashes
 

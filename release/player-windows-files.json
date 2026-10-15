@@ -76,7 +76,7 @@
     {"path": "SDL2.dll", "from": "build", "source": "baseline/player-bin/SDL2.dll", "sameAsDependency": "rt64/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3/lib/x64/SDL2.dll"},
     {"path": "dxcompiler.dll", "from": "build", "source": "baseline/player-bin/dxcompiler.dll", "sameAsDependency": "rt64/src/contrib/dxc/bin/x64/dxcompiler.dll"},
     {"path": "dxil.dll", "from": "build", "source": "baseline/player-bin/dxil.dll", "sameAsDependency": "rt64/src/contrib/dxc/bin/x64/dxil.dll"},
-    {"path": "README.txt", "from": "source", "source": "release/README.encore.txt"},
+    {"path": "README.txt", "from": "source", "source": "release/README.txt"},
     {"path": "LICENSE", "from": "source"},
     {"path": "THIRD_PARTY_NOTICES.md", "from": "source"},
     {"path": "third_party/notices/concurrentqueue-BSD-header-notice.txt", "from": "source"},

@@ -2,7 +2,7 @@
 """Bind, assemble and verify the Banjo-Tooie: Scurvy Dog Port Windows ZIP; never publishes it.
 
   receipt  After a clean build of this committed checkout, run every gate and
-           write the path-free build receipt (default <build>/encore-build-receipt.json).
+           write the path-free build receipt (default <build>/player-build-receipt.json).
   package  Recompute the receipt, require it to equal the saved one, then write
            the exact-allowlist ZIP and <zip>.sha256.
   verify   Recompute the receipt and re-check an existing ZIP and checksum.
@@ -33,8 +33,8 @@ sys.path.insert(0, str(ROOT / "tools" / "baseline"))
 import verify_baseline_binding as raw_gate  # noqa: E402
 import verify_guest_binding as guest_gate  # noqa: E402
 
-ALLOWLIST = ROOT / "release" / "encore-windows-files.json"
-RECEIPT_NAME = "encore-build-receipt.json"
+ALLOWLIST = ROOT / "release" / "player-windows-files.json"
+RECEIPT_NAME = "player-build-receipt.json"
 RECEIPT_SCHEMA = "banjo-tooie-encore-build-receipt/1"
 MANIFEST = "package-manifest.json"
 MANIFEST_SCHEMA = "banjo-tooie-encore-package/1"
@@ -400,7 +400,7 @@ def main() -> int:
     parser.add_argument("mode", choices=("receipt", "package", "verify"))
     parser.add_argument("--build-dir", type=Path, default=ROOT / "build" / "windows-dev")
     parser.add_argument("--receipt", type=Path, help="Default: <build-dir>/" + RECEIPT_NAME)
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "dist" / "encore")
+    parser.add_argument("--output-dir", type=Path, default=ROOT / "dist" / "player")
     parser.add_argument("--replace-receipt", action="store_true", help="Only after a fresh clean build")
     args = parser.parse_args()
     try:

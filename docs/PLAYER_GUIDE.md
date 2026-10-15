@@ -28,17 +28,39 @@ file does not convert it. To check a file in PowerShell:
 
 ## Profile, saves and logs
 
-Saves, settings, logs and a copy of your ROM are kept in `%LOCALAPPDATA%\BanjoTooieEncore`.
-Ordinary game saves are in its `saves` folder. Progress is kept only through
-the game's own saves. Back up the `saves` folder before switching versions.
+Saves, settings, logs and a copy of your ROM are kept in
+`%LOCALAPPDATA%\BanjoTooieScurvyDogPort`. Ordinary game saves are in its
+`saves` folder. Progress is kept only through the game's own saves. Back up
+the `saves` folder before switching versions.
 
 Only one copy of the game can use the profile at a time. If the folder already
 contains files that are not a Scurvy Dog Port profile, the game explains this and
 changes nothing; move those files elsewhere and start again.
 
-Each run writes `encore.log` in the profile folder and keeps the previous run
-as `encore-previous.log`. Startup error messages say where details were
+Each run writes `player.log` in the profile folder and keeps the previous run
+as `player-previous.log`. Startup error messages say where details were
 written.
+
+### Moving from Alpha 4
+
+Alpha 4 and 4.1 kept their profile in `%LOCALAPPDATA%\BanjoTooieEncore`. The
+first time this version starts and `BanjoTooieScurvyDogPort` does not exist
+yet, it copies your save and its backup, settings and controls, stored ROM copy
+and Alpha 3 import choice from there. Logs and the RT64 cache are not copied.
+The Alpha 4 folder is only read and stays as it is. This is a one-time copy;
+progress made later in Alpha 4 or 4.1 is not synchronized with this profile.
+
+- Close Alpha 4 or 4.1 first. While it is running, the game says so and copies
+  nothing.
+- An existing `BanjoTooieScurvyDogPort` folder, even an empty one, is always
+  used as it is and nothing is copied into it.
+- If copying fails, the message says why and names a folder such as
+  `BanjoTooieScurvyDogPort.migrating-1234-1` holding what was copied so far.
+  The game never uses it; you can delete it. Starting again retries with a new
+  folder. An interrupted copy can also leave such a folder behind.
+  If copying keeps failing, report the error. To start a fresh profile instead,
+  create an empty `%LOCALAPPDATA%\BanjoTooieScurvyDogPort` folder; old progress
+  will not be copied into it, and `BanjoTooieEncore` stays unchanged.
 
 ### Bringing over an Alpha 3 save
 
@@ -56,18 +78,20 @@ settings**. **Resume** returns to the game and **Quit** exits.
 **Controls**
 
 - **Controller**: **Automatic** or a specific connected controller.
-- **Controller profile** and **Binding type** (keyboard, controller button or
-  axis direction).
+- **Controller profile** and **Binding type** (keyboard or controller). The
+  controller view lists buttons and stick/trigger directions together.
 - To rebind, select an action's **Primary** or **Secondary** binding, release
   all controls, then press the new input. **Cancel binding** stops a capture;
   **Reset bindings** restores the defaults.
 
 **Video**
 
-- **Resolution scale** (1x–8x), **Output rate** (Current, Original, Display or
+- **Resolution scale** (1x–8x), **Output rate** (Default (Original), Original, Display or
   Manual, 20–360 Hz), **Widescreen**, **Gameplay aspect**, **Cutscene aspect**
   and **VSync**.
 - Display settings except VSync take effect the next time you start the game.
+- Default (Original) uses the game's original output rate. This label replaces
+  Current; it does not change an existing output-rate choice.
 
 ## Default controls
 
@@ -95,14 +119,15 @@ settings**. **Resume** returns to the game and **Quit** exits.
 | Missing DLL | Keep the package together and install Microsoft's x64 Visual C++ Redistributable. |
 | ROM not accepted | Check the `.z64` format and the SHA-256 above. |
 | "Already using" message | Another copy of Scurvy Dog Port is running; close it. |
-| Profile folder refused | Move the unrelated files out of `%LOCALAPPDATA%\BanjoTooieEncore`. |
+| Profile folder refused | Move the unrelated files out of `%LOCALAPPDATA%\BanjoTooieScurvyDogPort`. |
 | Alpha 3 progress missing | The save is only offered while the Scurvy Dog Port profile has no save. Your Alpha 3 file is still in its original folder. |
+| Alpha 4 progress missing | It is copied only while `%LOCALAPPDATA%\BanjoTooieScurvyDogPort` does not exist. Your `BanjoTooieEncore` folder is unchanged. |
 
 ## Reporting a problem
 
 Report reproducible problems in the
 [issue tracker](https://github.com/some-scurvy-dog/banjo-tooie-scurvy-dog-port/issues).
 Include the version, Windows version, GPU and driver, controller, settings,
-where it happened and steps to reproduce. Review `encore.log` before sharing:
+where it happened and steps to reproduce. Review `player.log` before sharing:
 it can include usernames and local paths. Never upload a ROM, saves, generated
 game files, a whole profile or unreviewed logs.

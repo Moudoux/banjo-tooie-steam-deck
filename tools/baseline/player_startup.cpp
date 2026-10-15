@@ -1,7 +1,7 @@
 // Windows only: Baseline.cmake rejects other hosts.
 #define _CRT_SECURE_NO_WARNINGS
 #include "player_startup.hpp"
-#include "encore_version.hpp"
+#include "player_version.hpp"
 #include <array>
 #include <atomic>
 #include <cstdio>
@@ -22,9 +22,13 @@ namespace fs = std::filesystem;
 
 namespace baseline::player {
 namespace {
-constexpr wchar_t product_folder[] = L"BanjoTooieEncore";
+constexpr wchar_t product_folder[] = L"BanjoTooieScurvyDogPort";
+constexpr wchar_t previous_folder[] = L"BanjoTooieEncore"; // Alpha 4 default; only ever read.
 constexpr wchar_t legacy_folder[] = L"BanjoTooieRecompiled";
 constexpr wchar_t title[] = L"Banjo-Tooie: Scurvy Dog Port";
+// The runtime's stored ROM, <profile>\<game_id>.z64; the largest file a migration copies.
+constexpr wchar_t rom_name[] = L"bt.n64.us.1.0.z64";
+constexpr DWORD copy_limit = 64u << 20;
 using SaveBytes = std::array<char, save_bytes>;
 fs::path log_file;
 std::atomic<bool> log_only_errors{false};
@@ -80,14 +84,14 @@ bool read_exact(HANDLE handle, char* data, DWORD size) {
     return ReadFile(handle, &extra, 1, &bytes, nullptr) && bytes == 0;
 }
 
-bool file_equals(const fs::path& path, const SaveBytes& expected) {
+bool file_equals(const fs::path& path, std::string_view expected) {
     File file(CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
         FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
-    SaveBytes actual{};
+    std::string actual(expected.size(), '\0');
     return file && read_exact(file.handle, actual.data(), DWORD(actual.size())) && actual == expected;
 }
 
-bool write_new(const fs::path& path, const SaveBytes& bytes) {
+bool write_new(const fs::path& path, std::string_view bytes) {
     File file(CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr));
     DWORD written = 0;
     return file && WriteFile(file.handle, bytes.data(), DWORD(bytes.size()), &written, nullptr) &&
@@ -117,6 +121,72 @@ std::optional<std::uintmax_t> ordinary_size(const fs::path& path) {
         (data.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)))
         return std::nullopt;
     return (std::uintmax_t(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+}
+
+// Exclusive like the engineering ProfileLock: no sharing while the handle is held.
+HANDLE open_marker(const fs::path& root) {
+    return CreateFileW((root / marker_name).c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+}
+
+bool marker_matches(HANDLE marker, const fs::path& root) {
+    BY_HANDLE_FILE_INFORMATION info{};
+    char text[sizeof(marker_text)]{};
+    DWORD bytes = 0;
+    if (!GetFileInformationByHandle(marker, &info)) {
+        const DWORD error = GetLastError();
+        fail("The profile marker in " + utf8(root) + " could not be inspected" + windows_error(error) +
+            ". The original profile is unchanged.");
+    }
+    if (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) return false;
+    if (!ReadFile(marker, text, sizeof(text), &bytes, nullptr)) {
+        const DWORD error = GetLastError();
+        fail("The profile marker in " + utf8(root) + " could not be read" + windows_error(error) +
+            ". The original profile is unchanged.");
+    }
+    return std::string_view(text, bytes) == std::string_view(marker_text, sizeof(marker_text) - 1);
+}
+
+// Held without delete sharing, so the folder cannot be renamed or replaced
+// meanwhile. A link is opened as itself, never followed.
+HANDLE open_folder(const fs::path& path) {
+    return CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+}
+
+bool ordinary_folder(HANDLE folder, const fs::path& path) {
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (!GetFileInformationByHandle(folder, &info)) {
+        const DWORD error = GetLastError();
+        fail("The profile folder " + utf8(path) + " could not be inspected" + windows_error(error) +
+            ". The original profile is unchanged.");
+    }
+    return (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+        !(info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT);
+}
+
+// One allowlisted profile file into a new target; an absent source is skipped.
+// Shared read only: a file still open for writing is refused, and none can start
+// writing until the copy has verified. The source is never written.
+void copy_ordinary(const fs::path& source, const fs::path& target) {
+    File input(CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+    if (!input) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND) return;
+        if (error == ERROR_SHARING_VIOLATION) fail(utf8(source) + " is in use by another program");
+        fail(utf8(source) + " could not be opened" + windows_error(error));
+    }
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (!GetFileInformationByHandle(input.handle, &info) ||
+        (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)))
+        fail(utf8(source) + " is not an ordinary file");
+    if (info.nFileSizeHigh || info.nFileSizeLow > copy_limit) fail(utf8(source) + " is unexpectedly large");
+    std::string bytes(info.nFileSizeLow, '\0');
+    if (!read_exact(input.handle, bytes.data(), DWORD(bytes.size())))
+        fail(utf8(source) + " could not be read completely");
+    if (!write_new(target, bytes) || !file_equals(target, bytes))
+        fail(utf8(target) + " could not be written and verified");
 }
 
 void write_record(const fs::path& path, const std::string& text) {
@@ -193,6 +263,7 @@ Arguments parse_arguments(const std::vector<std::wstring>& arguments) {
 }
 
 fs::path default_profile_root() { return local_app_data() / product_folder; }
+fs::path previous_profile_root() { return local_app_data() / previous_folder; }
 fs::path legacy_save_path() { return local_app_data() / legacy_folder / L"saves" / save_name; }
 
 Profile::Profile(Profile&& other) noexcept
@@ -216,17 +287,10 @@ Profile Profile::acquire(const fs::path& requested) {
         fail("The profile location " + utf8(root) + " is not an ordinary folder. Rename or remove it, "
             "then start the game again. Nothing was changed.");
     const auto marker = root / marker_name;
-    // Exclusive like the engineering ProfileLock: no sharing while this process runs.
-    HANDLE handle = CreateFileW(marker.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
-        FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    HANDLE handle = open_marker(root);
     if (handle != INVALID_HANDLE_VALUE) {
         Profile profile(root, handle);
-        BY_HANDLE_FILE_INFORMATION info{};
-        char text[sizeof(marker_text)]{};
-        DWORD bytes = 0;
-        if (!GetFileInformationByHandle(handle, &info) || (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ||
-            !ReadFile(handle, text, sizeof(text), &bytes, nullptr) ||
-            std::string_view(text, bytes) != std::string_view(marker_text, sizeof(marker_text) - 1))
+        if (!marker_matches(handle, root))
             fail("The folder " + utf8(root) + " has a profile marker this version does not recognize. "
                 "Nothing was changed.");
         return profile;
@@ -261,6 +325,86 @@ Profile Profile::acquire(const fs::path& requested) {
     return Profile(root, handle);
 }
 
+Migration migrate_profile(const fs::path& previous, const fs::path& destination) {
+    const auto normal = [](const fs::path& path) {
+        const auto result = fs::absolute(path).lexically_normal();
+        return result.has_filename() ? result : result.parent_path();
+    };
+    const auto old_root = normal(previous), new_root = normal(destination);
+    const auto kept = "Nothing was copied, and your progress in " + utf8(old_root) + " is unchanged.";
+    // Any existing destination wins, even an empty one; nothing is merged into it.
+    if (GetFileAttributesW(new_root.c_str()) != INVALID_FILE_ATTRIBUTES)
+        return {Migration::DestinationExists, "player profile migration: none; " + utf8(new_root) + " exists"};
+    if (const DWORD error = GetLastError(); error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
+        fail("The profile folder " + utf8(new_root) + " could not be inspected" + windows_error(error) + ". " + kept);
+    File old_folder(open_folder(old_root));
+    if (!old_folder) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+            return {Migration::SourceMissing, "player profile migration: none; no " + utf8(old_root)};
+        fail("The earlier profile " + utf8(old_root) + " could not be opened" + windows_error(error) + ". " + kept);
+    }
+    // Only a folder the earlier version owned is copied; that version refused anything else too.
+    const Migration unrecognized{Migration::SourceUnrecognized,
+        "player profile migration: none; " + utf8(old_root) + " is not a recognized profile and was left unchanged"};
+    if (!ordinary_folder(old_folder.handle, old_root)) return unrecognized;
+    File marker(open_marker(old_root));
+    if (!marker) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_SHARING_VIOLATION) fail(in_use(old_root) + " " + kept);
+        if (error != ERROR_FILE_NOT_FOUND)
+            fail("The earlier profile " + utf8(old_root) + " could not be opened" + windows_error(error) + ". " + kept);
+        return unrecognized;
+    }
+    if (!marker_matches(marker.handle, old_root)) return unrecognized;
+    const auto old_saves = old_root / L"saves";
+    File saves(open_folder(old_saves));
+    if (!saves) {
+        const DWORD error = GetLastError();
+        if (error != ERROR_FILE_NOT_FOUND)
+            fail("The earlier saves folder " + utf8(old_saves) + " could not be opened" + windows_error(error) + ". " + kept);
+    } else if (!ordinary_folder(saves.handle, old_saves)) {
+        fail("The earlier saves location " + utf8(old_saves) + " is not an ordinary folder. " + kept);
+    }
+    // A new sibling owned by this attempt alone, never the profile folder itself.
+    // Marked only once complete; a failed attempt leaves it in place for the player.
+    fs::path stage;
+    for (unsigned attempt = 1;; ++attempt) {
+        stage = new_root;
+        stage += L".migrating-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(attempt);
+        if (CreateDirectoryW(stage.c_str(), nullptr)) break;
+        const DWORD error = GetLastError();
+        if (error != ERROR_ALREADY_EXISTS || attempt == 100)
+            fail("No folder for the copy could be created next to " + utf8(new_root) + windows_error(error) + ". " + kept);
+    }
+    try {
+        if (saves) {
+            if (!CreateDirectoryW((stage / L"saves").c_str(), nullptr))
+                fail("the saves folder could not be created" + windows_error(GetLastError()));
+            // The runtime reads <save>.bak when the save itself cannot be opened.
+            for (const auto& name : {std::wstring(save_name), std::wstring(save_name) + L".bak"})
+                copy_ordinary(old_saves / name, stage / L"saves" / name);
+        }
+        for (const wchar_t* name : {L"tooie_imgui.json", rom_name, import_record_name})
+            copy_ordinary(old_root / name, stage / name);
+        if (!write_new(stage / marker_name, {marker_text, sizeof(marker_text) - 1}))
+            fail("the profile marker could not be written");
+        // No replace flag: a destination that appeared meanwhile wins.
+        if (!MoveFileExW(stage.c_str(), new_root.c_str(), 0)) {
+            const DWORD error = GetLastError();
+            if (error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS)
+                fail(utf8(new_root) + " appeared meanwhile and was left as it is");
+            fail("the copy could not be renamed to " + utf8(new_root) + windows_error(error));
+        }
+    } catch (const std::exception& failure) {
+        fail(std::string("Your earlier profile could not be copied: ") + failure.what() + ".\n\nYour original " +
+            utf8(old_root) + " is unchanged and still holds your progress. This attempt's copy is kept, unused, in " +
+            utf8(stage) + "; you can delete it. Start the game again to retry.");
+    }
+    return {Migration::Migrated,
+        "player profile migration: copied " + utf8(old_root) + " to " + utf8(new_root) + "; the original is unchanged"};
+}
+
 ImportResult import_save(const fs::path& source, const fs::path& root) {
     const auto saves = root / L"saves";
     if (!saves_empty(saves)) return ImportResult::DestinationNotEmpty;
@@ -293,7 +437,8 @@ ImportResult import_save(const fs::path& source, const fs::path& root) {
     if (!saves_empty(saves)) return ImportResult::DestinationNotEmpty;
     const auto staging = root / L"save-import.partial";
     DeleteFileW(staging.c_str()); // An interrupted earlier copy; never a save.
-    if (!write_new(staging, bytes) || !file_equals(staging, bytes)) {
+    const std::string_view data(bytes.data(), bytes.size());
+    if (!write_new(staging, data) || !file_equals(staging, data)) {
         DeleteFileW(staging.c_str());
         fail("Your earlier save could not be copied into " + utf8(root) +
             ". Check free disk space and folder permissions. The original is unchanged.");
@@ -307,7 +452,7 @@ ImportResult import_save(const fs::path& source, const fs::path& root) {
         fail("Your earlier save could not be placed in " + utf8(saves) + windows_error(error) +
             ". The original is unchanged.");
     }
-    if (!file_equals(target, bytes)) {
+    if (!file_equals(target, data)) {
         DeleteFileW(target.c_str());
         fail("The copied save did not verify and was removed. The original is unchanged.");
     }
@@ -359,8 +504,8 @@ void prepare_saves(const Arguments& arguments, const fs::path& root) {
 }
 
 void open_log(const fs::path& root) {
-    const auto path = root / L"encore.log";
-    MoveFileExW(path.c_str(), (root / L"encore-previous.log").c_str(), MOVEFILE_REPLACE_EXISTING);
+    const auto path = root / L"player.log";
+    MoveFileExW(path.c_str(), (root / L"player-previous.log").c_str(), MOVEFILE_REPLACE_EXISTING);
     // Both streams append to one shareable file; a failure leaves startup unlogged, not blocked.
     if (!_wfreopen(path.c_str(), L"a", stderr)) return;
     std::setvbuf(stderr, nullptr, _IONBF, 0);

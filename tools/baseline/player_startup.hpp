@@ -29,7 +29,8 @@ Arguments parse_arguments(const std::vector<std::wstring>& arguments);
 // Wide command line without the executable; Unicode paths survive.
 std::vector<std::wstring> command_line();
 
-// Legacy profile marker and folder stay stable across display-name changes.
+// Compatibility identifier: the Alpha 4 marker name and bytes, so existing
+// explicit --profile-dir profiles and migrated profiles stay valid.
 inline constexpr wchar_t marker_name[] = L".encore-profile";
 inline constexpr char marker_text[] = "Banjo-Tooie: Encore profile v1\n";
 // Unchanged runtime identity: saves/<game_id>.bin, 16 Kbit EEPROM.
@@ -37,8 +38,9 @@ inline constexpr wchar_t save_name[] = L"bt.n64.us.1.0.bin";
 inline constexpr std::uintmax_t save_bytes = 2048;
 inline constexpr wchar_t import_record_name[] = L"save-import.txt";
 
-std::filesystem::path default_profile_root(); // %LOCALAPPDATA%\BanjoTooieEncore
-std::filesystem::path legacy_save_path();     // Earlier alpha default save; only ever read.
+std::filesystem::path default_profile_root();  // %LOCALAPPDATA%\BanjoTooieScurvyDogPort
+std::filesystem::path previous_profile_root(); // %LOCALAPPDATA%\BanjoTooieEncore (Alpha 4); only ever read.
+std::filesystem::path legacy_save_path();      // Earlier alpha default save; only ever read.
 
 // Exclusive owner of a marked profile for its lifetime. A missing or empty
 // folder is created and marked before anything else is written; a marked
@@ -57,6 +59,20 @@ private:
     void* handle_ = nullptr;
 };
 
+// Normal play's one-time copy of the previous default profile, made before the
+// destination is acquired. Any existing destination wins unchanged, and a
+// missing, unmarked or linked source is left alone. Otherwise the source stays
+// locked and is only read while its save, save backup, settings, stored ROM
+// and import record are verified into a new sibling folder owned by this
+// attempt. That folder is marked last and renamed to the absent destination.
+// A source in use, or any failure, throws a Failure; a failed attempt keeps
+// its folder, unused, and names it.
+struct Migration {
+    enum Outcome { DestinationExists, SourceMissing, SourceUnrecognized, Migrated } outcome;
+    std::string note; // One log line, written once the profile log is open.
+};
+Migration migrate_profile(const std::filesystem::path& previous, const std::filesystem::path& destination);
+
 enum class ImportResult { Imported, SourceMissing, WrongSize, DestinationNotEmpty };
 // Copies one ordinary save into a profile whose saves folder is absent or
 // empty. The source is only read and is held against writers until the copy
@@ -68,7 +84,7 @@ bool offer_import(const std::filesystem::path& source, const std::filesystem::pa
 // QA --import-save, otherwise the default profile's one-time offer.
 void prepare_saves(const Arguments& arguments, const std::filesystem::path& root);
 
-// Appends stdout/stderr to <profile>\encore.log, keeping one previous log.
+// Appends stdout/stderr to <profile>\player.log, keeping one previous log.
 void open_log(const std::filesystem::path& root);
 std::optional<std::filesystem::path> pick_rom(); // Empty when cancelled.
 bool ask_retry(const std::string& text);

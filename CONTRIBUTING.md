@@ -11,7 +11,7 @@ Include the Scurvy Dog Port version, Windows version, GPU and driver, controller
 relevant settings, where in the game it happened and steps to reproduce.
 Describe what you expected, what happened and whether it repeats.
 
-The game writes `encore.log` and `encore-previous.log` in its profile folder
+The game writes `player.log` and `player-previous.log` in its profile folder
 (see the [player guide](docs/PLAYER_GUIDE.md)). Logs can contain usernames and
 local paths: review and redact them before attaching. Never attach a ROM, save
 file, generated game code or data, credentials or a whole profile. If a private
@@ -40,8 +40,8 @@ source.
 Local generation uses your own supported ROM. Do not commit or attach the ROM,
 `generated/`, `deps/`, build output, profiles, saves, logs or captures.
 
-Release packages are prepared by maintainers with `tools/package_encore.py`
-from the exact file list in `release/encore-windows-files.json`. That list is
+Release packages are prepared by maintainers with `tools/package_player.py`
+from the exact file list in `release/player-windows-files.json`. That list is
 not permission to share other generated files or a build folder.
 
 ## Code, assets and attribution

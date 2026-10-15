@@ -168,7 +168,7 @@ These are open cleanup items, not finished architecture.
 
 ## What is built
 
-The supported player is the `windows-encore` preset in [CMakePresets.json](../CMakePresets.json). It sets `TOOIE_BASELINE=ON`.
+The supported player is the `windows-player` preset in [CMakePresets.json](../CMakePresets.json). It sets `TOOIE_BASELINE=ON`.
 
 [CMakeLists.txt](../CMakeLists.txt) then includes [cmake/Baseline.cmake](../cmake/Baseline.cmake) and calls `return()`. Everything after that `return()` belongs to the old engine (`TooieRecompiled`). The player does not build it.
 
@@ -186,7 +186,7 @@ The supported player is the `windows-encore` preset in [CMakePresets.json](../CM
 
 Directory names do not select anything. `silo-candidate`, `camera-candidate` and `cpu625-candidate` are historical names. Use this procedure.
 
-1. **Preset.** Read the `windows-encore` `cacheVariables` in `CMakePresets.json`. Note each `TOOIE_BASELINE_*` value.
+1. **Preset.** Read the `windows-player` `cacheVariables` in `CMakePresets.json`. Note each `TOOIE_BASELINE_*` value.
 2. **Native sources.** In `cmake/Baseline.cmake`, find each `target_sources(TooieBaseline …)`. Check the `if(...)` around it against the preset values.
 3. **Guest flags.** Read `SELECTION` in [prepare_player_guest.py](../tools/baseline/prepare_player_guest.py). It is `--actor-palette --demo-timing --shadow-fix --pre-background --cpu625 --minimum-host --npc665 --backpack621 --shadow-coefficients`.
 4. **Flags to files.** Read `prepare_image` in [prepare_camera_bridge.py](../tools/baseline/prepare_camera_bridge.py). Step 5 lists what it compiles.
@@ -247,7 +247,7 @@ tools/baseline/prepare_player_guest.py --rom … (WSL)
   ├─ prepare_silo_bridge.py       silo-candidate/*.c → Silo raw + image
   └─ prepare_render_bridge.py --camera --raw --image <SELECTION>
                                   → composition-v2/{raw/, boot.c, boot.bin, recomp_overlays.inl, *_layout.h}
-cmake --preset windows-encore     checks guest image SHA-256 7ec531fa…; composes the runtime sources
+cmake --preset windows-player     checks guest image SHA-256 7ec531fa…; composes the runtime sources
   BaselineRecompiledFuncs  ← composition-v2/raw/funcs_*.c   (raw recompiled game code)
   BaselineBootPatch        ← composition-v2/boot.c          (recompiled guest patches)
   TooieBaseline            ← boot.bin via file_to_c → register_boot_patch → recomp::overlays::register_patches
