@@ -64,3 +64,8 @@ the results. Contributors are responsible for the provenance, correctness,
 licensing and testing of their own submissions. Disclose material AI assistance
 in your pull request, and do not send AI-generated work to an upstream project
 whose policy prohibits it.
+
+Attribute commits truthfully: name an AI agent as author only for material it
+actually wrote, and keep the person who reviewed and integrated the work as
+committer. For work shared between a person and an agent, keep the person as
+author and credit the agent with a `Co-authored-by:` trailer.
