@@ -58,6 +58,10 @@ Status reconcile_aspect(RT64::SharedQueueResources& shared,uint32_t word,uint32_
 void configure_startup(RT64::Application& app) {
     const auto& prefs=latched_preferences();
     app.userConfig.resolutionMultiplier=prefs.resolution;
+#if BASELINE_PLAYER
+    // Player presentation stays independent of the engineering RenderMode and output rate.
+    app.enhancementConfig.presentation.mode=RT64::EnhancementConfiguration::Presentation::Mode::PresentEarly;
+#endif
     if(prefs.output_rate==1)app.userConfig.refreshRate=RT64::UserConfiguration::RefreshRate::Original;
     if(prefs.output_rate==2)app.userConfig.refreshRate=RT64::UserConfiguration::RefreshRate::Display;
     if(prefs.output_rate==3) {
