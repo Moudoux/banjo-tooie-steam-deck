@@ -1,8 +1,13 @@
 #include "minimum_host.hpp"
 #include "frontend_input_host.hpp"
 #include "frontend_config.hpp"
+#if BASELINE_PLAYER
+#include "player_version.hpp"
+#endif
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <ctime>
 #include <mutex>
 #include <stdexcept>
 
@@ -22,6 +27,58 @@ std::mutex request_mutex, render_mutex;
 std::deque<Request> requests;
 RenderInput render_input;
 constexpr size_t request_limit = 64, event_limit = 1024;
+#if BASELINE_PLAYER
+unsigned marker_seq = 0;
+bool marker_conflict_reported = false;
+std::string marker_toast;
+std::chrono::steady_clock::time_point marker_until{};
+
+const char* f4_owner() {
+    using namespace tooie::input;
+    for (unsigned action = 0; action <= unsigned(Action::Menu); ++action)
+        for (unsigned slot = 0; slot < 2; ++slot)
+            if (get_binding(Action(action), Device::Keyboard, BindingLayer::Base, slot).code == SDL_SCANCODE_F4)
+                return action_name(Action(action));
+    return nullptr;
+}
+void mark_issue() {
+    if (const auto* owner = f4_owner()) {
+        notice = std::string("F4 is bound to ") + owner + "; issue marker disabled.";
+        if (!marker_conflict_reported) {
+            std::fprintf(stderr, "baseline issue-marker disabled: F4 is bound to %s\n", owner);
+            std::fflush(stderr);
+            marker_conflict_reported = true;
+        }
+        return;
+    }
+    const auto now = std::time(nullptr);
+    std::tm local{}, utc{};
+    localtime_s(&local, &now); gmtime_s(&utc, &now);
+    char local_stamp[32]{}, utc_stamp[32]{}, clock_stamp[16]{};
+    std::strftime(local_stamp, sizeof(local_stamp), "%Y-%m-%d %H:%M:%S", &local);
+    std::strftime(utc_stamp, sizeof(utc_stamp), "%Y-%m-%dT%H:%M:%SZ", &utc);
+    std::strftime(clock_stamp, sizeof(clock_stamp), "%H:%M:%S", &local);
+    std::string controller = "none";
+    for (const auto& pad : tooie::input::controllers()) if (pad.selected) {
+        controller = pad.friendly_name.empty() ? pad.name : pad.friendly_name;
+        break;
+    }
+    // Keep a hardware-supplied name inside this single quoted log field/line.
+    for (auto& ch : controller) if (ch == '\r' || ch == '\n' || ch == '"' || ch == '\\') ch = '?';
+    ++marker_seq;
+    const bool saved = std::fprintf(stderr, "baseline issue-marker seq=%u local=%s utc=%s version=%s game_started=%d menu=%d "
+        "resolution=%d wide=%d native_aspect=%d cutscene_aspect=%d output_rate=%d manual_hz=%d vsync=%d fullscreen=%d controller=\"%s\"\n",
+        marker_seq, local_stamp, utc_stamp, baseline::player::build::version,
+        int(started.load(std::memory_order_acquire)), int(menu.load(std::memory_order_acquire)),
+        latched.resolution, latched.wide, latched.native_aspect, latched.cutscene_aspect,
+        selected.output_rate, selected.manual_hz, selected.vsync, selected.fullscreen, controller.c_str()) > 0 && std::fflush(stderr) == 0;
+    marker_toast = "Issue marker #" + std::to_string(marker_seq) + (saved
+        ? std::string(" saved at ") + clock_stamp + ". Send player.log."
+        : std::string(" at ") + clock_stamp + " could not be written to player.log.");
+    marker_until = std::chrono::steady_clock::now() + std::chrono::seconds(4);
+    if (notice.rfind("F4 is bound to ", 0) == 0) notice.clear();
+}
+#endif
 
 void set_menu(bool value) noexcept {
     if (value && !ready.load(std::memory_order_acquire)) {
@@ -160,6 +217,11 @@ void shutdown() noexcept {
     ready = menu = started = sticky_close = sticky_quit = overflow = false;
     previously_ready = quarantine = reported_unready = false; vsync = -1;
     output_rate.store(pack_output_rate({}), std::memory_order_release);
+#if BASELINE_PLAYER
+    marker_seq = 0; marker_conflict_reported = false;
+    marker_toast.clear(); marker_until = {};
+    if (notice.rfind("F4 is bound to ", 0) == 0) notice.clear();
+#endif
     { std::lock_guard lock(request_mutex); requests.clear(); }
     { std::lock_guard lock(render_mutex); render_input = {}; }
 }
@@ -171,6 +233,11 @@ void handle_event(const SDL_Event& event) {
         if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) focused = false;
         if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) focused = true;
     }
+#if BASELINE_PLAYER
+    if (event.type == SDL_KEYDOWN && !event.key.repeat && event.key.keysym.scancode == SDL_SCANCODE_F4 &&
+        !(event.key.keysym.mod & (KMOD_SHIFT | KMOD_ALT | KMOD_CTRL | KMOD_GUI)) && focused &&
+        !tooie::input::input_suppressed()) mark_issue();
+#endif
     tooie::input::handle_event(event);
     queue_event(event);
 }
@@ -210,6 +277,9 @@ InputPublication tick(bool gameplay) {
     snapshot->capture = tooie::input::capture_status(); snapshot->controllers = tooie::input::controllers();
     snapshot->profiles = tooie::input::controller_profiles(); snapshot->active_profile = tooie::input::active_controller_profile();
     snapshot->preferences = selected; snapshot->notice = notice;
+#if BASELINE_PLAYER
+    if (std::chrono::steady_clock::now() < marker_until) snapshot->toast = marker_toast;
+#endif
     if (const auto recovery = tooie::frontend::settings::recovery_notice(); !recovery.empty()) snapshot->notice = recovery;
     for (unsigned i = 0; i < snapshot->bindings.size(); ++i) {
         auto& row = snapshot->bindings[i]; const auto action = tooie::input::Action(i);

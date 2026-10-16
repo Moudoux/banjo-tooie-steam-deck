@@ -103,6 +103,14 @@ void video(const Snapshot& snapshot) {
 }
 }
 void draw_menu(const Snapshot& snapshot) {
+    if(!snapshot.toast.empty()) {
+        const auto* viewport=ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x+12.f,viewport->WorkPos.y+viewport->WorkSize.y-12.f),ImGuiCond_Always,ImVec2(0,1));
+        if(ImGui::Begin("##issue-marker-toast",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|
+            ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoNav|ImGuiWindowFlags_NoFocusOnAppearing|ImGuiWindowFlags_NoSavedSettings))
+            ImGui::TextUnformatted(snapshot.toast.c_str());
+        ImGui::End();
+    }
     if(!snapshot.menu)return;
     const auto* viewport=ImGui::GetMainViewport();
     const ImVec2 margin(std::min(12.f,std::max(0.f,(viewport->WorkSize.x-1.f)/2.f)),

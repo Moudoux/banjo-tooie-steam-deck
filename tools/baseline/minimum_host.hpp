@@ -49,7 +49,7 @@ struct Snapshot {
     tooie::input::CaptureStatus capture;
     std::vector<tooie::input::ControllerInfo> controllers;
     std::vector<std::string> profiles;
-    std::string active_profile, notice;
+    std::string active_profile, notice, toast;
     std::array<BindingRow, 19> bindings;
     Preferences preferences;
 };

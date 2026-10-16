@@ -1311,6 +1311,23 @@ enable_testing()
 if(TOOIE_BASELINE_PLAYER)
     add_test(NAME baseline_player_startup COMMAND BaselinePlayerStartupTest "${CMAKE_BINARY_DIR}/baseline/player-test")
     set_tests_properties(baseline_player_startup PROPERTIES TIMEOUT 30)
+    add_executable(baseline_input_host_test EXCLUDE_FROM_ALL
+        tests/baseline_input_host_test.cpp tools/baseline/minimum_host.cpp
+        src/frontend_input_preference.cpp src/frontend_config.cpp)
+    target_compile_definitions(baseline_input_host_test PRIVATE BASELINE_PLAYER=1 SDL_MAIN_HANDLED NOMINMAX)
+    target_compile_options(baseline_input_host_test PRIVATE -UNDEBUG)
+    target_compile_options(baseline_input_host_test PRIVATE "/FI${CMAKE_SOURCE_DIR}/tests/baseline_input_focus.h")
+    target_include_directories(baseline_input_host_test PRIVATE
+        "${CMAKE_SOURCE_DIR}/tools/baseline" "${CMAKE_SOURCE_DIR}/src"
+        "${_baseline_rt64}/src/contrib" "${_player_generated}" "${SDL2_INCLUDE_DIRS}")
+    target_link_libraries(baseline_input_host_test PRIVATE
+        "${SDL2_LIBRARIES}" user32 shell32 ole32 comdlg32 bcrypt winmm)
+    set_target_properties(baseline_input_host_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
+    add_custom_command(TARGET baseline_input_host_test POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_baseline_sdl}/lib/x64/SDL2.dll"
+            "$<TARGET_FILE_DIR:baseline_input_host_test>" VERBATIM)
+    add_test(NAME baseline_input_host COMMAND baseline_input_host_test)
+    set_tests_properties(baseline_input_host PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy" TIMEOUT 30)
     add_executable(baseline_output_rate_test EXCLUDE_FROM_ALL tests/baseline_output_rate_test.cpp
         tools/baseline/minimum_presentation.cpp src/widescreen.cpp)
     target_link_libraries(baseline_output_rate_test PRIVATE rt64)
