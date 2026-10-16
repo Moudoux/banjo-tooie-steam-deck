@@ -586,13 +586,87 @@ ultramodern::renderer::WindowHandle open_devices(const std::filesystem::path& ro
 #else
     constexpr const char* window_title = "Banjo-Tooie baseline";
 #endif
-    window = SDL_CreateWindow(window_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        960, 540, SDL_WINDOW_SHOWN
+    const char* required_display = std::getenv("TOOIE_REQUIRED_DISPLAY_NAME");
+    int display_index = -1;
+    SDL_Rect display_bounds{};
+    if (required_display) {
+        if (std::string_view(required_display) != "\\\\.\\DISPLAY2")
+            throw std::runtime_error("Required test display must be exact Windows DISPLAY2");
+#if defined(_WIN32)
+        struct CanonicalMonitor { HMONITOR handle=nullptr; RECT bounds{}; unsigned matches=0; bool failed=false; } canonical;
+        const auto visit = [](HMONITOR monitor, HDC, LPRECT, LPARAM opaque) -> BOOL {
+            auto& found = *reinterpret_cast<CanonicalMonitor*>(opaque);
+            MONITORINFOEXW info{}; info.cbSize=sizeof(info);
+            if (!GetMonitorInfoW(monitor,reinterpret_cast<MONITORINFO*>(&info))) { found.failed=true; return FALSE; }
+            if (std::wstring_view(info.szDevice) == L"\\\\.\\DISPLAY2") {
+                ++found.matches; found.handle=monitor; found.bounds=info.rcMonitor;
+            }
+            return TRUE;
+        };
+        if (!EnumDisplayMonitors(nullptr,nullptr,visit,reinterpret_cast<LPARAM>(&canonical)) ||
+            canonical.failed || canonical.matches != 1)
+            throw std::runtime_error("Canonical Windows DISPLAY2 unavailable or ambiguous");
+        const int count = SDL_GetNumVideoDisplays();
+        for (int i = 0; i < count; ++i) {
+            SDL_Rect bounds{};
+            if (SDL_GetDisplayBounds(i,&bounds) != 0) throw std::runtime_error("SDL display bounds unavailable");
+            if (int64_t(bounds.x)==canonical.bounds.left && int64_t(bounds.y)==canonical.bounds.top &&
+                int64_t(bounds.w)==int64_t(canonical.bounds.right)-canonical.bounds.left &&
+                int64_t(bounds.h)==int64_t(canonical.bounds.bottom)-canonical.bounds.top) {
+                if (display_index >= 0) throw std::runtime_error("Canonical DISPLAY2 SDL bounds mapping is ambiguous");
+                display_index=i; display_bounds=bounds;
+            }
+        }
+        if (display_index < 0 || display_bounds.w <= 0 || display_bounds.h <= 0)
+            throw std::runtime_error("Canonical DISPLAY2 has no exact SDL bounds mapping");
+#else
+        throw std::runtime_error("Canonical DISPLAY2 guard requires Windows");
+#endif
+    }
+    const int position = required_display ? SDL_WINDOWPOS_CENTERED_DISPLAY(display_index) : SDL_WINDOWPOS_CENTERED;
+    const int width = required_display ? std::min(960, display_bounds.w) : 960;
+    const int height = required_display ? std::min(540, display_bounds.h) : 540;
+    window = SDL_CreateWindow(window_title, position, position,
+        width, height, (required_display ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN)
 #if TOOIE_BASELINE_HOST
         | SDL_WINDOW_RESIZABLE
 #endif
         );
     if (!window) throw std::runtime_error(SDL_GetError());
+    if (required_display) {
+#if defined(_WIN32)
+        const auto verify_display = [&](const char* phase) {
+            const int actual = SDL_GetWindowDisplayIndex(window);
+            const char* name = actual >= 0 ? SDL_GetDisplayName(actual) : nullptr;
+            SDL_Rect bounds{};
+            int x=0,y=0,w=0,h=0;
+            SDL_GetWindowPosition(window,&x,&y); SDL_GetWindowSize(window,&w,&h);
+            SDL_SysWMinfo wm{}; SDL_VERSION(&wm.version);
+            MONITORINFOEXW monitor{}; monitor.cbSize=sizeof(monitor);
+            const bool canonical_match = SDL_GetWindowWMInfo(window,&wm) == SDL_TRUE && wm.subsystem == SDL_SYSWM_WINDOWS &&
+                GetMonitorInfoW(MonitorFromWindow(wm.info.win.window,MONITOR_DEFAULTTONULL),reinterpret_cast<MONITORINFO*>(&monitor)) &&
+                std::wstring_view(monitor.szDevice) == L"\\\\.\\DISPLAY2";
+            const bool matched = canonical_match && actual == display_index && name &&
+                SDL_GetDisplayBounds(display_index,&bounds) == 0 && bounds.w > 0 && bounds.h > 0 &&
+                int64_t(bounds.x)==monitor.rcMonitor.left && int64_t(bounds.y)==monitor.rcMonitor.top &&
+                int64_t(bounds.w)==int64_t(monitor.rcMonitor.right)-monitor.rcMonitor.left &&
+                int64_t(bounds.h)==int64_t(monitor.rcMonitor.bottom)-monitor.rcMonitor.top &&
+                x >= bounds.x && y >= bounds.y && w > 0 && h > 0 &&
+                int64_t(x)+w <= int64_t(bounds.x)+bounds.w && int64_t(y)+h <= int64_t(bounds.y)+bounds.h;
+            std::fprintf(stderr,"baseline required-display phase=%s required=%s index=%d actual=%d name=%s x=%d y=%d width=%d height=%d bounds_x=%d bounds_y=%d bounds_width=%d bounds_height=%d matched=%u\n",
+                phase,required_display,display_index,actual,canonical_match?required_display:"na",x,y,w,h,bounds.x,bounds.y,bounds.w,bounds.h,unsigned(matched));
+            std::fprintf(stderr,"baseline required-display-sdl phase=%s index=%d friendly_name=%s canonical_match=%u\n",phase,actual,name?name:"na",unsigned(canonical_match));
+            std::fflush(stderr);
+            if (!matched) throw std::runtime_error("Required DISPLAY2 window placement failed");
+        };
+        verify_display("hidden");
+        SDL_ShowWindow(window);
+        try { verify_display("shown"); }
+        catch (...) { SDL_HideWindow(window); throw; }
+#else
+        throw std::runtime_error("Canonical DISPLAY2 guard requires Windows");
+#endif
+    }
 #if TOOIE_BASELINE_HOST
     host::initialize(window,root);
     host::render::install();
