@@ -1,6 +1,6 @@
 # Architecture
 
-This page explains how the Alpha 4.1 source (`v0.1.0-alpha.4.1`) is built and who owns each behavior. Read it before you change code.
+This page explains how the selected Windows player source is built and who owns each behavior. Read it before you change code.
 
 This project is a work in progress. The design is not final, and improvements are continually evaluated.
 
@@ -387,13 +387,20 @@ The generated registry identifies functions by their N64Recomp section entry (`r
 
 ### A setting: output frame rate
 
-1. The menu's "Output rate" control in `minimum_menu.cpp` calls `preference(Preference::OutputRate, rate)`. That queues a `Request`.
-2. Each VI pump, `devices.cpp` `update_gfx` calls `host::tick`.
-3. `host::tick` applies the request through `update_preference`. That stores `settings::set_int("baseline_output_rate", value)`. `src/frontend_config.cpp` owns the store.
-4. On the next launch, `minimum_host.cpp` reads the key.
-5. `devices.cpp` calls `host::render::configure_startup(*app)` in `minimum_presentation.cpp`.
-6. That maps the value to RT64 `UserConfiguration::RefreshRate::Original`, `Display` or `Manual` plus `refreshRateTarget`. "Current" leaves the RT64 default.
-7. RT64 interpolation produces the higher frame rate. No separate 60 FPS or 120 FPS game patch exists.
+1. The menu's "Output rate" control in `minimum_menu.cpp` queues a preference request. `host::tick` applies it, and `minimum_host.cpp` persists the accepted value and publishes one packed rate request.
+2. At startup, `minimum_presentation.cpp` maps the saved value to RT64 `UserConfiguration::RefreshRate::Original`, `Display` or `Manual` with its manual target. Default also selects Original.
+3. During play, the graphics owner in `devices.cpp` consumes the latest request and queues a rate-only runtime configuration update. `minimum_presentation.cpp` changes only RT64's refresh-rate fields under the shared configuration lock. Aspect and pending framebuffer changes remain owned by their existing paths.
+4. RT64 interpolation produces the higher output rate. No separate 60 FPS or 120 FPS game patch exists. Present Early remains selected for the player at every output rate.
+
+The **Fullscreen** checkbox in `minimum_menu.cpp` requests borderless desktop
+fullscreen through SDL in `minimum_host.cpp`. The menu reflects actual window
+flags; a failed change shows an error and is not saved. VSync also applies
+during play. Resolution and aspect choices remain latched until the next launch.
+
+At player startup, `minimum_presentation.cpp` enables RT64's existing
+`textureLOD.scale` setting so mip choice follows rendered resolution. This is
+source behavior; texture appearance and missing-mipmap shimmer have not been
+visually accepted.
 
 ### Renderer label owner
 

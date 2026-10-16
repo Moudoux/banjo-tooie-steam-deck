@@ -1,7 +1,7 @@
 # Banjo-Tooie: Scurvy Dog Port player guide
 
-For the Windows x64 alpha, version 0.1.0-alpha.4.1. Scurvy Dog Port is unofficial and the
-game is not included.
+For the Windows x64 alpha. Scurvy Dog Port is unofficial and the game is not
+included.
 
 ## Install and first launch
 
@@ -91,10 +91,12 @@ settings**. **Resume** returns to the game and **Quit** exits.
 
 **Video**
 
-- **Resolution scale** (1x–8x), **Output rate** (Default (Original), Original, Display or
-  Manual, 20–360 Hz), **Widescreen**, **Gameplay aspect**, **Cutscene aspect**
-  and **VSync**.
-- Display settings except VSync take effect the next time you start the game.
+- **Fullscreen** checkbox (borderless desktop), **Resolution scale** (1x–8x),
+  **Output rate** (Default (Original), Original, Display or Manual, 20–360 Hz),
+  **Widescreen**, **Gameplay aspect**, **Cutscene aspect** and **VSync**.
+- Output rate, VSync and fullscreen apply during play. Resolution and aspect
+  changes take effect the next time you start the game. If fullscreen cannot
+  change, the menu shows an error and keeps the actual window state.
 - Default (Original) uses the game's original output rate. This label replaces
   Current; it does not change an existing output-rate choice.
 
@@ -133,6 +135,11 @@ settings**. **Resume** returns to the game and **Quit** exits.
 Report reproducible problems in the
 [issue tracker](https://github.com/some-scurvy-dog/banjo-tooie-scurvy-dog-port/issues).
 Include the version, Windows version, GPU and driver, controller, settings,
-where it happened and steps to reproduce. Review `player.log` before sharing:
+where it happened and steps to reproduce. Press plain F4 once when the issue
+appears to add a numbered marker with the time and current settings to the
+existing `player.log`. A message appears for four seconds to confirm the marker
+or report that it could not be written. F4 does not take a screenshot or video.
+If F4 is assigned to an action or a binding capture is active, that input
+takes precedence and no marker is added. Review `player.log` before sharing:
 it can include usernames and local paths. Never upload a ROM, saves, generated
 game files, a whole profile or unreviewed logs.
