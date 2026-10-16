@@ -200,7 +200,7 @@ void compare(bool chain,Row row){
     require(a.result==b.result,"original/candidate logical return differs");
 }
 #ifdef TOOIE_PLAYER_STATE_ADDRESS
-void player_fixture(int which){
+void player_fixture(int which,uint32_t dragon_asset=0,uint32_t dragon_count=0){
     player_case=which;events.clear();
     std::vector<uint8_t> ram(16*1024*1024);auto* rdram=ram.data();
     for(uint32_t a=stack-guard;a<stack+32;++a)put_byte(rdram,a,0xA5);
@@ -217,6 +217,12 @@ void player_fixture(int which){
         put(rdram,player_component+0x10C,0x62B);
         put(rdram,player_pose,which==13?68u:66u);
         put(rdram,player_pose+4,which==14?65u:68u);
+    }
+    if(dragon_asset){
+        MEM_H(0xC,guest(player_component))=0x607;
+        put(rdram,player_component+0x10C,dragon_asset);
+        put(rdram,player_pose,which==21?dragon_count+1:dragon_count);
+        put(rdram,player_pose+4,which==22?dragon_count:68u); // Exact and larger allocations.
     }
     put(rdram,0x8012C968,player_pose);put(rdram,0x8012CF8C,player_dispatch);
     put(rdram,0x80123198,player_dispatch);
@@ -239,8 +245,9 @@ void player_fixture(int which){
     candidate::func_800DE448(rdram,&c);saved(c,before);
     require(low(c.r2)==returned,"player preserves original return");
     require(events.size()==2&&events[0].kind==Buffers&&events[1].kind==Draw,"player preserves original call chain");
-    const bool refused=(which>=2&&which<=4)||which==7||which==9||which==11||which==13||which==14;
-    require(word(rdram,state+16)==(which==11?2609u:refused?0u:3792u),"complete player reservation debited exactly once");
+    const bool refused=(which>=2&&which<=4)||which==7||which==9||which==11||which==13||which==14||(dragon_asset&&which==21);
+    require(word(rdram,state+16)==(which==11?2609u:refused?0u:3792u),
+        dragon_asset?"Dragon exact current pose admission/refusal and reservation":"complete player reservation debited exactly once");
     require(word(rdram,state+28)==0,"player releases active ownership");
     require(word(rdram,pc+15*4)==(refused?0u:1u),"admission count");
     if(refused){
@@ -252,8 +259,8 @@ void player_fixture(int which){
             "OVERRIDE retains exact unsupported CPU type predicate bit");
         if(which==9)require(word(rdram,pc+17*4)==TOOIE_BRIDGE_MODEL_DATA,
             "full-width unsupported LOD asset refuses without low16 alias");
-        if(which==13||which==14)require(word(rdram,pc+17*4)==TOOIE_BRIDGE_ANIMATION,
-            "62B exact current66 and capacity>=66 required before custom writes");
+        if(which==13||which==14||(dragon_asset&&which==21))require(word(rdram,pc+17*4)==TOOIE_BRIDGE_ANIMATION,
+            "asset exact current count and sufficient capacity required before custom writes");
         if(which==11)require(word(rdram,pc+17*4)==TOOIE_BRIDGE_CAPACITY,
             "3792 reservation refuses over shared model allowance");
         require(word(rdram,player_cursor)==0xDF123456&&word(rdram,player_cursor+4)==0x789ABCDE,
@@ -330,7 +337,24 @@ void player_fixture(int which){
         }
         require(word(rdram,pc+32)==first_id+1024,"two observed asset switches consume separate blocks");
     }
-    if(which>=15){
+    if(dragon_asset&&which!=21){
+        require(word(rdram,pc+88)==dragon_asset&&word(rdram,player_pose)==dragon_count&&
+            word(rdram,player_pose+4)==(which==22?dragon_count:68u),
+            "Dragon preserves exact current60/58 with exact or larger capacity");
+        if(dragon_asset==0x838u&&which==20)for(uint32_t asset:{0x62Au,0x838u,0x839u}){
+            const uint32_t old_id=word(rdram,pc+32);
+            put(rdram,state+8,word(rdram,state+8)+1);put(rdram,player_component+0x10C,asset);
+            put(rdram,player_pose,asset==0x62Au?68u:asset==0x838u?60u:58u);
+            put(rdram,player_buffers,player_cursor);
+            auto next=context();next.r4=guest(actor+4);next.r5=guest(rotation);next.r6=0;next.r7=guest(extra);
+            put(rdram,stack+0x10,player_model);candidate::func_800DE448(rdram,&next);
+            require(word(rdram,pc+32)==old_id+512&&word(rdram,pc+88)==asset&&word(rdram,pc+12)==player_model,
+                "standard/Dragon and Dragon LOD switches renew at the same model address");
+            require(word(rdram,state+16)==3792&&word(rdram,state+28)==0,
+                "Dragon transitions preserve common prepay and paid unwind");
+        }
+    }
+    if(which>=15&&!dragon_asset){
         const uint32_t first_id=word(rdram,pc+32);
         auto invoke=[&](recomp_func_t* fn,uint32_t a0,uint32_t a1=0u){
             auto call=context();call.r4=guest(a0);call.r5=guest(a1);fn(rdram,&call);
@@ -783,6 +807,9 @@ int main(){
         compare(false,{0xC1234567u,3,false});compare(false,{0xC1234567u,4,false});comparisons+=2;
 #ifdef TOOIE_PLAYER_STATE_ADDRESS
         for(int which=0;which<20;++which){player_fixture(which);++player_cases;}
+        for(uint32_t asset:{0x838u,0x839u})for(int which:{20,21,22}){
+            player_fixture(which,asset,asset==0x838u?60u:58u);++player_cases;
+        }
 #endif
 #ifdef TOOIE_ACTOR_PALETTE_FIXTURE
         palette_groups=palette_fixtures();

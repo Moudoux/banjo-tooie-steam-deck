@@ -975,10 +975,10 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
             endif()
             if(TOOIE_BASELINE_BACKPACK621)
                 # Installed only after actual fullgraph/control/source/ELF acceptance.
-                set(_baseline_expected_image "e8381aa84fb10d5536354a1306d06d79abe22134b09767c2ffd5c38ef413331a")
+                set(_baseline_expected_image "ec6d5739e438a87421ff751253d007ecfe2697ff65e4e9fddee87b799412c93c")
                 if(_baseline_shadow_coefficients STREQUAL "ON")
                     # Same composition; shadow_projection.o (TOOIE_SHADOW_COEFFICIENTS=1) and actor.o (TOOIE_HAND862=1) differ.
-                    set(_baseline_expected_image "a677899114d5ab2527f0c59211d824b6bd7efe9802a79290923c4822f5e352e8")
+                    set(_baseline_expected_image "c78e92102a8e20e67db4ea5e3faf8eb09c2261f2da120a63470d3ce2846fa6b9")
                 endif()
                 string(JSON _baseline_raw_b621_type TYPE "${_baseline_raw_binding}" backpack621)
                 string(JSON _baseline_raw_b621 GET "${_baseline_raw_binding}" backpack621)

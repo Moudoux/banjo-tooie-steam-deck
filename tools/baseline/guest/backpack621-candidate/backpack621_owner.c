@@ -236,9 +236,10 @@ B621 u32 tooie_backpack621_admit(u32 buffers,u32 cursor_slot,u32 model) {
        mtx>mtxbase+0x12C00u-1408u || SS.extra_bytes>5808u)return b621_refuse(B621_BUDGET);
     volatile struct TooieBackpack621Owner* e=&BS.owner[BX.slot];
     u32 animation=*(volatile u32*)0x8012C824u,seen=1u<<(BX.view*5u+b621_phase(BX.phase));
+    /* Decoded-buffer address is occurrence input; only nullness changes producer class. */
     u32 renew=!(e->flags&TOOIE_BACKPACK621_VALID) || e->owner!=BX.owner ||
         e->backpack!=part || e->model!=model || e->handle!=handle || e->copy!=copy ||
-        e->display_list!=model+1400u || e->animation!=animation || e->vector_cache!=vector ||
+        e->display_list!=model+1400u || (e->animation==0u)!=(animation==0u) || e->vector_cache!=vector ||
         (e->stamp!=SS.epoch && e->stamp+1u!=SS.epoch);
     if(!renew) {
         if(e->stamp!=SS.epoch) {e->stamp=SS.epoch;e->seen=0;e->flags=TOOIE_BACKPACK621_VALID;}
@@ -259,6 +260,7 @@ B621 u32 tooie_backpack621_admit(u32 buffers,u32 cursor_slot,u32 model) {
         e->stamp=SS.epoch;e->flags=TOOIE_BACKPACK621_VALID;
         e->copy=copy;e->display_list=model+1400u;e->animation=animation;e->vector_cache=vector;
     }
+    e->animation=animation;
     e->seen|=seen;e->camera_id[BX.view]=camera;
     BX.buffers=buffers;BX.pool_index=pool;BX.gfx_base=base;BX.gfx_begin=current;
     BX.group_id=e->idbase+(BX.view*5u+b621_phase(BX.phase))*512u;BX.paid=1;BS.epoch=SS.epoch;

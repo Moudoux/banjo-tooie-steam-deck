@@ -199,6 +199,18 @@ void hybrid_helpers() {
     reset();put(rdram,pc+88,0x62B);put(rdram,pc+96,67);
     require(call(tooie_player_leaf_begin)==0&&word(rdram,buffers)==gfx&&word(rdram,state+24)==1,
         "62B role67 leaf refuses before command writes");
+    for(uint32_t asset:{0x838u,0x839u}){
+        const uint32_t count=asset==0x838u?60u:58u;
+        reset();put(rdram,pc+88,asset);put(rdram,pc+96,count);
+        require(call(tooie_player_leaf_begin)==1&&word(rdram,gfx+4)==0x90000100u+count,
+            "Dragon final pose role admits its own hybrid ID");
+        call(tooie_player_leaf_end);
+        for(uint32_t role:{0u,count+1}){
+            reset();put(rdram,pc+88,asset);put(rdram,pc+96,role);
+            require(call(tooie_player_leaf_begin)==0&&word(rdram,buffers)==gfx&&word(rdram,gfx)==0&&word(rdram,state+24)==1,
+                "Dragon role0 or past-pose role trips before command writes");
+        }
+    }
     reset();put(rdram,pc+96,0);require(call(tooie_player_leaf_begin)==0&&word(rdram,buffers)==gfx&&word(rdram,state+24)==1,"leaf role0 refused");
     reset();put(rdram,pc+96,UINT32_MAX);require(call(tooie_player_leaf_begin)==0&&word(rdram,buffers)==gfx,"invalid leaf context refused");
     reset();put(rdram,buffers,base+0x8FC0-24);require(call(tooie_player_leaf_begin)==0&&word(rdram,buffers)==base+0x8FC0-24,"leaf reserves complete32-byte augmentation");

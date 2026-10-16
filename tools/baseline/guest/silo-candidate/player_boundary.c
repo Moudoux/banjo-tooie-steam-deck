@@ -10,6 +10,8 @@ static inline __attribute__((always_inline)) u32 player_pose_count(u32 asset) {
     if (asset == 0x62Au) return 68u;
     if (asset == 0x62Bu) return 66u;
     if (asset == 0x665u) return 41u;
+    if (asset == 0x838u) return 60u;
+    if (asset == 0x839u) return 58u;
     return 0u;
 }
 typedef struct { s16 pose; u8 pad2[10]; s16 selector; } PlayerBody;
@@ -93,8 +95,9 @@ PLAYER u32 tooie_player_begin(SiloBuffers* b,u32 model) {
     if(!silo_range(base,0x8FC0u,7u) || current<base || current>base+0x8FC0u || (current&7u))
         REFUSE(TOOIE_BRIDGE_RANGE);
     if(current<SS.last_end) REFUSE(TOOIE_BRIDGE_CURSOR_DROP);
-    /* Original62A bounds also dominate62B's76 bones/57 leaves and665's41/38.
-     * Prepay common3792; original command space remains its owner's. */
+    /* Original62A's78 bones/59 leaves dominate62B's76/57,665's41/38,
+     * Dragon838's70/55 and839's68/53. Prepay common3792;
+     * original command space remains its owner's. */
     if(SS.extra_bytes>2608u || base+0x8FC0u-current<3792u) REFUSE(TOOIE_BRIDGE_CAPACITY);
     if(PC.idbase && PC.stamp==SS.epoch) REFUSE(TOOIE_BRIDGE_DUPLICATE);
     packed=((u32)selector<<16)|(u32)handle; view_phase=view|(phase<<2);

@@ -29,6 +29,8 @@ void func_80092778(uint8_t*,recomp_context*);
 void func_80092864(uint8_t*,recomp_context*);
 void func_80098E64(uint8_t*,recomp_context*);
 void heap_free(uint8_t*,recomp_context*);
+void tooie_cpu625_retire(uint8_t*,recomp_context*);
+void tooie_backpack621_retire(uint8_t*,recomp_context*);
 }
 #define func_80092898 original_92898
 #define func_800F3880 original_F3880
@@ -56,9 +58,15 @@ struct Event {
         return kind==b.kind && a0==b.a0 && a1==b.a1 && memory==b.memory;
     }
 };
-struct Output { std::vector<uint8_t> ram; std::vector<Event> trace; };
+enum RetireKind { CpuRetire, BackpackRetire };
+struct RetireEvent {
+    RetireKind kind; uint32_t self, requested, reason, idbase, stamp;
+    size_t original_calls;
+};
+struct Output { std::vector<uint8_t> ram; std::vector<Event> trace; std::vector<RetireEvent> retire; };
 Case active{};
 std::vector<Event> events;
+std::vector<RetireEvent> retire_events;
 bool inspect_retirement=false, inspect_active=false;
 gpr guest(uint32_t p) { return S32(p); }
 uint32_t word(uint8_t* rdram,uint32_t p) { return uint32_t(MEM_W(0,guest(p))); }
@@ -130,6 +138,22 @@ void stub(Kind kind,uint8_t* rdram,recomp_context* c) {
     if(active.mutate) put(rdram,owner+0x50,bodies+uint32_t(events.size())*body_stride);
     clobber(c);c->r2=guest(result);
 }
+void retire(RetireKind kind,uint8_t* rdram,recomp_context* c) {
+    retire_events.push_back({kind,uint32_t(c->r4),uint32_t(c->r5),uint32_t(c->r6),
+        word(rdram,PF(idbase)),word(rdram,PF(stamp)),events.size()});
+    c->r2=0; // Accepted helper result; producer retirement effects are outside this fixture.
+}
+void check_retirements(const Output& out,bool freeing) {
+    require(out.retire.size()==2,"exact CPU625/backpack621 retirement calls");
+    for(unsigned i=0;i<2;++i) {
+        const auto& e=out.retire[i];
+        require(e.kind==(i==0?CpuRetire:BackpackRetire),"CPU625 retires before backpack621");
+        require(e.self==owner && e.requested==0 && e.reason==(freeing?4u:3u),
+            "retirement owner, request and init/free reason");
+        require(e.original_calls==0 && e.idbase==0x90000200 && e.stamp==7,
+            "both retirements precede original calls and lifecycle tombstone");
+    }
+}
 recomp_context context() {
     recomp_context c{};c.r4=guest(owner);c.r29=guest(stack);c.r31=guest(0x80045678);
     c.r16=16;c.r17=17;c.r18=18;c.r19=19;c.r20=20;c.r21=21;c.r22=22;c.r23=23;c.r28=28;c.r30=30;
@@ -151,8 +175,8 @@ void invoke(uint8_t* rdram,recomp_func_t* fn,unsigned frame) {
     for(uint32_t p=stack+16;p<stack+32;++p) require(byte(rdram,p)==0xA5,"above incoming homes sentinel");
 }
 Output run(Case test,recomp_func_t* fn,unsigned frame,bool matching=false,bool running=false) {
-    Output out{std::vector<uint8_t>(16*1024*1024),{}};auto* rdram=out.ram.data();
-    active=test;events.clear();inspect_retirement=matching&&!running;inspect_active=matching&&running;
+    Output out{std::vector<uint8_t>(16*1024*1024),{}, {}};auto* rdram=out.ram.data();
+    active=test;events.clear();retire_events.clear();inspect_retirement=matching&&!running;inspect_active=matching&&running;
     for(uint32_t p=owner-16;p<owner+0x198;++p) MEM_B(0,guest(p))=0xCC;
     for(uint32_t i=0;i<body_count;++i)
         for(uint32_t p=bodies+i*body_stride-16;p<bodies+i*body_stride+0x128;++p) MEM_B(0,guest(p))=0xA7;
@@ -162,12 +186,15 @@ Output run(Case test,recomp_func_t* fn,unsigned frame,bool matching=false,bool r
     put(rdram,PF(buffers),0x80300000);put(rdram,PF(base),0x80300100);
     put(rdram,PF(pool_index),1);put(rdram,PF(begin),0x80300200);put(rdram,PF(end),0);
     put(rdram,PF(current_bone_role),3);put(rdram,PF(emitted_bones),5);put(rdram,PF(emitted_leaf_calls),6);
-    invoke(rdram,fn,frame);out.trace=events;inspect_retirement=inspect_active=false;return out;
+    invoke(rdram,fn,frame);out.trace=events;out.retire=retire_events;
+    inspect_retirement=inspect_active=false;return out;
 }
 void compare(Case test,bool freeing=false,bool running=false) {
     auto a=run(test,freeing?original_F3880:original_92898,freeing?24:40,false,running);
     auto b=run(test,freeing?func_800F3880:func_80092898,
         freeing?TOOIE_PLAYER_FREE_FRAME_BYTES:TOOIE_PLAYER_INIT_FRAME_BYTES,false,running);
+    require(a.retire.empty(),"original has no candidate retirement imports");
+    check_retirements(b,freeing);
     require(a.trace==b.trace,"actual original/candidate calls, arguments and intermediate memory");
     const std::vector<Kind> init={Backpack,Set936,Set937,Allocate,Resolve,Resource,Bind,Create,
         Clear,Clear,Clear,Set93370,Set9337C,Float93230,Set931,Lookup,Float92864};
@@ -182,6 +209,7 @@ void compare(Case test,bool freeing=false,bool running=false) {
 void lifecycle(bool freeing,bool running) {
     auto out=run({0x12340001,0xABCD8001,false},freeing?func_800F3880:func_80092898,
         freeing?TOOIE_PLAYER_FREE_FRAME_BYTES:TOOIE_PLAYER_INIT_FRAME_BYTES,true,running);
+    check_retirements(out,freeing);
     auto* rdram=out.ram.data();
     require(word(rdram,SF(next_block))==2,"lifecycle does not allocate/reset issuer");
     if(!running) require(word(rdram,PF(idbase))==0 && word(rdram,PF(stamp))==(freeing?UINT32_MAX:0),
@@ -217,6 +245,8 @@ STUB(func_80092864,Float92864)
 STUB(func_80098E64,Teardown)
 STUB(heap_free,Free)
 #undef STUB
+extern "C" void tooie_cpu625_retire(uint8_t* r,recomp_context* c) { retire(CpuRetire,r,c); }
+extern "C" void tooie_backpack621_retire(uint8_t* r,recomp_context* c) { retire(BackpackRetire,r,c); }
 int main() {
     try {
         const std::array<uint32_t,2> edges[]={{0x12340001,0xABCD0001},{0xFFFF7FFF,0x12347FFF},

@@ -21,6 +21,22 @@ void mlMtxPop(uint8_t*, recomp_context*);
 }
 void tooie_player_bone_push(uint8_t*, recomp_context*);
 void tooie_player_bone_pop(uint8_t*, recomp_context*);
+// Transport maintenance for the selected DCF closure: every fixture starts
+// with zero RAM and admits only the player, leaving the 621 paid flag and
+// SC.admitted at zero.
+// These other-owner branches must remain unselected, never silently stubbed.
+void tooie_backpack621_bone_push(uint8_t*, recomp_context*) {
+    throw std::runtime_error("unexpected backpack621 bone push in player fixture");
+}
+void tooie_backpack621_bone_pop(uint8_t*, recomp_context*) {
+    throw std::runtime_error("unexpected backpack621 bone pop in player fixture");
+}
+void tooie_npc665_bone_push(uint8_t*, recomp_context*) {
+    throw std::runtime_error("unexpected NPC665 bone push in player fixture");
+}
+void tooie_npc665_bone_pop(uint8_t*, recomp_context*) {
+    throw std::runtime_error("unexpected NPC665 bone pop in player fixture");
+}
 void func_800DCF48(uint8_t*, recomp_context*);
 #include "dcf48_fixture.inc"
 namespace {
@@ -134,6 +150,8 @@ void semantic_fixture(unsigned which){
     put(rdram,state+8,1);put(rdram,state+16,3792);put(rdram,state+28,1);
     put(rdram,state+offsetof(TooieRenderBridgeState,silo_depth),1);
     put(rdram,pc,1);put(rdram,pc+7*4,1);put(rdram,pc+8*4,0x90000000);
+    // Current helper validates the admitted asset, not just the pose allocation.
+    put(rdram,pc+offsetof(TooiePlayerBoundary,effective_model_asset),0x62A);
     put(rdram,pc+9*4,buffers);put(rdram,pc+10*4,gfx-0x100);
     put(rdram,pc+12*4,gfx-24);
     put(rdram,0x8007BCD0,gfx-0x100);MEM_H(0,guest(0x8007BEDA))=0;
@@ -182,13 +200,15 @@ void semantic_fixture(unsigned which){
         const uint32_t cursor=word(rdram,buffers);
         require(bone_push(rdram,-2)==0&&word(rdram,buffers)==cursor&&word(rdram,state+24)==1,
             "unsupported negative index trips without push");
-    }else if(which==6){
-        put(rdram,pc+88,0x62B);
-        require(bone_push(rdram,65)==1&&word(rdram,pc+96)==66,"62B index65 is final admitted bone");
-        check_group(gfx,0x90000042);bone_pop(rdram);
+    }else if(which>=6){
+        const uint32_t asset=which==6?0x62Bu:which==7?0x838u:0x839u;
+        const uint32_t count=which==6?66u:which==7?60u:58u;
+        put(rdram,pc+88,asset);
+        require(bone_push(rdram,int(count)-1)==1&&word(rdram,pc+96)==count,"asset final pose index admits");
+        check_group(gfx,0x90000000+count);bone_pop(rdram);
         const uint32_t cursor=word(rdram,buffers);
-        require(bone_push(rdram,66)==0&&word(rdram,buffers)==cursor&&word(rdram,state+24)==1,
-            "62B index66 refuses before public writes");
+        require(bone_push(rdram,int(count))==0&&word(rdram,buffers)==cursor&&word(rdram,state+24)==1,
+            "asset pose-end index refuses before public writes");
     }else{
         require(bone_push(rdram,68)==0&&word(rdram,buffers)==gfx&&word(rdram,state+24)==1,
             "index at68-entry pose end trips without push");
@@ -258,7 +278,7 @@ int main() {
         run(true,false,0,false); // Leaf still pops; no dispatcher call.
         unsigned player_cases=0;
 #ifdef TOOIE_PLAYER_STATE_ADDRESS
-        for(unsigned which=0;which<7;++which){semantic_fixture(which);++player_cases;}
+        for(unsigned which=0;which<9;++which){semantic_fixture(which);++player_cases;}
 #endif
         std::cout<<"DCF48 actual-body fixture passed: 5 paths; player_cases="<<player_cases
             <<"; frame="<<TOOIE_DCF48_FRAME_BYTES<<'\n';
