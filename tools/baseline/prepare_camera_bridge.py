@@ -10,6 +10,7 @@ import prepare_minimum_host as host_owner
 import minimum_host_hooks as host_hooks
 import prepare_npc665 as npc_owner
 import prepare_backpack621 as backpack_owner
+import prepare_graphics_rate as rate_owner
 from npc665_hooks import add_hooks as add_npc_hooks, strip_hooks as strip_npc_hooks, HOOKS as NPC_HOOKS
 from cpu625_hooks import add_cpu625_hooks, CPU625_HOOKS
 sha,win=accepted.sha,accepted.win
@@ -120,6 +121,7 @@ def prepare_raw(root,output,run,shadow_observer=False,demo_timing=False,shadow_f
     functions=list(dict.fromkeys(held.GENERATED_FUNCTIONS+branch['providers']));omitted=list(dict.fromkeys(held.FUNCTIONS[3:]+branch['omissions']))
     if actor_palette:functions.append(FEATHER_LEAF_PATCH);omitted.append(FEATHER_LEAF_PATCH)
     if minimum_host:functions.append(host_owner.PROJECTION);omitted.append(host_owner.PROJECTION)
+    if backpack621:functions.append(rate_owner.BODY);omitted.append(rate_owner.BODY)
     assert set(held.GENERATED_FUNCTIONS)<=set(functions) and len(set(omitted))==len(omitted)
     assert 'func_800DE498' not in omitted
     config=toml.loads(parent.read_text());patches=config['patches'];hooks=patches['hook']
@@ -250,7 +252,11 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
         matches=[(sec,fn) for sec in sections.values() for fn in sec.get('functions',[]) if fn['name']==host_owner.PROJECTION]
         assert len(matches)==1
         sec,fn=matches[0];rows.append(dict(name=fn['name'],section=sec['name'],vram=hex(fn['vram']),section_offset=hex(fn['vram']-sec['vram']),extent=hex(fn['size'])))
-    assert len(rows)==27+int(bool(host)) and len({r['name'] for r in rows})==len(rows)
+    if backpack:
+        matches=[(sec,fn) for sec in sections.values() for fn in sec.get('functions',[]) if fn['name']==rate_owner.BODY]
+        assert len(matches)==1
+        sec,fn=matches[0];rows.append(dict(name=fn['name'],section=sec['name'],vram=hex(fn['vram']),section_offset=hex(fn['vram']-sec['vram']),extent=hex(fn['size'])))
+    assert len(rows)==27+int(bool(host))+int(bool(backpack)) and len({r['name'] for r in rows})==len(rows)
     contract=json.loads((root/SOURCE/'camera_hook_contract.json').read_text())['branches']['hook']
     base_functions=list(held.GENERATED_FUNCTIONS)
     if actor_palette:base_functions.insert(base_functions.index('tooie_actor_palette_end'),CPU_ROOT_HELPERS[0]);base_functions.insert(base_functions.index('tooie_actor_palette_end'),FEATHER_LEAF_HELPER)
@@ -265,7 +271,7 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
         lines.append('    {baseline_boot_patch_registry::%s,0x%Xu,0x%Xu,0x%Xu,0x%Xu,0x%Xu},'%(row['name'],sec['rom'],sec['vram'],sec['size'],offset,extent))
     lines+=['};','static CameraPatchExpected camera_expected_patches[] = {']
     expected_names=base_functions+contract['providers']+([CPU_ROOT_HELPERS[1],FEATHER_LEAF_PATCH] if actor_palette else [])+(DEMO_HELPERS if demo else [])+(SHADOW_HELPERS if shadow else [])+(PRE_HELPERS if pre else [])+(cpu_owner.HELPERS if cpu else [])+([host_owner.PROJECTION,host_owner.HELPER] if host else [])+([npc_owner.CHECKED if n==npc_owner.END else n for n in npc_owner.HELPERS] if npc else [])
-    expected_names+=backpack_owner.HELPERS if backpack else []
+    expected_names+=(backpack_owner.HELPERS+[rate_owner.BODY]) if backpack else []
     for name in dict.fromkeys(expected_names):
         section=(5+int(bool(demo))+int(bool(shadow))+int(bool(pre))+int(bool(cpu))+int(bool(host))) if name in npc_owner.HELPERS or name==npc_owner.CHECKED else (5+int(bool(demo))+int(bool(shadow))+int(bool(pre))+int(bool(cpu))) if name==host_owner.HELPER else (5+int(bool(demo))+int(bool(shadow))+int(bool(pre))) if name in cpu_owner.HELPERS else (5+int(bool(demo))+int(bool(shadow))) if name in PRE_HELPERS else 6 if name in SHADOW_HELPERS else 5 if name in DEMO_HELPERS else helpers.get(name,0)
         if name in backpack_owner.HELPERS:section=5+int(bool(demo))+int(bool(shadow))+int(bool(pre))+int(bool(cpu))+int(bool(host))+int(bool(npc))
@@ -289,17 +295,17 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
         for rom,ram,size,funcs,relocs,index in rows:
             f=re.search(r'static FuncEntry '+funcs+r'\[\] = \{(.*?)\n\};',overlay,re.S);q=re.search(r'static RelocEntry '+relocs+r'\[\] = \{(.*?)\n\};',overlay,re.S);assert f and q
             tuples.append((int(rom,16),int(ram,16),int(size,16),int(index),f[1].count('.func'),q[1].count('.offset')))
-        first=tuples[0];assert (first[0],first[1],first[3],first[4])==(0,0x80801000,1,(39 if actor_palette else 38)+int(bool(host)))
+        first=tuples[0];assert (first[0],first[1],first[3],first[4])==(0,0x80801000,1,(39 if actor_palette else 38)+int(bool(host))+int(bool(backpack)))
         shift=first[2]-0x96C8
         fixed=[(0x96C8,0x8080A6C8,0x2E38,2,1,2),(0xC500,0x8080D500,0x15FC,3,6,3),(0xDAFC,0x8080EAFC,0xD10 if actor_palette else 0x68C,4,4 if actor_palette else 3,0),(0xE820 if actor_palette else 0xE19C,0x8080F820 if actor_palette else 0x8080F19C,0x3DB4 if actor_palette else 0x20F0,8,4 if actor_palette else 2,6 if actor_palette else 4)]
         if not npc and not backpack:assert all(actual==(old[0]+shift,old[1]+shift,*old[2:]) for actual,old in zip(tuples[1:5],fixed)), 'PRE fixed section identity and uniform shift'
         elif npc:
-            assert [x[3:5] for x in tuples[:5]]==[(1,39+int(bool(host))),(2,1),(3,6),(4,4),(8,4)], 'NPC changed shared sections preserve original memberships'
+            assert [x[3:5] for x in tuples[:5]]==[(1,39+int(bool(host))+int(bool(backpack))),(2,1),(3,6),(4,4),(8,4)], 'NPC changed shared sections preserve original memberships'
             row=tuples[-2] if backpack else tuples[-1]
             assert row[:4]==(npc['rom'],npc['ram'],npc['size'],npc['index']) and row[4]==8
             npc['sections']=tuples[:5];npc['relocs']=row[5]
         if backpack:
-            assert [x[3:5] for x in tuples[:5]]==[(1,39+int(bool(host))),(2,1),(3,6),(4,4),(8,4)]
+            assert [x[3:5] for x in tuples[:5]]==[(1,39+int(bool(host))+int(bool(backpack))),(2,1),(3,6),(4,4),(8,4)]
             assert tuples[-1][:4]==(backpack['rom'],backpack['ram'],backpack['size'],backpack['index']) and tuples[-1][4]==8
             backpack['sections']=tuples[:5];backpack['relocs']=tuples[-1][5]
         layout+='#define TOOIE_PRE_TEXT_SIZE 0x%Xu\n#define TOOIE_PRE_TEXT_RELOCS %du\n#define TOOIE_PRE_SHIFT 0x%Xu\n'%(first[2],first[5],shift)
@@ -446,7 +452,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
          assert sum(w>>26==3 for w in words)==int(combined_owner) and not any(w>>26==0 and w&63==9 for w in words), 'Exact selected helper JAL/leaf bound'
          assert not any((w>>26 in [15,32,33,35,36,37,40,41,43]) and ((w>>16&31)==28 if w>>26==15 else (w>>21&31)==28) for w in words), 'Compiled demo helper GP dependency'
       defs+=defined;objects[name]={'sha256':h(out/(name+'.o')),'definitions':defined,'imports':sorted(imports),'allocated_sections':sections,'compile_argv':[str(x) for x in command],'frames':frames}
-    demo=None;shadow=None;pre=None;cpu=None;host=None;npc=None;backpack=None
+    demo=None;shadow=None;pre=None;cpu=None;host=None;npc=None;backpack=None;graphics_rate=None
     selected_shared=held.compile_objects(root,out,run,cpu_root=actor_palette,cpu625=cpu625,npc665=npc665,shared=True,backpack621=backpack621,hand862=backpack621 and shadow_coefficients)
     lifecycle=selected_shared['lifecycle']
     if not npc665:
@@ -474,6 +480,8 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
             assert cpu_owner.facts(out/(name+'.o'))==before, ('621 unchanged existing owner object',name)
     if minimum_host:
         objects.update(host_owner.compile_objects(root,out,run,flags,win));defs += [host_owner.HELPER,host_owner.PROJECTION]
+    if backpack621:
+        objects['graphics_rate']=rate_owner.compile_owner(root,out,run,flags,win);defs.append(rate_owner.BODY)
     heap=r/'build/windows-dev/baseline/heap-patch';prior=r/'build/windows-dev/baseline/render-bridge-silo-candidate'
     honey=prepare_honey_containment(root,output,run,npc665,backpack621)
     selected_actor=selected_shared if actor_palette else None
@@ -525,6 +533,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
      if backpack621:
       prior_end=npc['state']+16 if npc else host['image_end'] if host else cpu['state']+464
       backpack=backpack_owner.linked(elf,prior_end)
+      graphics_rate=rate_owner.linked(elf,backpack['image_end'])
      expected=bytearray(1380)
      for offset,value in {1024:0x43414D32,1028:2,1064:0xA0000000,1068:1,1072:1,1076:1}.items():expected[offset:offset+4]=value.to_bytes(4,'big')
      assert state.data()==expected and state['sh_size']==1380
@@ -574,7 +583,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     if pre:
      overlay=(out/'recomp_overlays.inl').read_text();match=re.search(r'static RelocEntry section_%d_tooie_pre_background_helpers_relocs\[\] = \{(.*?)\n\};'%pre['index'],overlay,re.S);assert match
      pre['relocs']=match[1].count('.offset');assert pre['relocs']==0
-    binary=(out/'boot.bin').read_bytes();assert binary[:2760]==(heap/'boot.bin').read_bytes();assert binary[addresses['tooie_camera_state']-0x80801000:addresses['tooie_camera_state']-0x80801000+1380]==expected;assert len(binary)==(backpack['image_end'] if backpack else npc['state']+16 if npc else host['image_end'] if host else cpu['state']+464 if cpu else pre['state']+124 if pre else shadow['state']+56 if shadow else demo['state']+8 if demo else ranges[1][1])-0x80801000
+    binary=(out/'boot.bin').read_bytes();assert binary[:2760]==(heap/'boot.bin').read_bytes();assert binary[addresses['tooie_camera_state']-0x80801000:addresses['tooie_camera_state']-0x80801000+1380]==expected;assert len(binary)==(graphics_rate['image_end'] if graphics_rate else backpack['image_end'] if backpack else npc['state']+16 if npc else host['image_end'] if host else cpu['state']+464 if cpu else pre['state']+124 if pre else shadow['state']+56 if shadow else demo['state']+8 if demo else ranges[1][1])-0x80801000
     if demo:assert demo['ram']==ranges[1][1] and binary[demo['state']-0x80801000:demo['state']-0x80801000+8]==bytes(8)
     if pre:
      assert demo_timing and shadow_fix
@@ -591,12 +600,12 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
         expected_order.insert(expected_order.index('func_80092898')+1,'tooie_cpu625_retire')
     actual_order=re.findall(r'^RECOMP_FUNC void (\w+)\(',text,re.M)
     if npc665 or backpack621:
-        new_helpers=(npc_owner.HELPERS if npc665 else [])+(backpack_owner.HELPERS if backpack621 else [])
+        new_helpers=(npc_owner.HELPERS if npc665 else [])+((backpack_owner.HELPERS+[rate_owner.BODY]) if backpack621 else [])
         original_order=[n for n in actual_order if n not in new_helpers]
         assert len(actual_order)==len(set(actual_order)) and set(actual_order)==set(expected_order)
         assert original_order==[n for n in expected_order if n not in new_helpers], 'Existing provider order preserved'
     else:assert len(actual_order)==len(set(actual_order)) and actual_order==expected_order, 'Exact ordered generated providers'
-    assert set(base_functions+defs)==set(base_functions)|set(json.loads((source/'camera_hook_contract.json').read_text())['branches']['hook']['providers'])|set(DEMO_HELPERS if demo_timing else [])|set(SHADOW_HELPERS if shadow_fix else [])|set(PRE_HELPERS if pre_background else [])|set(cpu_owner.HELPERS if cpu625 else [])|set(npc_owner.HELPERS if npc665 else [])|set(backpack_owner.HELPERS if backpack621 else [])|set([host_owner.PROJECTION,host_owner.HELPER] if minimum_host else [])|set([CPU_ROOT_HELPERS[1],FEATHER_LEAF_PATCH] if actor_palette else [])
+    assert set(base_functions+defs)==set(base_functions)|set(json.loads((source/'camera_hook_contract.json').read_text())['branches']['hook']['providers'])|set(DEMO_HELPERS if demo_timing else [])|set(SHADOW_HELPERS if shadow_fix else [])|set(PRE_HELPERS if pre_background else [])|set(cpu_owner.HELPERS if cpu625 else [])|set(npc_owner.HELPERS if npc665 else [])|set(backpack_owner.HELPERS if backpack621 else [])|set([host_owner.PROJECTION,host_owner.HELPER] if minimum_host else [])|set([rate_owner.BODY] if backpack621 else [])|set([CPU_ROOT_HELPERS[1],FEATHER_LEAF_PATCH] if actor_palette else [])
     npc_end=None
     if npc665:
         npc_end=npc_owner.checked_end(out,out/'pair.o')
@@ -630,6 +639,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
         if backpack:
             candidate=dict(scope='UNQUALIFIED linked621 candidate; original/public composed qualification still owed',image_sha256=sha(out/'boot.bin'),backpack621=backpack,object=b621_object,shared_objects=selected_shared,table=backpack_table,protected_owner_objects={name:row['sha256'] for name,row in protected_before.items()},raw_binding_sha256=sha(out/'RAW_BINDING.json'))
             (out/'BACKPACK621_UNQUALIFIED_LINK.json').write_text(json.dumps(candidate,indent=2)+'\n')
+            (out/'GRAPHICS_RATE_UNQUALIFIED_LINK.json').write_text(json.dumps(dict(scope='UNQUALIFIED exact public-rate replacement; stop before image pin acceptance',graphics_rate=graphics_rate,object=objects['graphics_rate'],image_sha256=sha(out/'boot.bin'),image_bytes=len(binary),raw_binding_sha256=sha(out/'RAW_BINDING.json')),indent=2)+'\n')
         assert sha(out/'boot.bin')==expected_image, 'Exact separately qualified PREON actorON/OFF/NPC image'
     receipt={'scope':'Full frozen emitter/replay layout2 composition; unselected, no parser compatibility or enabling claim','objects':objects,'addresses':addresses,'camera_state_bytes':1380,'state_bytes':18844,'pool_bytes':147200,'pool_alignment':16,'image_bytes':len(binary),'image_final_extent':hex(ranges[1][1]),'initialized_PROGBITS':True,'prefix_bytes':2760,'old_state_bytes':18844,'state_vram':addresses['tooie_render_bridge_state'],'bridge_state_bytes':18844,'helper_definitions':held.HELPERS+['tooie_camera_construction_begin','tooie_camera_construction_end','tooie_camera_de498_ignore'],'bone_frame_bytes':json.loads((prior/'receipt.json').read_text())['bone_frame_bytes'],'leaf_frame_bytes':json.loads((prior/'receipt.json').read_text())['leaf_frame_bytes'],'pair_frames':json.loads((prior/'receipt.json').read_text())['pair_frames'],'player_frames':json.loads((prior/'receipt.json').read_text())['player_frames'],'actor_frames':json.loads((prior/'receipt.json').read_text())['actor_frames'],'lifecycle_frames':lifecycle['frames'],'definitions':base_functions+defs,'inputs':{str(p):h(p) for p in inputs+list(source.glob('camera*')) if p.is_file()},'outputs':{p.name:h(p) for p in sorted(out.iterdir(),key=lambda p:p.name) if p.is_file() and p.name not in ('receipt.json','PLAYER_GUEST.json')}}
     receipt['backpack621']=backpack;receipt['backpack621_table']=backpack_table
@@ -644,6 +654,8 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     if npc:receipt['inputs'].update(objects['npc665']['inputs']);receipt['helper_definitions']+=npc_owner.HELPERS
     receipt['cpu625']=cpu;receipt['lifecycle_object']=fresh_lifecycle
     receipt['cpu625_table']=cpu_table
+    receipt['graphics_rate']=graphics_rate
+    if graphics_rate:receipt['inputs'].update(objects['graphics_rate']['inputs'])
     receipt['definitions']=expected_order
     receipt['bone_frame_bytes']=selected_shared['bone']['frames']['func_800DCF48']
     receipt['leaf_frame_bytes']=selected_shared['leaf']['frames']['func_800DD998']

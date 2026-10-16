@@ -646,7 +646,7 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
     if (
         baseline_boot_patch_registry::section_table[0].ram_addr != 0x80801000 ||
 #if BASELINE_CAMERA_IDENTITY && TOOIE_ACTOR_PALETTE_SELECTED
-        baseline_boot_patch_registry::section_table[0].num_funcs != 39+TOOIE_MINIMUM_HOST_SELECTED ||
+        baseline_boot_patch_registry::section_table[0].num_funcs != 39+TOOIE_MINIMUM_HOST_SELECTED+TOOIE_BACKPACK621_SELECTED ||
 #else
         baseline_boot_patch_registry::section_table[0].num_funcs != (BASELINE_CAMERA_IDENTITY ? 38 : BASELINE_RENDER_BRIDGE ? (BASELINE_RENDER_SILO ? 13 : 8) : (BASELINE_HONEY_PATCH ? 4 : (BASELINE_HEAP_PATCH ? 3 : 2))) ||
 #endif

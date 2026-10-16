@@ -298,8 +298,8 @@ following:
 ```powershell
 git status --short --untracked-files=all
 python .\tools\package_player.py receipt
-python .\tools\package_player.py package --output-dir dist\scurvy-dog-alpha4.1
-python .\tools\package_player.py verify --output-dir dist\scurvy-dog-alpha4.1
+python .\tools\package_player.py package --output-dir dist\scurvy-dog-alpha4.2
+python .\tools\package_player.py verify --output-dir dist\scurvy-dog-alpha4.2
 ```
 
 The `git status` command must print nothing.

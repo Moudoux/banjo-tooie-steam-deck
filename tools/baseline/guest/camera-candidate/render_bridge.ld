@@ -46,6 +46,8 @@ SECTIONS {
     .tooie_backpack621_helpers : { *(.tooie_backpack621_helpers) } >patch
     .tooie_backpack621_state ALIGN(4) : { *(.tooie_backpack621_state) } >patch
     ASSERT(SIZEOF(.tooie_backpack621_state)==0 || SIZEOF(.tooie_backpack621_state)==612, "621 state extent")
+    .tooie_graphics_rate_state ALIGN(8) : { *graphics_rate.o(.tooie_graphics_rate_state) } >patch
+    ASSERT(SIZEOF(.tooie_graphics_rate_state)==0 || SIZEOF(.tooie_graphics_rate_state)==48, "two graphics-rate tails extent")
     .forbidden : {
         *(.text*) *(.rodata*) *(.srodata*) *(.data*) *(.sdata*)
         *(.bss*) *(.sbss*) *(COMMON) *(.tdata*) *(.tbss*) *(.lit*)

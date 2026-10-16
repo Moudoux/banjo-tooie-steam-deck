@@ -928,9 +928,15 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                NOT _baseline_actor_enabled OR NOT _baseline_pre_type STREQUAL "OBJECT")
                 message(FATAL_ERROR "Backpack621 requires exact612-state/eight-helper guest and CPU/actor/PRE carrier")
             endif()
-            math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+8")
+            math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+9")
             math(EXPR _baseline_helper_expected "${_baseline_helper_expected}+8")
+            string(JSON _baseline_rate_state GET "${_baseline_selected_receipt}" graphics_rate state_bytes)
+            if(NOT _baseline_rate_state EQUAL 48)
+                message(FATAL_ERROR "Selected player requires exact two public-rate tails")
+            endif()
             set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                "${CMAKE_SOURCE_DIR}/tools/baseline/prepare_graphics_rate.py"
+                "${CMAKE_SOURCE_DIR}/tools/baseline/guest/camera-candidate/graphics_rate.c"
                 "${_baseline_bridge_dir}/backpack621_selection_layout.h"
                 "${CMAKE_SOURCE_DIR}/tools/baseline/prepare_backpack621.py"
                 "${CMAKE_SOURCE_DIR}/tools/baseline/guest/backpack621-candidate/backpack621_owner.c"
@@ -969,10 +975,10 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
             endif()
             if(TOOIE_BASELINE_BACKPACK621)
                 # Installed only after actual fullgraph/control/source/ELF acceptance.
-                set(_baseline_expected_image "d77f234a46e3976da068429e411bac68496d9aedff520e727c983491725aa0e2")
+                set(_baseline_expected_image "e8381aa84fb10d5536354a1306d06d79abe22134b09767c2ffd5c38ef413331a")
                 if(_baseline_shadow_coefficients STREQUAL "ON")
                     # Same composition; shadow_projection.o (TOOIE_SHADOW_COEFFICIENTS=1) and actor.o (TOOIE_HAND862=1) differ.
-                    set(_baseline_expected_image "197ff89208ef8df1e65a4ab74b1575a09049382e4858e736b54b7175e5f0c15c")
+                    set(_baseline_expected_image "a677899114d5ab2527f0c59211d824b6bd7efe9802a79290923c4822f5e352e8")
                 endif()
                 string(JSON _baseline_raw_b621_type TYPE "${_baseline_raw_binding}" backpack621)
                 string(JSON _baseline_raw_b621 GET "${_baseline_raw_binding}" backpack621)
@@ -1220,6 +1226,38 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
         target_compile_definitions(BaselineLeafHandlerTest PRIVATE NOMINMAX "TOOIE_PLAYER_STATE_ADDRESS=${_player_state}"
             "TOOIE_DD998_FRAME_BYTES=${_baseline_leaf_frame}" "TOOIE_DD998_HELPER_FRAME_BYTES=${_baseline_leaf_helper_frame}")
         set_target_properties(BaselineLeafHandlerTest PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
+    endif()
+    if(TOOIE_BASELINE_BACKPACK621)
+        set(_baseline_rate_fixture_dir "${_baseline_bridge_dir}/graphics-rate-fixture")
+        set(_baseline_rate_fixture "${_baseline_rate_fixture_dir}/graphics_rate_candidate_fixture.inc")
+        file(READ "${_baseline_bridge_dir}/receipt.json" _baseline_rate_receipt)
+        string(JSON _baseline_rate_tail GET "${_baseline_rate_receipt}" graphics_rate state)
+        string(JSON _baseline_rate_frame GET "${_baseline_rate_receipt}" objects graphics_rate frames func_800E7EF4)
+        add_custom_command(OUTPUT "${_baseline_rate_fixture}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${_baseline_rate_fixture_dir}"
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/extract_heap_realloc.py"
+                "${_baseline_bridge_dir}/boot.c" "${_baseline_rate_fixture}" func_800E7EF4
+            DEPENDS tests/extract_heap_realloc.py "${_baseline_bridge_dir}/boot.c"
+                "${_baseline_bridge_dir}/receipt.json" VERBATIM)
+        add_executable(BaselineGraphicsRateTest EXCLUDE_FROM_ALL
+            tests/baseline_graphics_rate_test.cpp "${_baseline_rate_fixture}")
+        target_include_directories(BaselineGraphicsRateTest PRIVATE
+            "${_baseline_rate_fixture_dir}" "${RUNTIME_RECOMP_INCLUDE}")
+        target_link_libraries(BaselineGraphicsRateTest PRIVATE rt64)
+        target_link_directories(BaselineGraphicsRateTest PRIVATE "${_baseline_sdl}/lib/x64")
+        if(MSVC)
+            target_link_options(BaselineGraphicsRateTest PRIVATE /ENTRY:mainCRTStartup)
+        endif()
+        target_include_directories(BaselineGraphicsRateTest PRIVATE
+            "${_baseline_rt64}/src" "${_baseline_rt64}/src/contrib"
+            "${_baseline_rt64}/src/contrib/hlslpp/include" "${_baseline_rt64}/src/contrib/plume"
+            "${_baseline_sdl}/include")
+        target_compile_definitions(BaselineGraphicsRateTest PRIVATE NOMINMAX HLSL_CPU SDL_MAIN_HANDLED
+            "TOOIE_GRAPHICS_RATE_TAIL_ADDRESS=${_baseline_rate_tail}u"
+            "TOOIE_GRAPHICS_RATE_FRAME_BYTES=${_baseline_rate_frame}u")
+        set_target_properties(BaselineGraphicsRateTest PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
+        add_test(NAME baseline_graphics_rate COMMAND BaselineGraphicsRateTest)
     endif()
     set_target_properties(BaselineDrawBoundariesTest PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
     if(TOOIE_BASELINE_SILO_CANDIDATE)

@@ -1,5 +1,14 @@
 # Release notes
 
+## 0.1.0-alpha.4.2 - Banjo-Tooie: Scurvy Dog Port
+
+- Changed player presentation to Present Early for every output-rate option.
+- Changed frame pacing to use the game's measured graphics rate.
+- Changed the profile folder to BanjoTooieScurvyDogPort, with a one-time copy of existing Alpha 4/4.1 saves and settings.
+- Fixed controller binding guidance and the controls menu layout.
+
+Upgrade: Close Alpha 4/4.1 before starting this version. Your previous profile is preserved; later progress in the old version is not synchronized.
+
 ## 0.1.0-alpha.4.1 — Banjo-Tooie: Scurvy Dog Port
 
 - Fixed: Project name in the executable, dialogs and package. Run

@@ -1,6 +1,6 @@
 """Maintained player guest recipe: baseline raw, boot/core1/heap, Silo, then the
-selected 621 composition with the existing shadow policy and qualified hand labels
-(guest 197ff892; visual smoothness remains unverified).
+selected 621 composition with the existing shadow policy, qualified hand labels
+and a public refresh-rate command using the completed graphics interval.
 
 Run under the existing WSL codegen environment after tools/prepare_codegen.py has
 produced config/, generated/heap-patch-products/ and generated/core2-expected.bin
@@ -21,9 +21,9 @@ OUTPUTS = [BASELINE + '/raw', BASELINE + '/heap-patch', BASELINE + '/render-brid
 # Accepted player selection; shadow_observer stays OFF.
 SELECTION = ['--actor-palette', '--demo-timing', '--shadow-fix', '--pre-background', '--cpu625',
              '--minimum-host', '--npc665', '--backpack621', '--shadow-coefficients']
-IMAGE_SHA256 = '197ff89208ef8df1e65a4ab74b1575a09049382e4858e736b54b7175e5f0c15c'
-IMAGE_BYTES = 297092
-LAYOUT_SHA256 = '82877a89b3680a737374552bc57f1633e64d7d2fc7f0fb5d3d86d0e5f0730b5a'
+IMAGE_SHA256 = 'a677899114d5ab2527f0c59211d824b6bd7efe9802a79290923c4822f5e352e8'
+IMAGE_BYTES = 297368
+LAYOUT_SHA256 = 'b7eaff07e6dde1bb40b668f80edf3d8a9f819629844792cac997f6e46b5a1c46'
 ROM_SHA256 = '9ec37fba6890362eba86fb855697a9cff1519275531b172083a1a6a045483583'
 DECOMPRESSED_SHA256 = '8c9d316b2edca686ec8393ddf95d480a7dfd9879ef434dbcfc4ea3000f2ffe89'
 # Native publication references that Baseline.cmake authenticates at configure.

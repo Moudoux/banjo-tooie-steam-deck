@@ -1,4 +1,4 @@
-Banjo-Tooie: Scurvy Dog Port 0.1.0-alpha.4.1 - Windows x64
+Banjo-Tooie: Scurvy Dog Port 0.1.0-alpha.4.2 - Windows x64
 ================================================
 
 Unofficial alpha. The game is not included; you need your own copy.
