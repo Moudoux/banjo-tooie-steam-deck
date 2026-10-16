@@ -100,6 +100,16 @@ settings**. **Resume** returns to the game and **Quit** exits.
 - Default (Original) uses the game's original output rate. This label replaces
   Current; it does not change an existing output-rate choice.
 
+### Texture packs (local, unreleased build)
+
+- Place RT64 `.rtz` texture packs in
+  `%LOCALAPPDATA%\BanjoTooieScurvyDogPort\mods`, then restart the game. There is
+  no pack menu yet.
+- This experimental support loads texture replacements only. Code mods, ROM
+  patches and modified ROMs are unsupported.
+- Pack loading passed startup checks; in-game replacement appearance has not
+  yet been verified.
+
 ## Default controls
 
 | Game input | Keyboard | Controller |

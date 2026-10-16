@@ -163,7 +163,7 @@ These are open cleanup items, not finished architecture.
 - **Raw offsets.** Guest patches still use offsets such as `player_body(self)+0x11` and fixed addresses such as `0x80122DC8`.
 - **Carried upstream patches.** See [Pinned upstream and carried patches](#pinned-upstream-and-carried-patches).
 - **Windows-only shell.** The player uses a small ImGui menu, not a shared cross-platform frontend.
-- **No mod support.** The player loads no mods and exports no mod API. It claims no compatibility with code mods.
+- **Texture packs (local, unreleased).** The player accepts RT64 `.rtz` packs through the runtime's mod manifest/order service. Code mods and ROM patches remain unsupported; no guest mod API is exported. The engineering baseline keeps an empty mod game ID.
 - **Old source.** The old engine and unselected experiments remain in the tree.
 
 ## What is built
@@ -587,12 +587,12 @@ This section separates three sources:
 - Mods can set transform IDs ([transform_tagging.c L959–L970](https://github.com/BanjoRecomp/BanjoRecomp/blob/dbd52154bc1e00e56867b1fac94a8f907052f41b/patches/transform_tagging.c#L959-L970)).
 - The handle array is larger than the game's normal marker count, so that mods can add markers.
 
-**Tooie, current state**
+**Tooie, selected local player**
 
-- The player loads no mods and exports no API.
+- Runtime discovers texture packs under the owned profile's `mods` folder and supplies their manifest/order. Native enable/disable callbacks stage paths; the graphics owner applies them through RT64's public texture cache after upload completion. No custom archive loader or code-mod hook is added.
 - Side tables match the original 200-entry pool. Descriptors outside it are refused, not tracked.
 
-**Tooie, if mods were added later**
+**Tooie, if code mods were added later**
 
 - A live recompiler that rebuilds a ROM-derived function without this port's hook configuration can omit the inserted hook calls.
 - A mod that deliberately overrides a registered guest C replacement removes that replacement's behavior, unless the two are composed or chained.

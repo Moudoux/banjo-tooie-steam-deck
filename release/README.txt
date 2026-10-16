@@ -37,8 +37,13 @@ Controller: left stick moves, A = A, B = B, Start = Start,
             right stick = C buttons.
 
 VIDEO
-Output rate defaults to Original. Changing the output rate takes effect the
-next time you start the game. Default (Original) is the former Current choice.
+Output rate defaults to Original and changes apply during play.
+Default (Original) is the former Current choice.
+
+TEXTURE PACKS (EXPERIMENTAL)
+Place RT64 .rtz packs in %LOCALAPPDATA%\BanjoTooieScurvyDogPort\mods and restart.
+Only texture replacements are supported; code mods and ROM patches are not.
+In-game texture appearance has not yet been verified.
 
 KNOWN ISSUES
 - Mayahem Temple can render black in the distance.

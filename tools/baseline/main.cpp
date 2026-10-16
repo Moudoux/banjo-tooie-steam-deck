@@ -231,7 +231,12 @@ int main(int argc, char** argv) {
 #else
             .display_name = "Banjo-Tooie baseline",
 #endif
-            .game_id = u8"bt.n64.us.1.0", .mod_game_id = "",
+            .game_id = u8"bt.n64.us.1.0",
+#ifdef BASELINE_PLAYER
+            .mod_game_id = "bt",
+#else
+            .mod_game_id = "",
+#endif
             .save_type = recomp::SaveType::Eep16k, .thumbnail_bytes = {}, .is_enabled = true,
             .decompression_routine = nullptr, .has_compressed_code = true,
             .entrypoint_address = gpr(int32_t(0x80000400)), .entrypoint = recomp_entrypoint,
@@ -249,6 +254,9 @@ int main(int argc, char** argv) {
 #endif
         };
         if (!recomp::register_game(game)) throw std::runtime_error("Game registration failed");
+#ifdef BASELINE_PLAYER
+        baseline::register_texture_packs();
+#endif
 #ifdef BASELINE_BOOT_PATCH
         baseline::register_boot_patch(section_table, ARRLEN(section_table));
 #endif

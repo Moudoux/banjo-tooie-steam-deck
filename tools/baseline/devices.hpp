@@ -8,6 +8,9 @@ enum class RenderMode { Original, Display };
 ultramodern::renderer::WindowHandle open_devices(const std::filesystem::path& root,
     ultramodern::renderer::GraphicsApi api, unsigned seconds, RenderMode render_mode);
 void close_devices();
+#ifdef BASELINE_PLAYER
+void register_texture_packs();
+#endif
 void emit_audio_summary();
 void load_input_script(const std::filesystem::path& path);
 ultramodern::renderer::callbacks_t renderer_callbacks();

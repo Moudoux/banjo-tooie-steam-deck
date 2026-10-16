@@ -18,6 +18,11 @@
 #include "dp-freeze.hpp"
 #endif
 #include "librecomp/game.hpp"
+#ifdef BASELINE_PLAYER
+#include "librecomp/mods.hpp"
+#include "ultramodern/error_handling.hpp"
+#include <unordered_map>
+#endif
 #include "SDL.h"
 #include "SDL_syswm.h"
 // Runtime's lean Windows include omits the COM bases required by DXC headers.
@@ -28,6 +33,9 @@
 #include "hle/rt64_rdp.h"
 #include "hle/rt64_interpreter.h"
 #include "hle/rt64_shared_queue_resources.h"
+#ifdef BASELINE_PLAYER
+#include "render/rt64_texture_cache.h"
+#endif
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -67,6 +75,56 @@ RenderMode selected_render_mode = RenderMode::Original;
 std::chrono::steady_clock::time_point quit_at;
 bool start_requested = false;
 bool quit_requested = false;
+#ifdef BASELINE_PLAYER
+bool start_refused = false;
+struct TexturePack { size_t order; std::filesystem::path path; };
+std::mutex texture_pack_mutex;
+std::unordered_map<std::string, TexturePack> texture_packs;
+std::atomic<bool> texture_packs_pending = false;
+void enable_texture_pack(recomp::mods::ModContext& context, const recomp::mods::ModHandle& mod) {
+    const TexturePack pack{context.get_mod_order_index(mod.manifest.mod_id), mod.manifest.mod_root_path};
+    std::lock_guard lock(texture_pack_mutex);
+    texture_packs.insert_or_assign(mod.manifest.mod_id, pack);
+    texture_packs_pending.store(true, std::memory_order_release);
+}
+void disable_texture_pack(recomp::mods::ModContext&, const recomp::mods::ModHandle& mod) {
+    std::lock_guard lock(texture_pack_mutex);
+    texture_packs.erase(mod.manifest.mod_id);
+    texture_packs_pending.store(true, std::memory_order_release);
+}
+bool texture_only_selection() {
+    for (const auto& mod : recomp::mods::get_all_mod_details("bt")) {
+        if (!mod.runtime_toggleable && (recomp::mods::is_mod_enabled(mod.mod_id) ||
+                recomp::mods::is_mod_auto_enabled(mod.mod_id))) {
+            const auto message = "Only texture packs are supported. Disable mod: " + mod.display_name;
+            ultramodern::error_handling::message_box(message.c_str());
+            return false;
+        }
+    }
+    return true;
+}
+void apply_texture_packs(RT64::TextureCache& cache) {
+    if (!texture_packs_pending.exchange(false, std::memory_order_acq_rel)) return;
+    std::vector<TexturePack> packs;
+    {
+        std::lock_guard lock(texture_pack_mutex);
+        for (const auto& entry : texture_packs) packs.push_back(entry.second);
+    }
+    // Earlier mod entries override later ones; no runtime lock is held here.
+    std::sort(packs.begin(), packs.end(), [](const auto& a, const auto& b) { return a.order > b.order; });
+    std::vector<RT64::ReplacementDirectory> directories;
+    for (const auto& pack : packs) directories.emplace_back(pack.path);
+    cache.waitForGPUUploads();
+    bool loaded = true;
+    if (directories.empty()) cache.clearReplacementDirectories();
+    else loaded = cache.loadReplacementDirectories(directories);
+    if (!loaded) {
+        cache.clearReplacementDirectories();
+        std::fputs("baseline texture-pack filesystem load failed; using original textures\n", stderr);
+    }
+    std::fprintf(stderr, "baseline texture-pack count=%zu filesystem_loaded=%s\n", packs.size(), loaded ? "true" : "false");
+}
+#endif
 std::atomic<bool> quit_published = false;
 std::atomic<bool> initial_vi_ready = false;
 std::atomic<uint32_t> first_dl_start{0}, first_dl_size{0};
@@ -314,6 +372,9 @@ public:
     }
     void send_dl(const OSTask* task) override {
         if (!valid() || !task) fail("Display list on invalid renderer");
+#ifdef BASELINE_PLAYER
+        apply_texture_packs(*app->textureCache);
+#endif
         const bool armed = first_dl_armed.load(std::memory_order_acquire);
         if (armed && task_ordinal < 3) ++task_ordinal;
         const bool observe = armed && task_ordinal <= 2;
@@ -586,6 +647,16 @@ void expect_first_graphics(uint32_t start, uint32_t size) {
 }
 bool first_graphics_processed() { return first_dl_processed.load(std::memory_order_acquire); }
 bool quit_was_requested() { return quit_published.load(std::memory_order_acquire); }
+#ifdef BASELINE_PLAYER
+void register_texture_packs() {
+    const auto content = recomp::mods::register_mod_content_type({
+        .content_filename = "rt64.json", .allow_runtime_toggle = true,
+        .on_enabled = enable_texture_pack, .on_disabled = disable_texture_pack, .on_reordered = nullptr
+    });
+    if (!recomp::mods::register_mod_container_type("rtz", {content}, false))
+        throw std::runtime_error("Texture pack registration failed");
+}
+#endif
 
 ultramodern::renderer::WindowHandle open_devices(const std::filesystem::path& root,
     ultramodern::renderer::GraphicsApi api, unsigned seconds, RenderMode render_mode) {
@@ -788,7 +859,12 @@ void update_gfx(void*) {
     const auto publication=host::tick(start_requested);
     const bool deadline_reached=std::chrono::steady_clock::now()>=quit_at;
     const bool close=publication.quit;
-    const bool stopping=close || quit_requested || deadline_reached;
+#ifdef BASELINE_PLAYER
+    const bool start_failed=start_requested && !ultramodern::is_game_started();
+#else
+    constexpr bool start_failed=false, start_refused=false;
+#endif
+    const bool stopping=close || quit_requested || deadline_reached || start_failed || start_refused;
     // Menu ownership uses the existing tape abort/latch, not a hardware witness.
     const bool activity=publication.activity || host::menu_open();
     const auto physical=stopping ? input::State{} : publication.physical;
@@ -799,16 +875,20 @@ void update_gfx(void*) {
         input_player.publish(physical,activity,stopping,now,publication.focused && !stopping,&events);
     }
     print_input_events(events);
-    if(!quit_requested && (close || deadline_reached)) {
+    if(!quit_requested && (close || deadline_reached || start_failed || start_refused)) {
         quit_requested=true;
         quit_published.store(true,std::memory_order_release);
-        std::fprintf(stderr,"baseline standard quit requested (%s)\n",close ? "host/window" : "deadline");
+        const char* reason=start_refused ? "unsupported-mod" : start_failed ? "mod-load" : close ? "host/window" : "deadline";
+        std::fprintf(stderr,"baseline standard quit requested (%s)\n",reason);
         ultramodern::quit();
 #if defined(BASELINE_VI_CONTROLLER_CYCLE)
         ultramodern::detail::dp_freeze::notify_stop();
 #endif
     }
-    if(!start_requested && !quit_requested && initial_vi_ready.load(std::memory_order_acquire)) {
+    if(!start_requested && !quit_requested && !start_refused && initial_vi_ready.load(std::memory_order_acquire)) {
+#ifdef BASELINE_PLAYER
+        if (!texture_only_selection()) { start_refused=true; return; }
+#endif
         // HOST selects the compiled typed guest presentation provider too.
         // Static capability is independent of lazy menu renderer readiness.
         host::render::latch_startup(true);
