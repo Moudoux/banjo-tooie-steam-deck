@@ -1311,6 +1311,21 @@ enable_testing()
 if(TOOIE_BASELINE_PLAYER)
     add_test(NAME baseline_player_startup COMMAND BaselinePlayerStartupTest "${CMAKE_BINARY_DIR}/baseline/player-test")
     set_tests_properties(baseline_player_startup PROPERTIES TIMEOUT 30)
+    add_executable(baseline_output_rate_test EXCLUDE_FROM_ALL tests/baseline_output_rate_test.cpp
+        tools/baseline/minimum_presentation.cpp src/widescreen.cpp)
+    target_link_libraries(baseline_output_rate_test PRIVATE rt64)
+    target_link_directories(baseline_output_rate_test PRIVATE "${_baseline_sdl}/lib/x64")
+    target_compile_definitions(baseline_output_rate_test PRIVATE BASELINE_PLAYER=1 NOMINMAX HLSL_CPU SDL_MAIN_HANDLED)
+    target_compile_options(baseline_output_rate_test PRIVATE -UNDEBUG)
+    target_include_directories(baseline_output_rate_test PRIVATE src tools/baseline
+        "${CMAKE_SOURCE_DIR}/tools/baseline/guest/minimum-host"
+        "${RUNTIME_ROOT}/ultramodern/include" "${RUNTIME_RECOMP_INCLUDE}"
+        "${_baseline_rt64}/src" "${_baseline_rt64}/src/contrib"
+        "${RUNTIME_ROOT}/thirdparty"
+        "${_baseline_rt64}/src/contrib/hlslpp/include" "${_baseline_rt64}/src/contrib/plume"
+        "${_baseline_sdl}/include")
+    set_target_properties(baseline_output_rate_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
+    add_test(NAME baseline_output_rate COMMAND baseline_output_rate_test)
 endif()
 if(TOOIE_BASELINE_CORE1_PUBLICATION)
     add_test(NAME baseline_guest_digest COMMAND BaselineGuestDigestTest)

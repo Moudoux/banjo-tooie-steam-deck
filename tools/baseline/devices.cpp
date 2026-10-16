@@ -293,7 +293,18 @@ public:
     bool valid() override { return app && setup_result == ultramodern::renderer::SetupResult::Success; }
     bool update_config(const ultramodern::renderer::GraphicsConfig& old_config,
         const ultramodern::renderer::GraphicsConfig& new_config) override {
+#if BASELINE_PLAYER
+        if (!valid()) fail("Config update on invalid renderer");
+        try {
+            if (host::render::update_rate(app->userConfig, *app->sharedQueueResources, old_config, new_config)) {
+                std::fprintf(stderr, "baseline output-rate config-applied rr_option=%d rr_manual_value=%d owner=gfx presented=unobserved\n",
+                    int(new_config.rr_option), new_config.rr_manual_value);
+                return true;
+            }
+        } catch (const std::exception& error) { fail(error.what()); }
+#else
         if (old_config != new_config) fail("Graphics config changed outside declared condition");
+#endif
         return false;
     }
     void enable_instant_present() override {
@@ -344,6 +355,12 @@ public:
     }
     void update_screen() override {
         if (!valid()) fail("Screen update on invalid renderer");
+#if BASELINE_PLAYER
+        const auto requested = host::requested_output_rate();
+        auto config = ultramodern::renderer::get_graphics_config(); // Graphics owner only after startup.
+        host::render::preference_rate(config, requested.option, requested.manual_hz);
+        if (config != ultramodern::renderer::get_graphics_config()) ultramodern::renderer::set_graphics_config(config);
+#endif
         app->updateScreen();
         const uint32_t rate = get_display_framerate();
         if ((!display_rate_seen && rate != 0) || (display_rate_seen && rate != observed_display_rate)) {
@@ -689,6 +706,10 @@ ultramodern::renderer::WindowHandle open_devices(const std::filesystem::path& ro
     config.msaa_option = Antialiasing::None;
     config.rr_option = BASELINE_RENDERER_COMPARISON ? RefreshRate::Manual : RefreshRate::Original;
     config.hpfb_option = HighPrecisionFramebuffer::Off; config.rr_manual_value = 60; config.ds_option = 1;
+#if BASELINE_PLAYER
+    const auto& latched = host::latched_preferences();
+    host::render::preference_rate(config, latched.output_rate, latched.manual_hz);
+#endif
     set_graphics_config(config);
     quit_published.store(false, std::memory_order_relaxed);
     quit_at = seconds ? std::chrono::steady_clock::now() + std::chrono::seconds(seconds)

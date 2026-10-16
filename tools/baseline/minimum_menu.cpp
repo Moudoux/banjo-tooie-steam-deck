@@ -45,7 +45,9 @@ void controls(const Snapshot& snapshot) {
         if(ImGui::Button("Cancel binding")){Request r;r.kind=RequestKind::CancelCapture;enqueue(std::move(r));}
     }
     if(ImGui::BeginTable("bindings",3,ImGuiTableFlags_Borders|ImGuiTableFlags_RowBg|ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Action",ImGuiTableColumnFlags_WidthFixed);ImGui::TableSetupColumn("Primary",ImGuiTableColumnFlags_WidthStretch,1.f);ImGui::TableSetupColumn("Secondary",ImGuiTableColumnFlags_WidthStretch,1.f);ImGui::TableHeadersRow();
+        float action_width=ImGui::CalcTextSize("Action").x;
+        for(const auto& row:snapshot.bindings)action_width=std::max(action_width,ImGui::CalcTextSize(row.action.c_str()).x);
+        ImGui::TableSetupColumn("Action",ImGuiTableColumnFlags_WidthFixed,action_width);ImGui::TableSetupColumn("Primary",ImGuiTableColumnFlags_WidthStretch,1.f);ImGui::TableSetupColumn("Secondary",ImGuiTableColumnFlags_WidthStretch,1.f);ImGui::TableHeadersRow();
         for(unsigned action=0;action<snapshot.bindings.size();++action) {
             const auto& row=snapshot.bindings[action];ImGui::PushID(int(action));ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);ImGui::TextUnformatted(row.action.c_str());
@@ -74,7 +76,13 @@ void controls(const Snapshot& snapshot) {
 }
 void video(const Snapshot& snapshot) {
     const auto& prefs=snapshot.preferences;
+#if BASELINE_PLAYER
+    ImGui::TextWrapped("Output rate, VSync and fullscreen apply now; resolution and aspect take effect next launch.");
+    bool fullscreen=prefs.fullscreen!=0;
+    if(ImGui::Checkbox("Fullscreen",&fullscreen))preference(Preference::Fullscreen,int(fullscreen));
+#else
     ImGui::TextWrapped("Display settings except VSync take effect next launch.");
+#endif
     int resolution=prefs.resolution;
     if(ImGui::SliderInt("Resolution scale",&resolution,1,8,"%dx"))preference(Preference::Resolution,resolution);
     int rate=prefs.output_rate;

@@ -10,6 +10,38 @@
 namespace baseline::host::render {
 namespace {
 std::atomic<uint32_t> settings{0},publication{0};
+bool rt64_rate(RT64::UserConfiguration& user,const ultramodern::renderer::GraphicsConfig& config) {
+    if(config.rr_manual_value<20 || config.rr_manual_value>360)return false;
+    using Rate=RT64::UserConfiguration::RefreshRate;
+    Rate rate;
+    switch(config.rr_option) {
+    case ultramodern::renderer::RefreshRate::Original:rate=Rate::Original;break;
+    case ultramodern::renderer::RefreshRate::Display:rate=Rate::Display;break;
+    case ultramodern::renderer::RefreshRate::Manual:rate=Rate::Manual;break;
+    default:return false;
+    }
+    user.refreshRate=rate;user.refreshRateTarget=config.rr_manual_value;
+    return true;
+}
+}
+void preference_rate(ultramodern::renderer::GraphicsConfig& config,int option,int manual_hz) {
+    using Rate=ultramodern::renderer::RefreshRate;
+    config.rr_option=option==2?Rate::Display:option==3?Rate::Manual:Rate::Original;
+    config.rr_manual_value=manual_hz;
+}
+bool update_rate(RT64::UserConfiguration& app_user,RT64::SharedQueueResources& shared,
+    const ultramodern::renderer::GraphicsConfig& old_config,const ultramodern::renderer::GraphicsConfig& new_config) {
+    if(old_config==new_config)return false;
+    auto other=new_config;
+    other.rr_option=old_config.rr_option;other.rr_manual_value=old_config.rr_manual_value;
+    if(other!=old_config)throw std::runtime_error("Graphics config changed outside output rate");
+    RT64::UserConfiguration rate;
+    if(!rt64_rate(rate,new_config))throw std::runtime_error("Invalid output-rate configuration");
+    std::lock_guard lock(shared.configurationMutex);
+    shared.userConfig.refreshRate=app_user.refreshRate=rate.refreshRate;
+    shared.userConfig.refreshRateTarget=app_user.refreshRateTarget=rate.refreshRateTarget;
+    shared.userConfigChanged=true;shared.newConfigValidated=false;
+    return true;
 }
 void latch_startup(bool pillarbox_capable) {
     if(settings.load(std::memory_order_acquire))throw std::runtime_error("Baseline supports one game per process");
@@ -61,7 +93,11 @@ void configure_startup(RT64::Application& app) {
 #if BASELINE_PLAYER
     // Player presentation stays independent of the engineering RenderMode and output rate.
     app.enhancementConfig.presentation.mode=RT64::EnhancementConfiguration::Presentation::Mode::PresentEarly;
-#endif
+    app.enhancementConfig.textureLOD.scale=true; // Mip choice follows rendered resolution.
+    ultramodern::renderer::GraphicsConfig config{};
+    preference_rate(config,prefs.output_rate,prefs.manual_hz);
+    if(!rt64_rate(app.userConfig,config))throw std::runtime_error("Invalid startup output rate");
+#else
     if(prefs.output_rate==1)app.userConfig.refreshRate=RT64::UserConfiguration::RefreshRate::Original;
     if(prefs.output_rate==2)app.userConfig.refreshRate=RT64::UserConfiguration::RefreshRate::Display;
     if(prefs.output_rate==3) {
@@ -69,6 +105,7 @@ void configure_startup(RT64::Application& app) {
         app.userConfig.refreshRateTarget=prefs.manual_hz;
     }
     // Output-rate0 inherits the explicitly selected CLI render condition.
+#endif
 }
 }
 

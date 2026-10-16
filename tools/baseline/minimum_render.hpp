@@ -1,11 +1,15 @@
 #pragma once
 #include "minimum_host.hpp"
+#include "ultramodern/config.hpp"
 #include <cstdint>
-namespace RT64 { struct Application; struct SharedQueueResources; }
+namespace RT64 { struct Application; struct SharedQueueResources; struct UserConfiguration; }
 namespace baseline::host::render {
 enum class Status { Pending, Applied, Unsupported };
 void install();
 void configure_startup(RT64::Application&);
+void preference_rate(ultramodern::renderer::GraphicsConfig&,int option,int manual_hz);
+bool update_rate(RT64::UserConfiguration&,RT64::SharedQueueResources&,
+    const ultramodern::renderer::GraphicsConfig& old_config,const ultramodern::renderer::GraphicsConfig& new_config);
 void publish_renderer(RT64::Application&,SDL_Window*);
 void latch_startup(bool pillarbox_capable);
 Status reconcile_aspect(RT64::SharedQueueResources&,uint32_t settings,uint32_t publication);

@@ -3,6 +3,7 @@
 #include "input.hpp"
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <deque>
 #include <filesystem>
 #include <memory>
@@ -10,14 +11,22 @@
 #include <vector>
 
 namespace baseline::host {
-// Values are read once before the guest starts. Changes in the menu persist for
-// the next process, except VSync, whose request is consumed by public Draw.
+// Resolution and aspect are latched before the guest starts. Output rate,
+// VSync and fullscreen apply live in the player and persist for the next process.
 struct Preferences {
     int resolution = 1, output_rate = 0, manual_hz = 60;
     int wide = -1, native_aspect = 0, cutscene_aspect = 0;
     int vsync = -1; // Missing preserves the backend's current value.
+    int fullscreen = 0;
 };
-enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync };
+enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen };
+struct OutputRate { int option = 0, manual_hz = 60; };
+inline uint32_t pack_output_rate(OutputRate rate) noexcept {
+    return (uint32_t(rate.option) << 16) | uint32_t(rate.manual_hz);
+}
+inline OutputRate unpack_output_rate(uint32_t rate) noexcept {
+    return {int(rate >> 16), int(rate & 0xffffu)};
+}
 enum class RequestKind { Controller, Profile, ResetBindings, Capture, CancelCapture, Preference };
 struct Request {
     RequestKind kind{};
@@ -68,4 +77,6 @@ void request_quit() noexcept;
 void publish_ready(bool) noexcept;
 RenderInput take_render_input();
 int requested_vsync() noexcept;
+// Graphics owner only: consume the SDL owner's atomic requested pair.
+OutputRate requested_output_rate() noexcept;
 }

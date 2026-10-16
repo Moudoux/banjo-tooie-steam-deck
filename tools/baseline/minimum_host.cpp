@@ -15,6 +15,7 @@ bool reported_unready = false, initialized = false;
 std::atomic<bool> menu{false}, ready{false}, started{false};
 std::atomic<bool> sticky_close{false}, sticky_quit{false}, overflow{false};
 std::atomic<int> vsync{-1};
+std::atomic<uint32_t> output_rate{pack_output_rate({})};
 Preferences latched, selected;
 std::string notice;
 std::mutex request_mutex, render_mutex;
@@ -39,6 +40,21 @@ void close_menu() {
 int bounded(int value, int lo, int hi, int fallback) {
     return value < lo || value > hi ? fallback : value;
 }
+#if BASELINE_PLAYER
+void set_fullscreen(bool enabled) {
+    const int result = SDL_SetWindowFullscreen(window, enabled ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+    const std::string error = result != 0 ? SDL_GetError() : "Window flags did not match the request";
+    selected.fullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN_DESKTOP) == SDL_WINDOW_FULLSCREEN_DESKTOP;
+    if (result == 0 && selected.fullscreen == int(enabled)) {
+        tooie::frontend::settings::set_int("baseline_fullscreen", selected.fullscreen);
+        if (notice.rfind("Fullscreen could not be changed:", 0) == 0) notice.clear();
+        std::fprintf(stderr, "baseline fullscreen applied=%d owner=SDL\n", selected.fullscreen);
+    } else {
+        notice = "Fullscreen could not be changed: " + error;
+        std::fprintf(stderr, "baseline fullscreen requested=%d actual=%d error=%s\n", int(enabled), selected.fullscreen, error.c_str());
+    }
+}
+#endif
 void update_preference(Preference key, int value) {
     using namespace tooie::frontend;
     switch (key) {
@@ -47,10 +63,12 @@ void update_preference(Preference key, int value) {
         selected.resolution = value; settings::set_int("baseline_resolution", value); break;
     case Preference::OutputRate:
         if (value < 0 || value > 3) return;
-        selected.output_rate = value; settings::set_int("baseline_output_rate", value); break;
+        selected.output_rate = value; settings::set_int("baseline_output_rate", value);
+        output_rate.store(pack_output_rate({selected.output_rate, selected.manual_hz}), std::memory_order_release); break;
     case Preference::ManualHz:
         if (value < 20 || value > 360) return;
-        selected.manual_hz = value; settings::set_int("baseline_manual_hz", value); break;
+        selected.manual_hz = value; settings::set_int("baseline_manual_hz", value);
+        output_rate.store(pack_output_rate({selected.output_rate, selected.manual_hz}), std::memory_order_release); break;
     case Preference::Wide:
         if (value < -1 || value > 1) return;
         selected.wide = value; settings::set_int("tooie_game_widescreen", value); break;
@@ -64,6 +82,12 @@ void update_preference(Preference key, int value) {
         if (value < 0 || value > 1) return;
         selected.vsync = value; settings::set_int("baseline_vsync", value);
         vsync.store(value, std::memory_order_release); break;
+    case Preference::Fullscreen:
+#if BASELINE_PLAYER
+        if (value < 0 || value > 1) return;
+        set_fullscreen(value != 0);
+#endif
+        break;
     }
 }
 void apply(Request& request) {
@@ -119,7 +143,12 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile) {
     selected.native_aspect = bounded(settings::get_int("tooie_native_aspect", 0), 0, 3, 0);
     selected.cutscene_aspect = bounded(settings::get_int("tooie_cutscene_aspect", 0), 0, 1, 0);
     selected.vsync = bounded(settings::get_int("baseline_vsync", -1), -1, 1, -1);
+    selected.fullscreen = bounded(settings::get_int("baseline_fullscreen", 0), 0, 1, 0);
     latched = selected; vsync.store(selected.vsync, std::memory_order_release);
+    output_rate.store(pack_output_rate({latched.output_rate, latched.manual_hz}), std::memory_order_release);
+#if BASELINE_PLAYER
+    if (selected.fullscreen) set_fullscreen(true);
+#endif
     if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0)
         std::fprintf(stderr, "baseline mapper keyboard-only: %s\n", SDL_GetError());
     tooie::input::initialize_settings(profile);
@@ -130,6 +159,7 @@ void shutdown() noexcept {
     initialized = false; window = nullptr; window_id = 0;
     ready = menu = started = sticky_close = sticky_quit = overflow = false;
     previously_ready = quarantine = reported_unready = false; vsync = -1;
+    output_rate.store(pack_output_rate({}), std::memory_order_release);
     { std::lock_guard lock(request_mutex); requests.clear(); }
     { std::lock_guard lock(render_mutex); render_input = {}; }
 }
@@ -215,6 +245,7 @@ RenderInput take_render_input() {
     out.events.swap(render_input.events); render_input.reset_input = false; return out;
 }
 int requested_vsync() noexcept { return vsync.load(std::memory_order_acquire); }
+OutputRate requested_output_rate() noexcept { return unpack_output_rate(output_rate.load(std::memory_order_acquire)); }
 }
 namespace tooie::input {
 const Host& host() noexcept {
