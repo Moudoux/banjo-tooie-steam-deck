@@ -388,7 +388,8 @@ public:
     float get_resolution_scale() const override { return 1.0f; }
 };
 
-// Maintain a real S16 stereo queue; no gain, device bias or pacing policy.
+// Maintain a real S16 stereo queue; no gain or pacing policy. The player reports
+// one VI fewer queued frames, as BK does; engineering builds report the raw count.
 void set_frequency(uint32_t frequency) {
     if (frequency < 1000 || frequency > 192000) fail("Unsupported audio frequency");
     std::lock_guard guard(audio_mutex);
@@ -491,7 +492,12 @@ size_t frames_remaining() {
         if (s.last_query_us) s.query_gap_max_us=std::max(s.query_gap_max_us,now-s.last_query_us);
         s.last_query_us=now;
     }
+#ifdef BASELINE_PLAYER
+    const size_t reserve=audio_frequency/60; // audio_mutex is held; subtract saturating.
+    return frames>reserve ? frames-reserve : 0;
+#else
     return frames;
+#endif
 }
 void poll_input() {}
 void print_input_events(const input::Events& events) {
