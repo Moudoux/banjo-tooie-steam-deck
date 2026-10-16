@@ -23,6 +23,10 @@ CPU_ROOT_HELPERS=['tooie_actor_cpu_root_begin','tooie_camera_cpu_root_begin']
 FEATHER_LEAF_HELPER='tooie_actor_feather_leaf_id'
 FEATHER_LEAF_PATCH='func_800DD024'
 
+def write_if_changed(path,text):
+    data=text.encode('utf-8')
+    if not path.exists() or path.read_bytes()!=data:path.write_bytes(data)
+
 def prepare_honey_containment(root, output, run, npc665=False, backpack621=False):
     """Exact camera-only insertion derivative; the accepted OFF bridge stays untouched."""
     from elftools.elf.elffile import ELFFile
@@ -280,11 +284,11 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
     layout='#pragma once\n#define TOOIE_DEMO_TIMING_SELECTED %du\n'%int(bool(demo))
     if demo:
         for key,value in demo.items():layout+='#define TOOIE_DEMO_%s 0x%Xu\n'%(key.upper(),value)
-    (output/'demo_timing_layout.h').write_text(layout)
+    write_if_changed(output/'demo_timing_layout.h',layout)
     layout='#pragma once\n#define TOOIE_SHADOW_SELECTED %du\n'%int(bool(shadow))
     if shadow:
         for key,value in shadow.items():layout+='#define TOOIE_SHADOW_%s 0x%Xu\n'%(key.upper(),value)
-    (output/'shadow_projection_layout.h').write_text(layout)
+    write_if_changed(output/'shadow_projection_layout.h',layout)
     layout='#pragma once\n#define TOOIE_ACTOR_PALETTE_SELECTED %du\n#define TOOIE_PRE_SELECTED %du\n'%(int(actor_palette),int(bool(pre)))
     if pre:
         for key,value in pre.items():layout+='#define TOOIE_PRE_%s 0x%Xu\n'%(key.upper(),value)
@@ -309,17 +313,17 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
             assert tuples[-1][:4]==(backpack['rom'],backpack['ram'],backpack['size'],backpack['index']) and tuples[-1][4]==8
             backpack['sections']=tuples[:5];backpack['relocs']=tuples[-1][5]
         layout+='#define TOOIE_PRE_TEXT_SIZE 0x%Xu\n#define TOOIE_PRE_TEXT_RELOCS %du\n#define TOOIE_PRE_SHIFT 0x%Xu\n'%(first[2],first[5],shift)
-    (output/'pre_background_layout.h').write_text(layout)
+    write_if_changed(output/'pre_background_layout.h',layout)
     layout='#pragma once\n#define TOOIE_CPU625_SELECTED %du\n'%int(bool(cpu))
     if cpu:
         for key,value in cpu.items():layout+='#define TOOIE_CPU625_%s 0x%Xu\n'%(key.upper(),value)
         layout+='#define TOOIE_CPU625_SECTION %du\n'%(5+int(bool(demo))+int(bool(shadow))+int(bool(pre)))
-    (output/'cpu625_selection_layout.h').write_text(layout)
+    write_if_changed(output/'cpu625_selection_layout.h',layout)
     layout='#pragma once\n#define TOOIE_MINIMUM_HOST_SELECTED %du\n'%int(bool(host))
     if host:
         for key,value in host.items():layout+='#define TOOIE_MINIMUM_HOST_%s 0x%Xu\n'%(key.upper(),value)
         layout+='#define TOOIE_MINIMUM_HOST_SECTION %du\n'%(5+int(bool(demo))+int(bool(shadow))+int(bool(pre))+int(bool(cpu)))
-    (output/'minimum_host_selection_layout.h').write_text(layout)
+    write_if_changed(output/'minimum_host_selection_layout.h',layout)
     layout='#pragma once\n#define TOOIE_NPC665_SELECTED %du\n'%int(bool(npc))
     if npc:
         for key in ('rom','ram','size','index','state','state_bytes','end','prior_end','relocs'):
@@ -328,7 +332,7 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
         lines+=['static constexpr uint32_t npc665_shared_sections[5][6] = {']
         lines+=['    {'+','.join('0x%Xu'%v for v in row)+'},' for row in npc['sections'][:5]]
         lines+=['};']
-    (output/'npc665_selection_layout.h').write_text(layout)
+    write_if_changed(output/'npc665_selection_layout.h',layout)
     layout='#pragma once\n#define TOOIE_BACKPACK621_SELECTED %du\n'%int(bool(backpack))
     if backpack:
         for key in ('rom','ram','size','index','state','state_bytes','prior_end','relocs'):
@@ -337,8 +341,8 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
         lines+=['static constexpr uint32_t backpack621_shared_sections[5][6] = {']
         lines+=['    {'+','.join('0x%Xu'%v for v in row)+'},' for row in backpack['sections']]
         lines+=['};']
-    (output/'backpack621_selection_layout.h').write_text(layout)
-    (output/'camera_registry_data.hpp').write_text('\n'.join(lines)+'\n',encoding='utf-8')
+    write_if_changed(output/'backpack621_selection_layout.h',layout)
+    write_if_changed(output/'camera_registry_data.hpp','\n'.join(lines)+'\n')
 
 def image_flags(root,pre_background,cpu625,npc665,backpack621):
     """Exact guest compile flags shared by the image and its same-selection 621OFF carrier."""
@@ -614,8 +618,8 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
         expected_order=[npc_owner.BODY if n==npc_owner.END else n for n in actual_order]
     if backpack621 and not npc665:expected_order=actual_order
     shared=r/'tests/extract_heap_realloc.py';s=shared.read_text();old='"tooie_player_begin", "tooie_player_end", "tooie_player_bone_push", "tooie_player_bone_pop", "tooie_player_leaf_begin", "tooie_player_leaf_end"):';scope={'__name__':'local_extractor'};exec(compile(s.replace(old,'"tooie_player_begin", "tooie_player_end", '+','.join(repr(n) for n in defs)+'):'),str(shared),'exec'),scope)
-    (out/'candidate_camera_lifecycle_ncpod_slice.inc').write_text(''.join(scope['extract'](text,n) for n in defs));(out/'camera_identity_layout.h').write_text('#pragma once\n#define TOOIE_CAMERA_STATE_VRAM 0x%08Xu\n#define TOOIE_CAMERA_MAIN_VRAM 0x%08Xu\n#define TOOIE_CAMERA_REDIRECTED_VRAM 0x%08Xu\n#define TOOIE_BRIDGE_STATE_VRAM 0x%08Xu\n'%(addresses['tooie_camera_state'],addresses['tooie_camera_main'],addresses['tooie_camera_redirected'],addresses['tooie_render_bridge_state']))
-    (out/'render_bridge_layout.h').write_text('#pragma once\n#define TOOIE_BRIDGE_STATE_VRAM 0x%08Xu\n#define TOOIE_BRIDGE_IMAGE_BYTES %du\n#define TOOIE_BRIDGE_STATE_IMAGE_OFFSET %du\n'%(addresses['tooie_render_bridge_state'],len(binary),addresses['tooie_render_bridge_state']-0x80801000),encoding='utf-8')
+    (out/'candidate_camera_lifecycle_ncpod_slice.inc').write_text(''.join(scope['extract'](text,n) for n in defs));write_if_changed(out/'camera_identity_layout.h','#pragma once\n#define TOOIE_CAMERA_STATE_VRAM 0x%08Xu\n#define TOOIE_CAMERA_MAIN_VRAM 0x%08Xu\n#define TOOIE_CAMERA_REDIRECTED_VRAM 0x%08Xu\n#define TOOIE_BRIDGE_STATE_VRAM 0x%08Xu\n'%(addresses['tooie_camera_state'],addresses['tooie_camera_main'],addresses['tooie_camera_redirected'],addresses['tooie_render_bridge_state']))
+    write_if_changed(out/'render_bridge_layout.h','#pragma once\n#define TOOIE_BRIDGE_STATE_VRAM 0x%08Xu\n#define TOOIE_BRIDGE_IMAGE_BYTES %du\n#define TOOIE_BRIDGE_STATE_IMAGE_OFFSET %du\n'%(addresses['tooie_render_bridge_state'],len(binary),addresses['tooie_render_bridge_state']-0x80801000))
     assert text.count("\n    tooie_cpu625_retire(rdram, ctx);")==2*int(cpu625), "Exact generated lifecycle call selection"
     if cpu:
         overlay=(out/'recomp_overlays.inl').read_text();match=re.search(r'static RelocEntry section_%d_tooie_cpu625_helpers_relocs\[\] = \{(.*?)\n\};'%cpu['index'],overlay,re.S);assert match
