@@ -135,6 +135,10 @@ void update_preference(Preference key, int value) {
     case Preference::CutsceneAspect:
         if (value < 0 || value > 1) return;
         selected.cutscene_aspect = value; settings::set_int("tooie_cutscene_aspect", value); break;
+    case Preference::QuietTalonTrot:
+        if (value < 0 || value > 1) return;
+        selected.quiet_talon_trot = value;
+        settings::set_int("tooie_quiet_talon_trot", value); break;
     case Preference::VSync:
         if (value < 0 || value > 1) return;
         selected.vsync = value; settings::set_int("baseline_vsync", value);
@@ -201,6 +205,11 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile) {
     selected.cutscene_aspect = bounded(settings::get_int("tooie_cutscene_aspect", 0), 0, 1, 0);
     selected.vsync = bounded(settings::get_int("baseline_vsync", -1), -1, 1, -1);
     selected.fullscreen = bounded(settings::get_int("baseline_fullscreen", 0), 0, 1, 0);
+#if BASELINE_PLAYER
+    selected.quiet_talon_trot = bounded(settings::get_int("tooie_quiet_talon_trot", 0), 0, 1, 0);
+#else
+    selected.quiet_talon_trot = 0;
+#endif
     latched = selected; vsync.store(selected.vsync, std::memory_order_release);
     output_rate.store(pack_output_rate({latched.output_rate, latched.manual_hz}), std::memory_order_release);
 #if BASELINE_PLAYER

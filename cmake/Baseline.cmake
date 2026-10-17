@@ -866,6 +866,7 @@ target_compile_definitions(rt64 PRIVATE "BASELINE_PLAYER_BOUNDARY=$<BOOL:${TOOIE
 target_compile_definitions(TooieBaseline PRIVATE "BASELINE_PLAYER_BOUNDARY=$<BOOL:${TOOIE_BASELINE_PLAYER_BOUNDARY}>")
 target_compile_definitions(BaselineRecompiledFuncs PRIVATE "BASELINE_CAMERA_IDENTITY=$<BOOL:${TOOIE_BASELINE_CAMERA_IDENTITY}>")
 target_compile_definitions(BaselineRecompiledFuncs PRIVATE "BASELINE_RENDER_BRIDGE=$<BOOL:${TOOIE_BASELINE_RENDER_BRIDGE}>")
+set(_baseline_quiet_trot OFF)
 if(TOOIE_BASELINE_RENDER_BRIDGE)
     # Raw funcs.h must precede the image's eight-body funcs.h.
     target_include_directories(TooieBaseline PRIVATE "${TOOIE_BASELINE_GENERATED_DIR}" "${_baseline_bridge_dir}")
@@ -970,6 +971,32 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
             file(SHA256 "${_baseline_bridge_dir}/boot.bin" _baseline_image_sha)
             # Player-accepted shadow coefficient policy; qualified only on the 621 composition.
             string(JSON _baseline_shadow_coefficients ERROR_VARIABLE _baseline_shadow_coefficients_error GET "${_baseline_selected_receipt}" shadow_coefficients)
+            set(_baseline_quiet_native OFF)
+            if(TOOIE_BASELINE_HOST AND TOOIE_BASELINE_BACKPACK621 AND _baseline_shadow_coefficients STREQUAL "ON")
+                set(_baseline_quiet_native ON)
+            endif()
+            string(JSON _baseline_quiet_type ERROR_VARIABLE _baseline_quiet_error TYPE "${_baseline_selected_receipt}" quiet_talon_trot)
+            string(JSON _baseline_raw_quiet_type ERROR_VARIABLE _baseline_raw_quiet_error TYPE "${_baseline_raw_binding}" quiet_talon_trot)
+            if(_baseline_quiet_error AND _baseline_raw_quiet_error AND NOT _baseline_quiet_native)
+                # Both valid legacy objects lack the field: historical OFF only.
+                set(_baseline_quiet_trot OFF)
+            elseif(NOT _baseline_quiet_error AND NOT _baseline_raw_quiet_error AND
+                   _baseline_quiet_type STREQUAL "BOOLEAN" AND _baseline_raw_quiet_type STREQUAL "BOOLEAN")
+                string(JSON _baseline_quiet_trot GET "${_baseline_selected_receipt}" quiet_talon_trot)
+                string(JSON _baseline_raw_quiet GET "${_baseline_raw_binding}" quiet_talon_trot)
+                if(NOT _baseline_quiet_trot STREQUAL _baseline_quiet_native OR
+                   NOT _baseline_raw_quiet STREQUAL _baseline_quiet_trot)
+                    message(FATAL_ERROR "Quiet Trot raw/image/native selection mismatch")
+                endif()
+            else()
+                message(FATAL_ERROR "Quiet Trot fields missing/partial/malformed; ON requires HOST and621 coefficient composition")
+            endif()
+            if(_baseline_quiet_trot)
+                math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+1")
+                set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                    "${CMAKE_SOURCE_DIR}/tools/baseline/prepare_quiet_talon_trot.py"
+                    "${CMAKE_SOURCE_DIR}/tools/baseline/guest/minimum-host/quiet_talon_trot.c")
+            endif()
             if(_baseline_shadow_coefficients STREQUAL "ON" AND NOT TOOIE_BASELINE_BACKPACK621)
                 message(FATAL_ERROR "Shadow coefficient guest image requires the 621 composition")
             endif()
@@ -979,6 +1006,9 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                 if(_baseline_shadow_coefficients STREQUAL "ON")
                     # Same composition; shadow_projection.o (TOOIE_SHADOW_COEFFICIENTS=1) and actor.o (TOOIE_HAND862=1) differ.
                     set(_baseline_expected_image "d4edc0fc90a7121906a969a87e0b0b239523a803b46a76ab60a78ec92c844525")
+                    if(_baseline_quiet_trot)
+                        set(_baseline_expected_image "3ab2614823ac33e1d6f271aeb0ba6a34f8457efcbf5b75da6d2c4b952f7c7e7e")
+                    endif()
                 endif()
                 string(JSON _baseline_raw_b621_type TYPE "${_baseline_raw_binding}" backpack621)
                 string(JSON _baseline_raw_b621 GET "${_baseline_raw_binding}" backpack621)
@@ -1259,6 +1289,40 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
             RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
         add_test(NAME baseline_graphics_rate COMMAND BaselineGraphicsRateTest)
     endif()
+    # Quiet leaf candidate comes from the selected image; originals remain in baseline/raw.
+    if(_baseline_quiet_trot)
+        set(_baseline_quiet_fixture_dir "${_baseline_bridge_dir}/quiet-talon-trot-fixture")
+        file(MAKE_DIRECTORY "${_baseline_quiet_fixture_dir}")
+        set(_baseline_quiet_candidate "${_baseline_quiet_fixture_dir}/candidate_fixture.inc")
+        set(_baseline_quiet_leaf "${_baseline_quiet_fixture_dir}/original_bsbtrot_fixture.inc")
+        set(_baseline_quiet_wrapper "${_baseline_quiet_fixture_dir}/original_de38_fixture.inc")
+        set(_baseline_quiet_original_leaf "${CMAKE_BINARY_DIR}/baseline/raw/funcs_202.c")
+        set(_baseline_quiet_original_wrapper "${CMAKE_BINARY_DIR}/baseline/raw/funcs_115.c")
+        add_custom_command(OUTPUT "${_baseline_quiet_candidate}" "${_baseline_quiet_leaf}" "${_baseline_quiet_wrapper}"
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/extract_heap_realloc.py"
+                "${TOOIE_BASELINE_BOOT_PATCH_DIR}/boot.c" "${_baseline_quiet_candidate}" func_808000DC_bsbtrot
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/extract_heap_realloc.py"
+                "${_baseline_quiet_original_leaf}" "${_baseline_quiet_leaf}" func_808000DC_bsbtrot
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/extract_heap_realloc.py"
+                "${_baseline_quiet_original_wrapper}" "${_baseline_quiet_wrapper}" func_8009DE38
+            DEPENDS tests/extract_heap_realloc.py "${TOOIE_BASELINE_BOOT_PATCH_DIR}/boot.c"
+                "${_baseline_quiet_original_leaf}" "${_baseline_quiet_original_wrapper}" VERBATIM)
+        string(JSON _baseline_quiet_frame GET "${_baseline_bridge_receipt}" objects quiet_talon_trot frames func_808000DC_bsbtrot)
+        if(NOT _baseline_quiet_frame EQUAL 40)
+            message(FATAL_ERROR "Quiet Talon Trot qualified frame differs")
+        endif()
+        add_executable(BaselineQuietTalonTrotTest EXCLUDE_FROM_ALL tests/baseline_quiet_talon_trot_test.cpp
+            "${_baseline_quiet_candidate}" "${_baseline_quiet_leaf}" "${_baseline_quiet_wrapper}")
+        target_include_directories(BaselineQuietTalonTrotTest PRIVATE
+            "${_baseline_quiet_fixture_dir}" "${RUNTIME_RECOMP_INCLUDE}")
+        target_compile_definitions(BaselineQuietTalonTrotTest PRIVATE NOMINMAX
+            "FB05_CANDIDATE_FRAME_BYTES=${_baseline_quiet_frame}"
+            FB05_ORIGINAL_LEAF_FRAME_BYTES=24 FB05_ORIGINAL_WRAPPER_FRAME_BYTES=32)
+        set_target_properties(BaselineQuietTalonTrotTest PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
+        add_test(NAME baseline_quiet_talon_trot COMMAND BaselineQuietTalonTrotTest)
+        add_test(NAME baseline_quiet_talon_trot_negative_pitch COMMAND BaselineQuietTalonTrotTest --negative pitch)
+        set_tests_properties(baseline_quiet_talon_trot_negative_pitch PROPERTIES WILL_FAIL TRUE)
+    endif()
     set_target_properties(BaselineDrawBoundariesTest PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
     if(TOOIE_BASELINE_SILO_CANDIDATE)
         foreach(_target IN ITEMS BaselineBoneHandlerTest BaselineDrawBoundariesTest)
@@ -1274,6 +1338,7 @@ target_include_directories(TooieBaseline PRIVATE
     "${_baseline_rt64}/src/contrib/mupen64plus-core/src/api"
     "${_baseline_rt64}/src/contrib/imgui" "${_baseline_rt64}/src/contrib/dxc/inc")
 target_compile_definitions(TooieBaseline PRIVATE SDL_MAIN_HANDLED HLSL_CPU NOMINMAX __PRFCHWINTRIN_H)
+target_compile_definitions(TooieBaseline PRIVATE "BASELINE_QUIET_TROT=$<BOOL:${_baseline_quiet_trot}>")
 target_link_libraries(TooieBaseline PRIVATE BaselineRecompiledFuncs librecomp ultramodern rt64
     Threads::Threads "${SDL2_LIBRARIES}" bcrypt winmm)
 # Qualification is a manual reviewed step; build targets never create/refresh it.

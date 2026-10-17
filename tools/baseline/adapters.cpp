@@ -650,7 +650,7 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
     if (
         baseline_boot_patch_registry::section_table[0].ram_addr != 0x80801000 ||
 #if BASELINE_CAMERA_IDENTITY && TOOIE_ACTOR_PALETTE_SELECTED
-        baseline_boot_patch_registry::section_table[0].num_funcs != 39+TOOIE_MINIMUM_HOST_SELECTED+TOOIE_BACKPACK621_SELECTED ||
+        baseline_boot_patch_registry::section_table[0].num_funcs != 39+TOOIE_MINIMUM_HOST_SELECTED+TOOIE_BACKPACK621_SELECTED+BASELINE_QUIET_TROT ||
 #else
         baseline_boot_patch_registry::section_table[0].num_funcs != (BASELINE_CAMERA_IDENTITY ? 38 : BASELINE_RENDER_BRIDGE ? (BASELINE_RENDER_SILO ? 13 : 8) : (BASELINE_HONEY_PATCH ? 4 : (BASELINE_HEAP_PATCH ? 3 : 2))) ||
 #endif
@@ -682,6 +682,17 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
     if (honey.func != func_80800380_chhoneycarrier || honey.offset < 2760 ||
         uint64_t(honey.offset) + honey.rom_size > baseline_boot_patch_bin_size)
         rejected_body("selected Honey patch provider/extent changed");
+#endif
+#if BASELINE_QUIET_TROT
+    const auto& quiet_section = baseline_boot_patch_registry::section_table[0];
+    if (std::count_if(quiet_section.funcs, quiet_section.funcs + quiet_section.num_funcs,
+            [](const auto& entry) { return entry.func == func_808000DC_bsbtrot; }) != 1)
+        rejected_body("selected quiet Trot provider missing/duplicate");
+    const auto* quiet_entry = std::find_if(quiet_section.funcs, quiet_section.funcs + quiet_section.num_funcs,
+        [](const auto& entry) { return entry.func == func_808000DC_bsbtrot; });
+    if (quiet_entry->offset < 2760 || !quiet_entry->rom_size ||
+        uint64_t(quiet_entry->offset) + quiet_entry->rom_size > TOOIE_BRIDGE_STATE_IMAGE_OFFSET)
+        rejected_body("selected quiet Trot provider/extent changed");
 #endif
 #if BASELINE_RENDER_BRIDGE
     validate_bridge_image(baseline_boot_patch_bin, baseline_boot_patch_bin_size);
@@ -1515,6 +1526,25 @@ void register_overlay_metadata(std::span<SectionTableEntry> sections, std::span<
     if (!honey.funcs || !std::any_of(honey.funcs, honey.funcs + honey.num_funcs,
             [](const auto& entry) { return entry.offset == 0x380; }))
         rejected_body("Honey original draw missing while its patch is disabled");
+#endif
+#if BASELINE_QUIET_TROT
+    if (sections.size() <= 30 || ids.size() <= 29 || ids[29] != 30)
+        rejected_body("bsbtrot overlay module/section mapping changed");
+    auto& trot = sections[30];
+    if (trot.rom_addr != 0x01F14F50 || trot.ram_addr != 0x80800000 ||
+        trot.size != 0x2F30 || trot.index != 30 || trot.num_funcs != 82 || !trot.funcs ||
+        std::any_of(trot.funcs, trot.funcs + trot.num_funcs,
+            [](const auto& entry) { return entry.offset == 0xDC; }))
+        rejected_body("bsbtrot original overlay identity/omitted sound leaf changed");
+    static std::vector<FuncEntry> trot_entries(trot.funcs, trot.funcs + trot.num_funcs);
+    trot_entries.push_back({.func = func_808000DC_bsbtrot, .offset = 0xDC, .rom_size = 0x44});
+    std::sort(trot_entries.begin(), trot_entries.end(),
+        [](const auto& a, const auto& b) { return a.offset < b.offset; });
+    if (trot_entries.size() != 83 ||
+        std::adjacent_find(trot_entries.begin(), trot_entries.end(),
+            [](const auto& a, const auto& b) { return a.offset == b.offset; }) != trot_entries.end())
+        rejected_body("bsbtrot restored overlay offsets are not unique");
+    trot.funcs = trot_entries.data(); trot.num_funcs = trot_entries.size();
 #endif
     overlay_sections = sections; overlay_ids = ids;
 }

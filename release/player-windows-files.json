@@ -7,8 +7,8 @@
   "executable": "BanjoTooieScurvyDogPort.exe",
   "reviewRule": "Package exactly these paths plus package-manifest.json. Build rows come from the gated build directory; source rows must be tracked files of the clean release commit. Keep every existing third-party notice; never prune attribution.",
   "guest": {
-    "sha256": "d4edc0fc90a7121906a969a87e0b0b239523a803b46a76ab60a78ec92c844525",
-    "bytes": 297552
+    "sha256": "3ab2614823ac33e1d6f271aeb0ba6a34f8457efcbf5b75da6d2c4b952f7c7e7e",
+    "bytes": 297712
   },
   "rawFunctionCount": 417,
   "build": {

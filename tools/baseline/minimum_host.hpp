@@ -18,8 +18,9 @@ struct Preferences {
     int wide = -1, native_aspect = 0, cutscene_aspect = 0;
     int vsync = -1; // Missing preserves the backend's current value.
     int fullscreen = 0;
+    int quiet_talon_trot = 0; // Latched before guest startup.
 };
-enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen };
+enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot };
 struct OutputRate { int option = 0, manual_hz = 60; };
 inline uint32_t pack_output_rate(OutputRate rate) noexcept {
     return (uint32_t(rate.option) << 16) | uint32_t(rate.manual_hz);

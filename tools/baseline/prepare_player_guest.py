@@ -21,9 +21,9 @@ OUTPUTS = [BASELINE + '/raw', BASELINE + '/heap-patch', BASELINE + '/render-brid
 # Accepted player selection; shadow_observer stays OFF.
 SELECTION = ['--actor-palette', '--demo-timing', '--shadow-fix', '--pre-background', '--cpu625',
              '--minimum-host', '--npc665', '--backpack621', '--shadow-coefficients']
-IMAGE_SHA256 = 'd4edc0fc90a7121906a969a87e0b0b239523a803b46a76ab60a78ec92c844525'
-IMAGE_BYTES = 297552
-LAYOUT_SHA256 = '3b8b2fb26fc4d7fe37f83433ce6cbc499fba892abb640a214f6d0573c3f35671'
+IMAGE_SHA256 = '3ab2614823ac33e1d6f271aeb0ba6a34f8457efcbf5b75da6d2c4b952f7c7e7e'
+IMAGE_BYTES = 297712
+LAYOUT_SHA256 = 'bae74ed8e2f89a54180a7ae707c5b509532300ef7ea4386b8f4586c2d944ba30'
 ROM_SHA256 = '9ec37fba6890362eba86fb855697a9cff1519275531b172083a1a6a045483583'
 DECOMPRESSED_SHA256 = '8c9d316b2edca686ec8393ddf95d480a7dfd9879ef434dbcfc4ea3000f2ffe89'
 # Native publication references that Baseline.cmake authenticates at configure.

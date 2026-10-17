@@ -9,7 +9,7 @@
 static_assert(TOOIE_MINIMUM_HOST_SELECTED==TOOIE_BASELINE_HOST,"Native/guest HOST selection mismatch");
 #include "npc665_selection_layout.h"
 #include "backpack621_selection_layout.h"
-constexpr size_t camera_patch_count = (TOOIE_SHADOW_SELECTED ? 61 : TOOIE_DEMO_TIMING_SELECTED ? 53 : 50)+(TOOIE_PRE_SELECTED?3:0)+(TOOIE_ACTOR_PALETTE_SELECTED?4:0)+(TOOIE_CPU625_SELECTED?4:0)+(TOOIE_MINIMUM_HOST_SELECTED?2:0)+(TOOIE_NPC665_SELECTED?8:0)+(TOOIE_BACKPACK621_SELECTED?9:0);
+constexpr size_t camera_patch_count = (TOOIE_SHADOW_SELECTED ? 61 : TOOIE_DEMO_TIMING_SELECTED ? 53 : 50)+(TOOIE_PRE_SELECTED?3:0)+(TOOIE_ACTOR_PALETTE_SELECTED?4:0)+(TOOIE_CPU625_SELECTED?4:0)+(TOOIE_MINIMUM_HOST_SELECTED?2:0)+(TOOIE_NPC665_SELECTED?8:0)+(TOOIE_BACKPACK621_SELECTED?9:0)+BASELINE_QUIET_TROT;
 // Registry identity only. Guest leaves retain all camera semantic policy.
 namespace {
 struct CameraAlias {
@@ -26,7 +26,7 @@ void camera_validate_patch_table() {
 #if TOOIE_PRE_SELECTED
     if(camera_actor_palette_selected>1 || camera_actor_palette_selected!=TOOIE_ACTOR_PALETTE_SELECTED || !TOOIE_DEMO_TIMING_SELECTED || !TOOIE_SHADOW_SELECTED || std::size(sections)!=6+TOOIE_DEMO_TIMING_SELECTED+TOOIE_SHADOW_SELECTED+TOOIE_CPU625_SELECTED+TOOIE_MINIMUM_HOST_SELECTED+TOOIE_NPC665_SELECTED+TOOIE_BACKPACK621_SELECTED || std::size(camera_aliases)!=27+TOOIE_MINIMUM_HOST_SELECTED+TOOIE_BACKPACK621_SELECTED || std::size(camera_expected_patches)!=camera_patch_count)
         rejected_body("PRE selection exact provider/alias/section counts");
-    if(sections[0].rom_addr!=0 || sections[0].ram_addr!=0x80801000 || sections[0].index!=1 || sections[0].num_funcs!=((camera_actor_palette_selected?39u:38u)+TOOIE_MINIMUM_HOST_SELECTED+TOOIE_BACKPACK621_SELECTED) || sections[0].size!=TOOIE_PRE_TEXT_SIZE || sections[0].num_relocs!=TOOIE_PRE_TEXT_RELOCS)rejected_body("PRE fixed section0 identity");
+    if(sections[0].rom_addr!=0 || sections[0].ram_addr!=0x80801000 || sections[0].index!=1 || sections[0].num_funcs!=((camera_actor_palette_selected?39u:38u)+TOOIE_MINIMUM_HOST_SELECTED+TOOIE_BACKPACK621_SELECTED+BASELINE_QUIET_TROT) || sections[0].size!=TOOIE_PRE_TEXT_SIZE || sections[0].num_relocs!=TOOIE_PRE_TEXT_RELOCS)rejected_body("PRE fixed section0 identity");
 #if TOOIE_BACKPACK621_SELECTED
     for(size_t i=0;i<5;i++) {const auto& a=sections[i];const auto& e=backpack621_shared_sections[i];
         if(a.rom_addr!=e[0] || a.ram_addr!=e[1] || a.size!=e[2] || a.index!=e[3] || a.num_funcs!=e[4] || a.num_relocs!=e[5])rejected_body("Backpack621 exact changed shared section");}

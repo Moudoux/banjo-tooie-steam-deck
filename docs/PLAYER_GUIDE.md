@@ -100,6 +100,9 @@ settings**. **Resume** returns to the game and **Quit** exits.
 - Default (Original) uses the game's original output rate. This label replaces
   Current; it does not change an existing output-rate choice.
 
+- **Audio:** **Mute Talon Trot movement sound** is off by default and takes effect
+  next launch. Long-legged and stilt movement sounds are unchanged.
+
 ### Texture packs (local, unreleased build)
 
 - Place RT64 `.rtz` texture packs in

@@ -87,6 +87,7 @@ void boot_osInitialize(uint8_t*, recomp_context*);
 void tooie_core1_osInitialize(uint8_t*, recomp_context*);
 void heap_realloc(uint8_t*, recomp_context*);
 void func_80800380_chhoneycarrier(uint8_t*, recomp_context*);
+void func_808000DC_bsbtrot(uint8_t*, recomp_context*);
 void boot___osPiRawStartDma(uint8_t*, recomp_context*);
 void boot_osPiGetStatus(uint8_t*, recomp_context*);
 void baseline_observe_and_publish_core1(uint8_t*, recomp_context*);

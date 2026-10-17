@@ -8,7 +8,8 @@ HELPER='tooie_baseline_cutscene_command'
 PROJECTION='func_80015D14'
 NATIVE_IMPORTS={'tooie_get_latched_widescreen_settings':0x8F000020,
                 'tooie_baseline_presentation_settings':0x8F000024,
-                'tooie_baseline_presentation_publish':0x8F000028}
+                'tooie_baseline_presentation_publish':0x8F000028,
+                'tooie_baseline_quiet_talon_trot':0x8F00002C}
 # Independently accepted image hashes are installed only after linked evidence.
 PRE_CPU_OFF_SHA256=None
 PRE_CPU_ON_SHA256='896ddc57ba43db4f5ef368d27eb9e9fc55015854ec12282cb2664d59f53c07e1'

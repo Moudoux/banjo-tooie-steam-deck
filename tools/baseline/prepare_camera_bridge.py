@@ -11,6 +11,7 @@ import minimum_host_hooks as host_hooks
 import prepare_npc665 as npc_owner
 import prepare_backpack621 as backpack_owner
 import prepare_graphics_rate as rate_owner
+import prepare_quiet_talon_trot as quiet_owner
 from npc665_hooks import add_hooks as add_npc_hooks, strip_hooks as strip_npc_hooks, HOOKS as NPC_HOOKS
 from cpu625_hooks import add_cpu625_hooks, CPU625_HOOKS
 sha,win=accepted.sha,accepted.win
@@ -114,7 +115,8 @@ def roster(root):
     assert {'func_8001A3A0','func_8001A324','func_800DE498','ncpod_entrypoint_12','ncpod_entrypoint_14'} <= {r['name'] for r in rows}
     return rows
 
-def prepare_raw(root,output,run,shadow_observer=False,demo_timing=False,shadow_fix=False,pre_background=False,actor_palette=False,cpu625=False,minimum_host=False,npc665=False,backpack621=False):
+def prepare_raw(root,output,run,shadow_observer=False,demo_timing=False,shadow_fix=False,pre_background=False,actor_palette=False,cpu625=False,minimum_host=False,npc665=False,backpack621=False,quiet_talon_trot=False):
+    assert type(quiet_talon_trot) is bool and (not quiet_talon_trot or (backpack621 and minimum_host))
     assert type(backpack621) is bool and (not backpack621 or cpu625), "621 requires existing selected CPU625 transports"
     parent=root/'build/windows-dev/baseline/render-bridge-silo-candidate/raw.toml'
     parent_receipt=json.loads((parent.parent/'RAW_BINDING.json').read_text())
@@ -126,6 +128,7 @@ def prepare_raw(root,output,run,shadow_observer=False,demo_timing=False,shadow_f
     if actor_palette:functions.append(FEATHER_LEAF_PATCH);omitted.append(FEATHER_LEAF_PATCH)
     if minimum_host:functions.append(host_owner.PROJECTION);omitted.append(host_owner.PROJECTION)
     if backpack621:functions.append(rate_owner.BODY);omitted.append(rate_owner.BODY)
+    if quiet_talon_trot:functions.append(quiet_owner.BODY);omitted.append(quiet_owner.BODY)
     assert set(held.GENERATED_FUNCTIONS)<=set(functions) and len(set(omitted))==len(omitted)
     assert 'func_800DE498' not in omitted
     config=toml.loads(parent.read_text());patches=config['patches'];hooks=patches['hook']
@@ -239,9 +242,9 @@ def prepare_raw(root,output,run,shadow_observer=False,demo_timing=False,shadow_f
     assert '    skip_19:\n'+ignore+'    // 0x800DEFB0:' in de
     assert 'L_800DEFB0:' not in de
     assert {'_ncpod_entrypoint_12','_ncpod_entrypoint_14'} <= set(after)
-    return dict(backpack621=backpack621,condition='BASELINE-CAMERA-DEFAULT-OFF-CANDIDATE',parent_sha256=sha(parent),definitions=functions,omitted=omitted,changed=changed,changed_scope='After exact CPU625/HOST/NPC665 insertion inverses; legacy camera changes only',actual_changed=sorted(n for n in actual_after if actual_after[n]!=before[n]),actual_unchanged_body_count=sum(actual_after[n]==before[n] for n in actual_after),original_body_count=len(before),child_body_count=len(after),unchanged_body_count=len(after)-len(changed),npc665=npc665,npc665_hook_pcs=[hex(pc) for _,pc,_ in NPC_HOOKS] if npc665 else [],npc665_changed=sorted({f for f,_,_ in NPC_HOOKS}) if npc665 else [],minimum_host=minimum_host,host_hook_functions=[host_hooks.GLOBAL_FUNCTION,host_hooks.CUTSCENE_FUNCTION] if minimum_host else [],cpu625=cpu625,cpu625_hook_pcs=[hex(pc) for _,pc,_ in CPU625_HOOKS] if cpu625 else [],cpu625_changed=sorted({f for f,_,_ in CPU625_HOOKS}) if cpu625 else [],actor_palette=actor_palette,demo_timing=demo_timing,demo_hook_pcs=[hex(pc) for _,pc,_ in demo_hooks] if demo_timing else [],shadow_observer=shadow_observer,shadow_hook_pcs=[hex(pc) for _,pc,_ in shadow_hooks] if shadow_observer else [],pre_background=pre_background,pre_hook_pcs=[hex(pc) for _,pc,_ in pre_hooks] if pre_background else [],shadow_fix=shadow_fix,shadow_fix_hook_pcs=[hex(pc) for _,pc,_ in shadow_fix_hooks] if shadow_fix else [],hook_pcs=['800A7888','800A7900','800DEFB0'],helper_lookup_contract=branch['helper_lookup'],contract_sha256=sha(root/SOURCE/'camera_hook_contract.json'),allocation_instruction_edits=False,roster_sha256=sha(root/SOURCE/'camera_roster.json'),original_raw={p.name:sha(p) for p in (root/'build/windows-dev/baseline/raw').iterdir() if p.is_file()},outputs={p.name:sha(p) for p in destination.iterdir() if p.is_file()})
+    return dict(quiet_talon_trot=quiet_talon_trot,backpack621=backpack621,condition='BASELINE-CAMERA-DEFAULT-OFF-CANDIDATE',parent_sha256=sha(parent),definitions=functions,omitted=omitted,changed=changed,changed_scope='After exact CPU625/HOST/NPC665 insertion inverses; legacy camera changes only',actual_changed=sorted(n for n in actual_after if actual_after[n]!=before[n]),actual_unchanged_body_count=sum(actual_after[n]==before[n] for n in actual_after),original_body_count=len(before),child_body_count=len(after),unchanged_body_count=len(after)-len(changed),npc665=npc665,npc665_hook_pcs=[hex(pc) for _,pc,_ in NPC_HOOKS] if npc665 else [],npc665_changed=sorted({f for f,_,_ in NPC_HOOKS}) if npc665 else [],minimum_host=minimum_host,host_hook_functions=[host_hooks.GLOBAL_FUNCTION,host_hooks.CUTSCENE_FUNCTION] if minimum_host else [],cpu625=cpu625,cpu625_hook_pcs=[hex(pc) for _,pc,_ in CPU625_HOOKS] if cpu625 else [],cpu625_changed=sorted({f for f,_,_ in CPU625_HOOKS}) if cpu625 else [],actor_palette=actor_palette,demo_timing=demo_timing,demo_hook_pcs=[hex(pc) for _,pc,_ in demo_hooks] if demo_timing else [],shadow_observer=shadow_observer,shadow_hook_pcs=[hex(pc) for _,pc,_ in shadow_hooks] if shadow_observer else [],pre_background=pre_background,pre_hook_pcs=[hex(pc) for _,pc,_ in pre_hooks] if pre_background else [],shadow_fix=shadow_fix,shadow_fix_hook_pcs=[hex(pc) for _,pc,_ in shadow_fix_hooks] if shadow_fix else [],hook_pcs=['800A7888','800A7900','800DEFB0'],helper_lookup_contract=branch['helper_lookup'],contract_sha256=sha(root/SOURCE/'camera_hook_contract.json'),allocation_instruction_edits=False,roster_sha256=sha(root/SOURCE/'camera_roster.json'),original_raw={p.name:sha(p) for p in (root/'build/windows-dev/baseline/raw').iterdir() if p.is_file()},outputs={p.name:sha(p) for p in destination.iterdir() if p.is_file()})
 
-def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,host=None,npc=None,backpack=None):
+def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,host=None,npc=None,backpack=None,quiet_talon_trot=False):
     assert type(actor_palette) is bool, 'Explicit registry actor selection'
     rows=roster(root)
     rows=[row for row in rows if row['name']!='func_800DE498']
@@ -276,6 +279,7 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
     lines+=['};','static CameraPatchExpected camera_expected_patches[] = {']
     expected_names=base_functions+contract['providers']+([CPU_ROOT_HELPERS[1],FEATHER_LEAF_PATCH] if actor_palette else [])+(DEMO_HELPERS if demo else [])+(SHADOW_HELPERS if shadow else [])+(PRE_HELPERS if pre else [])+(cpu_owner.HELPERS if cpu else [])+([host_owner.PROJECTION,host_owner.HELPER] if host else [])+([npc_owner.CHECKED if n==npc_owner.END else n for n in npc_owner.HELPERS] if npc else [])
     expected_names+=(backpack_owner.HELPERS+[rate_owner.BODY]) if backpack else []
+    expected_names+=[quiet_owner.BODY] if quiet_talon_trot else []
     for name in dict.fromkeys(expected_names):
         section=(5+int(bool(demo))+int(bool(shadow))+int(bool(pre))+int(bool(cpu))+int(bool(host))) if name in npc_owner.HELPERS or name==npc_owner.CHECKED else (5+int(bool(demo))+int(bool(shadow))+int(bool(pre))+int(bool(cpu))) if name==host_owner.HELPER else (5+int(bool(demo))+int(bool(shadow))+int(bool(pre))) if name in cpu_owner.HELPERS else (5+int(bool(demo))+int(bool(shadow))) if name in PRE_HELPERS else 6 if name in SHADOW_HELPERS else 5 if name in DEMO_HELPERS else helpers.get(name,0)
         if name in backpack_owner.HELPERS:section=5+int(bool(demo))+int(bool(shadow))+int(bool(pre))+int(bool(cpu))+int(bool(host))+int(bool(npc))
@@ -299,17 +303,17 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
         for rom,ram,size,funcs,relocs,index in rows:
             f=re.search(r'static FuncEntry '+funcs+r'\[\] = \{(.*?)\n\};',overlay,re.S);q=re.search(r'static RelocEntry '+relocs+r'\[\] = \{(.*?)\n\};',overlay,re.S);assert f and q
             tuples.append((int(rom,16),int(ram,16),int(size,16),int(index),f[1].count('.func'),q[1].count('.offset')))
-        first=tuples[0];assert (first[0],first[1],first[3],first[4])==(0,0x80801000,1,(39 if actor_palette else 38)+int(bool(host))+int(bool(backpack)))
+        first=tuples[0];assert (first[0],first[1],first[3],first[4])==(0,0x80801000,1,(39 if actor_palette else 38)+int(bool(host))+int(bool(backpack))+int(quiet_talon_trot))
         shift=first[2]-0x96C8
         fixed=[(0x96C8,0x8080A6C8,0x2E38,2,1,2),(0xC500,0x8080D500,0x15FC,3,6,3),(0xDAFC,0x8080EAFC,0xD10 if actor_palette else 0x68C,4,4 if actor_palette else 3,0),(0xE820 if actor_palette else 0xE19C,0x8080F820 if actor_palette else 0x8080F19C,0x3DB4 if actor_palette else 0x20F0,8,4 if actor_palette else 2,6 if actor_palette else 4)]
         if not npc and not backpack:assert all(actual==(old[0]+shift,old[1]+shift,*old[2:]) for actual,old in zip(tuples[1:5],fixed)), 'PRE fixed section identity and uniform shift'
         elif npc:
-            assert [x[3:5] for x in tuples[:5]]==[(1,39+int(bool(host))+int(bool(backpack))),(2,1),(3,6),(4,4),(8,4)], 'NPC changed shared sections preserve original memberships'
+            assert [x[3:5] for x in tuples[:5]]==[(1,39+int(bool(host))+int(bool(backpack))+int(quiet_talon_trot)),(2,1),(3,6),(4,4),(8,4)], 'NPC changed shared sections preserve original memberships'
             row=tuples[-2] if backpack else tuples[-1]
             assert row[:4]==(npc['rom'],npc['ram'],npc['size'],npc['index']) and row[4]==8
             npc['sections']=tuples[:5];npc['relocs']=row[5]
         if backpack:
-            assert [x[3:5] for x in tuples[:5]]==[(1,39+int(bool(host))+int(bool(backpack))),(2,1),(3,6),(4,4),(8,4)]
+            assert [x[3:5] for x in tuples[:5]]==[(1,39+int(bool(host))+int(bool(backpack))+int(quiet_talon_trot)),(2,1),(3,6),(4,4),(8,4)]
             assert tuples[-1][:4]==(backpack['rom'],backpack['ram'],backpack['size'],backpack['index']) and tuples[-1][4]==8
             backpack['sections']=tuples[:5];backpack['relocs']=tuples[-1][5]
         layout+='#define TOOIE_PRE_TEXT_SIZE 0x%Xu\n#define TOOIE_PRE_TEXT_RELOCS %du\n#define TOOIE_PRE_SHIFT 0x%Xu\n'%(first[2],first[5],shift)
@@ -358,8 +362,12 @@ def compile_backpack621_carrier(root,output,run,actor_palette,pre_background,cpu
     cpu_owner.compile_owner(root,output,run,flags,win)
     if npc665:npc_owner.compile_owner(root,output,run,flags+['-DTOOIE_ACTOR_PALETTE=1'],win)
 
-def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_fix=False,pre_background=False,cpu625=False,minimum_host=False,npc665=False,backpack621=False,shadow_coefficients=False):
+def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_fix=False,pre_background=False,cpu625=False,minimum_host=False,npc665=False,backpack621=False,shadow_coefficients=False,quiet_talon_trot=False):
     raw_binding=json.loads((output/"RAW_BINDING.json").read_text())
+    assert type(quiet_talon_trot) is bool
+    raw_quiet=raw_binding.get("quiet_talon_trot",False)
+    assert type(raw_quiet) is bool and raw_quiet==quiet_talon_trot, "Raw/image quiet Trot selection mismatch"
+    assert not quiet_talon_trot or (backpack621 and shadow_coefficients and minimum_host)
     assert type(backpack621) is bool and raw_binding.get('backpack621',False)==backpack621
     assert not backpack621 or (cpu625 and actor_palette and pre_background), "621 existing transport/carrier prerequisite"
     protected_before={}
@@ -486,6 +494,8 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
         objects.update(host_owner.compile_objects(root,out,run,flags,win));defs += [host_owner.HELPER,host_owner.PROJECTION]
     if backpack621:
         objects['graphics_rate']=rate_owner.compile_owner(root,out,run,flags,win);defs.append(rate_owner.BODY)
+    if quiet_talon_trot:
+        objects['quiet_talon_trot']=quiet_owner.compile_owner(root,out,run,flags,win);defs.append(quiet_owner.BODY)
     heap=r/'build/windows-dev/baseline/heap-patch';prior=r/'build/windows-dev/baseline/render-bridge-silo-candidate'
     honey=prepare_honey_containment(root,output,run,npc665,backpack621)
     selected_actor=selected_shared if actor_palette else None
@@ -604,12 +614,12 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
         expected_order.insert(expected_order.index('func_80092898')+1,'tooie_cpu625_retire')
     actual_order=re.findall(r'^RECOMP_FUNC void (\w+)\(',text,re.M)
     if npc665 or backpack621:
-        new_helpers=(npc_owner.HELPERS if npc665 else [])+((backpack_owner.HELPERS+[rate_owner.BODY]) if backpack621 else [])
+        new_helpers=(npc_owner.HELPERS if npc665 else [])+((backpack_owner.HELPERS+[rate_owner.BODY]) if backpack621 else [])+([quiet_owner.BODY] if quiet_talon_trot else [])
         original_order=[n for n in actual_order if n not in new_helpers]
         assert len(actual_order)==len(set(actual_order)) and set(actual_order)==set(expected_order)
         assert original_order==[n for n in expected_order if n not in new_helpers], 'Existing provider order preserved'
     else:assert len(actual_order)==len(set(actual_order)) and actual_order==expected_order, 'Exact ordered generated providers'
-    assert set(base_functions+defs)==set(base_functions)|set(json.loads((source/'camera_hook_contract.json').read_text())['branches']['hook']['providers'])|set(DEMO_HELPERS if demo_timing else [])|set(SHADOW_HELPERS if shadow_fix else [])|set(PRE_HELPERS if pre_background else [])|set(cpu_owner.HELPERS if cpu625 else [])|set(npc_owner.HELPERS if npc665 else [])|set(backpack_owner.HELPERS if backpack621 else [])|set([host_owner.PROJECTION,host_owner.HELPER] if minimum_host else [])|set([rate_owner.BODY] if backpack621 else [])|set([CPU_ROOT_HELPERS[1],FEATHER_LEAF_PATCH] if actor_palette else [])
+    assert set(base_functions+defs)==set(base_functions)|set(json.loads((source/'camera_hook_contract.json').read_text())['branches']['hook']['providers'])|set(DEMO_HELPERS if demo_timing else [])|set(SHADOW_HELPERS if shadow_fix else [])|set(PRE_HELPERS if pre_background else [])|set(cpu_owner.HELPERS if cpu625 else [])|set(npc_owner.HELPERS if npc665 else [])|set(backpack_owner.HELPERS if backpack621 else [])|set([host_owner.PROJECTION,host_owner.HELPER] if minimum_host else [])|set([rate_owner.BODY] if backpack621 else [])|set([quiet_owner.BODY] if quiet_talon_trot else [])|set([CPU_ROOT_HELPERS[1],FEATHER_LEAF_PATCH] if actor_palette else [])
     npc_end=None
     if npc665:
         npc_end=npc_owner.checked_end(out,out/'pair.o')
@@ -628,7 +638,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
         overlay=(out/'recomp_overlays.inl').read_text();match=re.search(r'static RelocEntry section_%d_baseline_host_helpers_relocs\[\] = \{(.*?)\n\};'%host['index'],overlay,re.S);assert match
         host['relocs']=match[1].count('.offset')
     assert text.count('\n    tooie_backpack621_retire(rdram, ctx);')==2*int(backpack621), 'Exact621 lifecycle call selection'
-    write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu,host,npc,backpack)
+    write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu,host,npc,backpack,quiet_talon_trot)
     if pre:
         if minimum_host:
             names=['boot.c','boot.bin','boot.elf','recomp_overlays.inl','funcs.h','camera_identity_layout.h','render_bridge_layout.h','camera_registry_data.hpp','pre_background_layout.h','cpu625_selection_layout.h','minimum_host_selection_layout.h']
@@ -658,6 +668,8 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     if npc:receipt['inputs'].update(objects['npc665']['inputs']);receipt['helper_definitions']+=npc_owner.HELPERS
     receipt['cpu625']=cpu;receipt['lifecycle_object']=fresh_lifecycle
     receipt['cpu625_table']=cpu_table
+    receipt['quiet_talon_trot']=quiet_talon_trot
+    if quiet_talon_trot:receipt['inputs'].update(objects['quiet_talon_trot']['inputs'])
     receipt['graphics_rate']=graphics_rate
     if graphics_rate:receipt['inputs'].update(objects['graphics_rate']['inputs'])
     receipt['definitions']=expected_order
@@ -686,7 +698,8 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
 
 def prepare(root,output,run,raw=False,image=False,actor_palette=False,shadow_observer=False,demo_timing=False,shadow_fix=False,pre_background=False,cpu625=False,minimum_host=False,npc665=False,backpack621=False,shadow_coefficients=False):
     output.mkdir(exist_ok=True)
+    quiet_talon_trot=bool(backpack621 and shadow_coefficients and minimum_host)
     if raw:
-        receipt=prepare_raw(root,output,run,shadow_observer,demo_timing,shadow_fix,pre_background,actor_palette,cpu625,minimum_host,npc665,backpack621);(output/'RAW_BINDING.json').write_text(json.dumps(receipt,indent=2)+'\n');print('camera raw',sha(output/'RAW_BINDING.json'))
+        receipt=prepare_raw(root,output,run,shadow_observer,demo_timing,shadow_fix,pre_background,actor_palette,cpu625,minimum_host,npc665,backpack621,quiet_talon_trot);(output/'RAW_BINDING.json').write_text(json.dumps(receipt,indent=2)+'\n');print('camera raw',sha(output/'RAW_BINDING.json'))
     if image:
-        receipt=prepare_image(root,output,run,actor_palette,demo_timing,shadow_fix,pre_background,cpu625,minimum_host,npc665,backpack621,shadow_coefficients);print('camera image',sha(output/'receipt.json'))
+        receipt=prepare_image(root,output,run,actor_palette,demo_timing,shadow_fix,pre_background,cpu625,minimum_host,npc665,backpack621,shadow_coefficients,quiet_talon_trot);print('camera image',sha(output/'receipt.json'))

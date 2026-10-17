@@ -3,6 +3,7 @@ MEMORY { patch : ORIGIN = 0x80801000, LENGTH = 0x7FF000 }
 tooie_get_latched_widescreen_settings = 0x8F000020;
 tooie_baseline_presentation_settings = 0x8F000024;
 tooie_baseline_presentation_publish = 0x8F000028;
+tooie_baseline_quiet_talon_trot = 0x8F00002C;
 SECTIONS {
     .recomp_patch : { *(.recomp_patch) } >patch
     .silo_helper ALIGN(4) : { *(.text.silo_preflight) } >patch

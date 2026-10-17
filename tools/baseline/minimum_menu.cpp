@@ -101,6 +101,14 @@ void video(const Snapshot& snapshot) {
     ImGui::Text("VSync: %s",status(render::vsync_status()));
     ImGui::Text("Aspect request: %s",status(render::aspect_status()));
 }
+#if BASELINE_PLAYER && BASELINE_QUIET_TROT
+void audio(const Snapshot& snapshot) {
+    bool quiet=snapshot.preferences.quiet_talon_trot!=0;
+    if(ImGui::Checkbox("Mute Talon Trot movement sound",&quiet))
+        preference(Preference::QuietTalonTrot,int(quiet));
+    ImGui::TextWrapped("Takes effect next launch. Long-legged and stilt movement sounds are unchanged.");
+}
+#endif
 }
 void draw_menu(const Snapshot& snapshot) {
     if(!snapshot.toast.empty()) {
@@ -130,6 +138,9 @@ void draw_menu(const Snapshot& snapshot) {
         if(ImGui::BeginTabBar("settings")) {
             if(ImGui::BeginTabItem("Controls")){controls(snapshot);ImGui::EndTabItem();}
             if(ImGui::BeginTabItem("Video")){video(snapshot);ImGui::EndTabItem();}
+#if BASELINE_PLAYER && BASELINE_QUIET_TROT
+            if(ImGui::BeginTabItem("Audio")){audio(snapshot);ImGui::EndTabItem();}
+#endif
             ImGui::EndTabBar();
         }
         ImGui::Separator();
