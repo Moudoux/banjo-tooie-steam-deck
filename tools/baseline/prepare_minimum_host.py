@@ -1,10 +1,14 @@
-"""Finite HOST/G07 object and linked-state proof; no native command policy."""
+"""Finite HOST projection/live-wide object proof; no native command policy."""
 import hashlib
 import sys
 from elftools.elf.elffile import ELFFile
 from prepare_cpu625 import facts  # Reuse ELF facts only; this selects no CPU owner.
 
 HELPER='tooie_baseline_cutscene_command'
+FRAME='tooie_baseline_widescreen_frame'
+HELPERS=[FRAME,HELPER]
+# Measured in the strict -fno-jump-tables live Wide object.
+HOST_FRAMES={FRAME:40,HELPER:40}
 PROJECTION='func_80015D14'
 NATIVE_IMPORTS={'tooie_get_latched_widescreen_settings':0x8F000020,
                 'tooie_baseline_presentation_settings':0x8F000024,
@@ -18,21 +22,22 @@ PRE_CPU_ON_SHA256='896ddc57ba43db4f5ef368d27eb9e9fc55015854ec12282cb2664d59f53c0
 def compile_objects(root,out,run,flags,win):
     source=root/'tools/baseline/guest/minimum-host'
     commands={
-        'minimum_cutscene':flags+['-DTOOIE_BASELINE_HOST=1','-I'+win(source),'-c',win(source/'minimum_cutscene.c'),'-o',win(out/'minimum_cutscene.o')],
+        'minimum_cutscene':flags+['-DTOOIE_BASELINE_HOST=1','-I'+win(source),'-fno-jump-tables','-c',win(source/'minimum_cutscene.c'),'-o',win(out/'minimum_cutscene.o')],
         'native_aspect_projection':flags+['-DTOOIE_BASELINE_HOST=1','-I'+win(root/'patches/game'),'-fno-jump-tables','-c',win(root/'patches/game/native_aspect_projection.c'),'-o',win(out/'native_aspect_projection.o')],
     }
     records={}
     for name,command in commands.items():
         run(command,name+'-compile.log');record=facts(out/(name+'.o'));record['compile_argv']=[str(x) for x in command];records[name]=record
     host=records['minimum_cutscene']
-    assert host['definitions']==[HELPER]
-    assert set(host['imports'])=={'set_widescreen','tooie_baseline_presentation_settings','tooie_baseline_presentation_publish'}
+    assert host['definitions']==HELPERS
+    assert set(host['imports'])=={'set_widescreen','func_800DA298','widescreen_enabled','tooie_baseline_presentation_settings','tooie_baseline_presentation_publish'}
     assert set(host['allocated_sections'])=={'.baseline_host_helpers','.baseline_host_state','.reginfo','.MIPS.abiflags'}
     assert host['allocated_sections']['.baseline_host_state']['type']=='SHT_PROGBITS'
     assert bytes.fromhex(host['section_bytes']['.baseline_host_state'])==bytes(8)
-    assert host['frames']=={HELPER:40}
+    assert HOST_FRAMES is not None, ('Measure live Wide helper frames before acceptance',host['frames'])
+    assert host['frames']==HOST_FRAMES
     metadata=[row for row in host['relocations'] if row['section']=='.pdr']
-    assert metadata==[dict(section='.pdr',offset=0,kind=2,target=HELPER)]
+    assert metadata==[dict(section='.pdr',offset=32*i,kind=2,target=name) for i,name in enumerate(HELPERS)]
     assert all(row['section']=='.baseline_host_helpers' and row['kind'] in (4,5,6) for row in host['relocations'] if row['section']!='.pdr')
     # Reuse the maintained G07 object validator and the actual existing contract.
     sys.path.insert(0,str(root/'tools'))
@@ -58,7 +63,7 @@ def linked(elf):
     assert state['sh_size']==8 and state.data()==bytes(8) and state['sh_addr']==section['sh_addr']+section['sh_size']
     assert literals['sh_size']==24 and literals['sh_addr']%8==0 and literals['sh_addr']>=state['sh_addr']+8
     assert literals['sh_addr']+24<=0x81000000
-    assert symbols[HELPER]['st_shndx']==elf.get_section_index(section.name)
+    assert all(symbols[name]['st_shndx']==elf.get_section_index(section.name) and symbols[name]['st_size']>0 for name in HELPERS)
     assert symbols[PROJECTION]['st_shndx']==elf.get_section_index('.recomp_patch')
     assert {name:symbols[name]['st_value'] for name in NATIVE_IMPORTS}==NATIVE_IMPORTS
     return dict(rom=section['sh_addr']-0x80801000,ram=section['sh_addr'],size=section['sh_size'],index=elf.get_section_index(section.name),

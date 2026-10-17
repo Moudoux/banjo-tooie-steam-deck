@@ -43,38 +43,63 @@ int main() {
     app.refreshRateTarget=shared.userConfig.refreshRateTarget=60;
     const uint32_t wide=(1u<<BASELINE_PRESENT_GENERATION_SHIFT)|BASELINE_PRESENT_ACTIVE|BASELINE_PRESENT_WIDE;
     assert(reconcile_aspect(shared,wide,0)==Status::Applied);
+    assert(shared.userConfig.aspectRatio==RT64::UserConfiguration::AspectRatio::Original);
+    const uint32_t applied_wide=(1u<<BASELINE_PUBLISH_GENERATION_SHIFT)|BASELINE_PUBLISH_WIDE;
+    assert(reconcile_aspect(shared,wide,applied_wide)==Status::Applied);
     assert(shared.userConfig.aspectRatio==RT64::UserConfiguration::AspectRatio::Manual);
     assert(shared.userConfig.aspectTarget==16.0/9.0 && shared.fbConfigChanged);
-    test_preferences.wide=1;
+    test_preferences.wide=-1;
     test_preferences.native_aspect=fit_aspect;
     latch_startup(true);
+    assert(tooie::widescreen::latched_settings_word()==3u); // Use-game projection follows guest halfword.
     assert(((settings_word() >> BASELINE_PRESENT_ASPECT_SHIFT) & 15u)==0u);
+    const auto startup_settings=settings_word();
+    for(int request:{-1,0,1}) {
+        tooie::widescreen::set_live_widescreen_request(request);
+        assert(((settings_word()>>BASELINE_PRESENT_WIDE_REQUEST_SHIFT)&BASELINE_PRESENT_WIDE_REQUEST_MASK)==uint32_t(request+1));
+        assert((settings_word()&~(BASELINE_PRESENT_WIDE_REQUEST_MASK<<BASELINE_PRESENT_WIDE_REQUEST_SHIFT))==startup_settings);
+        assert(test_preferences.wide==-1);
+    }
+    tooie::widescreen::set_live_widescreen_request(2);
+    assert(tooie::widescreen::live_widescreen_request()==1);
+    tooie::widescreen::set_live_widescreen_request(-1);
+    assert(reconcile_aspect(shared,settings_word(),1u<<BASELINE_PUBLISH_GENERATION_SHIFT)==Status::Applied);
+    assert(shared.userConfig.aspectRatio==RT64::UserConfiguration::AspectRatio::Original);
+    assert(reconcile_aspect(shared,settings_word(),2u<<BASELINE_PUBLISH_GENERATION_SHIFT|BASELINE_PUBLISH_WIDE)==Status::Applied);
+    assert(shared.userConfig.aspectRatio==RT64::UserConfiguration::AspectRatio::Original);
+    assert(reconcile_aspect(shared,0,applied_wide)==Status::Applied);
+    assert(shared.userConfig.aspectRatio==RT64::UserConfiguration::AspectRatio::Original);
+    publish_guest(1,BASELINE_PUBLISH_WIDE|0x80u);
+    assert(publication_word()==applied_wide);
     tooie::widescreen::set_live_aspect_bits(1u << TOOIE_WIDESCREEN_SETTINGS_ASPECT_SHIFT);
     assert(tooie::widescreen::latched_settings_word()==7u);
-    assert(reconcile_aspect(shared,settings_word(),0)==Status::Applied);
+    assert(reconcile_aspect(shared,settings_word(),applied_wide)==Status::Applied);
     assert(shared.userConfig.aspectTarget==21.0/9.0);
     const auto fit32=tooie::widescreen::fit_aspect_bits(3840,1080);
     assert(fit32==0x40000010u);
     tooie::widescreen::set_live_aspect_bits(fit32);
     assert(tooie::widescreen::latched_settings_word()==0x40000013u);
     assert(tooie::widescreen::latched_native_aspect()==tooie::widescreen::NativeAspect::Ratio16x9);
-    assert(reconcile_aspect(shared,settings_word(),0)==Status::Applied);
+    assert(reconcile_aspect(shared,settings_word(),applied_wide)==Status::Applied);
     assert(shared.userConfig.aspectTarget==32.0/9.0);
     const auto fit2560=tooie::widescreen::fit_aspect_bits(2560,1080);
     assert((fit2560 & 15u)==0 && (fit2560 & TOOIE_WIDESCREEN_SETTINGS_FIT));
     tooie::widescreen::set_live_aspect_bits(fit2560);
-    assert(reconcile_aspect(shared,settings_word(),0)==Status::Applied);
+    assert(reconcile_aspect(shared,settings_word(),applied_wide)==Status::Applied);
     assert(std::abs(shared.userConfig.aspectTarget-64.0/27.0)<1e-5);
     assert(std::abs(shared.userConfig.aspectTarget-21.0/9.0)>0.03); // True fit, not a preset.
     tooie::widescreen::set_live_aspect_bits(tooie::widescreen::fit_aspect_bits(640,480));
     assert(tooie::widescreen::latched_aspect_ratio()==16.0/9.0);
     assert(tooie::widescreen::fit_aspect_bits(7680,1080)==fit32);
     // Original cutscenes retain 4:3 even while the live gameplay ratio changes.
-    const auto bars=(settings_word() >> BASELINE_PRESENT_GENERATION_SHIFT) << 1 | 1u;
+    const auto bars=(settings_word() >> BASELINE_PRESENT_GENERATION_SHIFT) <<
+        BASELINE_PUBLISH_GENERATION_SHIFT | BASELINE_PUBLISH_PILLARBOX;
+    publish_guest(1,BASELINE_PUBLISH_PILLARBOX);
+    assert(publication_word()==bars);
     assert(reconcile_aspect(shared,settings_word(),bars)==Status::Applied);
     assert(shared.userConfig.aspectTarget==4.0/3.0);
     tooie::widescreen::set_live_aspect_bits(3u << TOOIE_WIDESCREEN_SETTINGS_ASPECT_SHIFT);
-    assert(reconcile_aspect(shared,settings_word(),0)==Status::Applied);
+    assert(reconcile_aspect(shared,settings_word(),applied_wide)==Status::Applied);
     assert(shared.userConfig.aspectTarget==43.0/18.0);
     assert(test_preferences.native_aspect==fit_aspect); // Immutable startup source.
     for(const auto requested:{OutputRate{2,60},OutputRate{3,120},OutputRate{3,75},OutputRate{1,60}}) {

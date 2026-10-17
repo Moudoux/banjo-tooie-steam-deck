@@ -13,6 +13,7 @@ std::atomic_bool latched_widescreen_enabled{false};
 std::atomic<tooie::widescreen::NativeAspect> configured_native_aspect_value{
     tooie::widescreen::NativeAspect::Ratio16x9};
 std::atomic<std::uint32_t> latched_aspect_bits{0};
+std::atomic<int> wide_request{-1}; // Baseline SDL owner publishes -1/0/1 only.
 
 constexpr tooie::widescreen::NativeAspect normalize_aspect(
     tooie::widescreen::NativeAspect aspect) noexcept {
@@ -84,6 +85,14 @@ double latched_aspect_ratio() noexcept {
 void set_live_aspect_bits(std::uint32_t bits) noexcept {
     latched_aspect_bits.store(bits & ~(TOOIE_WIDESCREEN_SETTINGS_ACTIVE |
         TOOIE_WIDESCREEN_SETTINGS_ENABLED), std::memory_order_release);
+}
+
+void set_live_widescreen_request(int request) noexcept {
+    if (request >= -1 && request <= 1) wide_request.store(request, std::memory_order_release);
+}
+
+int live_widescreen_request() noexcept {
+    return wide_request.load(std::memory_order_acquire);
 }
 
 uint32_t fit_aspect_bits(int width, int height) noexcept {

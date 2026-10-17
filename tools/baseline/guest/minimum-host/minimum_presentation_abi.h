@@ -1,9 +1,18 @@
 #pragma once
-/* One immutable startup word; command policy remains in the typed guest helper. */
+/* Startup generation/cutscene policy plus live request; guest owns application. */
 #define BASELINE_PRESENT_ACTIVE 1u
-#define BASELINE_PRESENT_WIDE 2u
+#define BASELINE_PRESENT_WIDE 2u /* Startup diagnostic; applied state is published by guest. */
 #define BASELINE_PRESENT_ORIGINAL_CUTSCENE 4u
 #define BASELINE_PRESENT_PILLARBOX_CAPABLE 8u
 #define BASELINE_PRESENT_ASPECT_SHIFT 4u
+#define BASELINE_PRESENT_WIDE_REQUEST_SHIFT 6u
+#define BASELINE_PRESENT_WIDE_REQUEST_MASK 3u
+#define BASELINE_PRESENT_USE_GAME 0u
+#define BASELINE_PRESENT_FORCE_OFF 1u
+#define BASELINE_PRESENT_FORCE_ON 2u
 #define BASELINE_PRESENT_GENERATION_SHIFT 8u
+#define BASELINE_PUBLISH_PILLARBOX 1u
+#define BASELINE_PUBLISH_WIDE 2u
+#define BASELINE_PUBLISH_FLAGS_MASK 3u
+#define BASELINE_PUBLISH_GENERATION_SHIFT 2u
 

@@ -143,8 +143,13 @@ Native code must not decide game semantics. It must not silently own guest lifet
   limit beside the option. A new setting must not inherit restart behavior by default.
 - Resolution is applied by the graphics owner through RT64 configuration. Quiet
   Talon Trot is read by its guest sound helper through a live host preference.
-  Aspect remains startup-only until guest widescreen and cutscene transitions can
-  be applied together; changing only the renderer would leave game policy stale.
+  Widescreen requests pass to a guest helper before camera refresh. That helper
+  calls the original setter and publishes the applied state for RT64. It reads
+  the original preference for Use game setting; it never overwrites that preference.
+  The old global-settings query override is retired from the selected player.
+- Gameplay aspect uses one atomic encoded ratio for guest projection and RT64.
+  Each owner applies it at its next boundary; no exact frame delay is promised.
+  Only the cutscene-aspect policy remains startup-latched.
 - Name overlay functions with their overlay suffix.
 - Declare every native access to guest memory. Name the function, the offsets and the reason.
 - Regenerate after each guest edit. Update image pins only after you review the change.
@@ -240,7 +245,7 @@ Keep three outputs apart:
 - **Recompiled patch code** (`boot.c`): PC-executable code built from guest C. Calls into patch functions run this code.
 - **Patch data image** (`boot.bin`): bytes mapped into guest memory from `0x80801000`, outside the original 8 MiB RDRAM.
 
-The selected image is 299,328 bytes, SHA-256 `4ce140e2…`. It contains:
+The selected image is 299,640 bytes, SHA-256 `b7241959…`. It contains:
 
 - the 2,760-byte boot and heap image at its start;
 - `tooie_render_bridge_state` (18,844 bytes);
@@ -257,7 +262,7 @@ tools/baseline/prepare_player_guest.py --rom … (WSL)
   ├─ prepare_silo_bridge.py       silo-candidate/*.c → Silo raw + image
   └─ prepare_render_bridge.py --camera --raw --image <SELECTION>
                                   → composition-v2/{raw/, boot.c, boot.bin, recomp_overlays.inl, *_layout.h}
-cmake --preset windows-player     checks guest image SHA-256 4ce140e2…; composes the runtime sources
+cmake --preset windows-player     checks guest image SHA-256 b7241959…; composes the runtime sources
   BaselineRecompiledFuncs  ← composition-v2/raw/funcs_*.c   (raw recompiled game code)
   BaselineBootPatch        ← composition-v2/boot.c          (recompiled guest patches)
   TooieBaseline            ← boot.bin via file_to_c → register_boot_patch → recomp::overlays::register_patches

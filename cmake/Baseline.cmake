@@ -911,8 +911,8 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
             if(NOT _baseline_host_type STREQUAL "OBJECT" OR NOT _baseline_actor_enabled OR NOT _baseline_pre_type STREQUAL "OBJECT")
                 message(FATAL_ERROR "Minimum host requires its exact guest object and actor/PRE carrier")
             endif()
-            math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+2")
-            math(EXPR _baseline_helper_expected "${_baseline_helper_expected}+1")
+            math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+3")
+            math(EXPR _baseline_helper_expected "${_baseline_helper_expected}+2")
         elseif(_baseline_host_type STREQUAL "OBJECT")
             message(FATAL_ERROR "HOST guest image is ON while native selection is OFF")
         endif()
@@ -1037,7 +1037,7 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                     if(_baseline_quiet_trot)
                         set(_baseline_expected_image "3ab2614823ac33e1d6f271aeb0ba6a34f8457efcbf5b75da6d2c4b952f7c7e7e")
                         if(_baseline_trot_toggle)
-                            set(_baseline_expected_image "4ce140e2df99f283663b65cec09e6463fdac8f7c21e7fed7c57f6c8f7965053c")
+                            set(_baseline_expected_image "b72419590be2a0f657e70232dc199eee5fe970bcddfe460dbf05510840f7db83")
                         endif()
                     endif()
                 endif()
@@ -1321,6 +1321,32 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
             RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
         add_test(NAME baseline_graphics_rate COMMAND BaselineGraphicsRateTest)
     endif()
+    if(TOOIE_BASELINE_HOST)
+        set(_baseline_wide_fixture_dir "${_baseline_bridge_dir}/widescreen-owner-fixture")
+        set(_baseline_wide_fixtures
+            "${_baseline_wide_fixture_dir}/widescreen_owner_candidate.inc"
+            "${_baseline_wide_fixture_dir}/widescreen_owner_negative.inc"
+            "${_baseline_wide_fixture_dir}/widescreen_owner_functions.h"
+            "${_baseline_wide_fixture_dir}/widescreen_owner_facts.h")
+        add_custom_command(OUTPUT ${_baseline_wide_fixtures}
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/prepare_widescreen_owner_fixture.py"
+                --candidate "${_baseline_bridge_dir}/boot.c" --elf "${_baseline_bridge_dir}/boot.elf"
+                --output "${_baseline_wide_fixture_dir}"
+            DEPENDS tests/prepare_widescreen_owner_fixture.py tests/extract_heap_realloc.py
+                "${_baseline_bridge_dir}/boot.c" "${_baseline_bridge_dir}/boot.elf"
+                "${_baseline_bridge_dir}/data.syms.toml" VERBATIM)
+        foreach(_wide_target IN ITEMS BaselineWidescreenOwnerTest BaselineWidescreenOwnerNegativeTest)
+            add_executable(${_wide_target} EXCLUDE_FROM_ALL tests/baseline_widescreen_owner_test.cpp ${_baseline_wide_fixtures})
+            target_include_directories(${_wide_target} PRIVATE "${_baseline_wide_fixture_dir}" "${RUNTIME_RECOMP_INCLUDE}")
+            target_compile_definitions(${_wide_target} PRIVATE NOMINMAX)
+            target_compile_features(${_wide_target} PRIVATE cxx_std_20)
+            set_target_properties(${_wide_target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
+        endforeach()
+        target_compile_definitions(BaselineWidescreenOwnerNegativeTest PRIVATE WIDE_OWNER_NEGATIVE_ACTIVE)
+        add_test(NAME baseline_widescreen_owner COMMAND BaselineWidescreenOwnerTest)
+        add_test(NAME baseline_widescreen_owner_negative_active COMMAND BaselineWidescreenOwnerNegativeTest)
+        set_tests_properties(baseline_widescreen_owner_negative_active PROPERTIES WILL_FAIL TRUE)
+    endif()
     if(_baseline_trot_toggle)
         set(_baseline_trot_fixture_dir "${_baseline_bridge_dir}/talon-trot-toggle-fixture")
         set(_baseline_trot_fixtures
@@ -1445,7 +1471,7 @@ if(TOOIE_BASELINE_PLAYER)
     target_include_directories(baseline_input_host_test PRIVATE
         "${CMAKE_SOURCE_DIR}/tools/baseline" "${CMAKE_SOURCE_DIR}/src"
         "${_baseline_rt64}/src/contrib" "${_player_generated}" "${SDL2_INCLUDE_DIRS}"
-        "${RUNTIME_RECOMP_INCLUDE}")
+        "${RUNTIME_RECOMP_INCLUDE}" "${RUNTIME_ROOT}/ultramodern/include")
     target_link_libraries(baseline_input_host_test PRIVATE
         "${SDL2_LIBRARIES}" user32 shell32 ole32 comdlg32 bcrypt winmm)
     set_target_properties(baseline_input_host_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")

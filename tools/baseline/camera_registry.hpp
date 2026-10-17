@@ -11,7 +11,7 @@ static_assert(TOOIE_MINIMUM_HOST_SELECTED==TOOIE_BASELINE_HOST,"Native/guest HOS
 #include "backpack621_selection_layout.h"
 #include "trot_toggle_selection_layout.h"
 static_assert(TOOIE_TROT_SELECTED==BASELINE_TROT_TOGGLE,"Native/guest Trot selection mismatch");
-constexpr size_t camera_patch_count = (TOOIE_SHADOW_SELECTED ? 61 : TOOIE_DEMO_TIMING_SELECTED ? 53 : 50)+(TOOIE_PRE_SELECTED?3:0)+(TOOIE_ACTOR_PALETTE_SELECTED?4:0)+(TOOIE_CPU625_SELECTED?4:0)+(TOOIE_MINIMUM_HOST_SELECTED?2:0)+(TOOIE_NPC665_SELECTED?8:0)+(TOOIE_BACKPACK621_SELECTED?9:0)+BASELINE_QUIET_TROT+(4+2)*BASELINE_TROT_TOGGLE;
+constexpr size_t camera_patch_count = (TOOIE_SHADOW_SELECTED ? 61 : TOOIE_DEMO_TIMING_SELECTED ? 53 : 50)+(TOOIE_PRE_SELECTED?3:0)+(TOOIE_ACTOR_PALETTE_SELECTED?4:0)+(TOOIE_CPU625_SELECTED?4:0)+(TOOIE_MINIMUM_HOST_SELECTED?3:0)+(TOOIE_NPC665_SELECTED?8:0)+(TOOIE_BACKPACK621_SELECTED?9:0)+BASELINE_QUIET_TROT+(4+2)*BASELINE_TROT_TOGGLE;
 // Registry identity only. Guest leaves retain all camera semantic policy.
 namespace {
 struct CameraAlias {
@@ -79,7 +79,7 @@ void camera_validate_patch_table() {
 #endif
     #if TOOIE_MINIMUM_HOST_SELECTED
     {const auto& p=sections[TOOIE_MINIMUM_HOST_SECTION];
-     if(!TOOIE_PRE_SELECTED || !TOOIE_ACTOR_PALETTE_SELECTED || p.rom_addr!=TOOIE_MINIMUM_HOST_ROM || p.ram_addr!=TOOIE_MINIMUM_HOST_RAM || p.size!=TOOIE_MINIMUM_HOST_SIZE || p.index!=TOOIE_MINIMUM_HOST_INDEX || p.num_funcs!=1 || p.num_relocs!=TOOIE_MINIMUM_HOST_RELOCS)rejected_body("HOST exact compiled helper section");}
+     if(!TOOIE_PRE_SELECTED || !TOOIE_ACTOR_PALETTE_SELECTED || p.rom_addr!=TOOIE_MINIMUM_HOST_ROM || p.ram_addr!=TOOIE_MINIMUM_HOST_RAM || p.size!=TOOIE_MINIMUM_HOST_SIZE || p.index!=TOOIE_MINIMUM_HOST_INDEX || p.num_funcs!=2 || p.num_relocs!=TOOIE_MINIMUM_HOST_RELOCS)rejected_body("HOST exact compiled helper section");}
     #endif
 #if TOOIE_NPC665_SELECTED
     {const auto& p=sections[TOOIE_NPC665_SECTION];
@@ -177,7 +177,7 @@ void camera_validate_published_section(const SectionTableEntry& section,uint32_t
     }
     if(checked) {
         camera_validate_resident_patches();
-        std::fprintf(stderr,"baseline camera-registry original_aliases=%zu patch_providers=%zu helpers=%u rom=%08x live=%08x lookup_equal=1\n",checked,camera_patch_count,(TOOIE_SHADOW_SELECTED?23u:TOOIE_DEMO_TIMING_SELECTED?15u:12u)+(TOOIE_PRE_SELECTED?3u:0u)+(TOOIE_ACTOR_PALETTE_SELECTED?3u:0u)+(TOOIE_CPU625_SELECTED?4u:0u)+TOOIE_MINIMUM_HOST_SELECTED+(TOOIE_NPC665_SELECTED?8u:0u)+(TOOIE_BACKPACK621_SELECTED?8u:0u)+2u*BASELINE_TROT_TOGGLE,section.rom_addr,live);
+        std::fprintf(stderr,"baseline camera-registry original_aliases=%zu patch_providers=%zu helpers=%u rom=%08x live=%08x lookup_equal=1\n",checked,camera_patch_count,(TOOIE_SHADOW_SELECTED?23u:TOOIE_DEMO_TIMING_SELECTED?15u:12u)+(TOOIE_PRE_SELECTED?3u:0u)+(TOOIE_ACTOR_PALETTE_SELECTED?3u:0u)+(TOOIE_CPU625_SELECTED?4u:0u)+2u*TOOIE_MINIMUM_HOST_SELECTED+(TOOIE_NPC665_SELECTED?8u:0u)+(TOOIE_BACKPACK621_SELECTED?8u:0u)+2u*BASELINE_TROT_TOGGLE,section.rom_addr,live);
         std::fflush(stderr);
     }
 }

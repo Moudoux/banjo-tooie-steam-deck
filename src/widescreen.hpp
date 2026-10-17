@@ -12,8 +12,8 @@ enum class NativeAspect : std::uint32_t {
     Ratio43x18 = 3,
 };
 
-// Wide/override remain startup-latched. The baseline host may publish gameplay
-// aspect bits live; guest and renderer consume the same atomic ratio value.
+// Legacy profile stays startup-latched. Baseline publishes a live wide request;
+// the guest halfword owns application and presentation acknowledges it.
 void configure_profile(bool enabled) noexcept;
 void configure_native_aspect(NativeAspect aspect) noexcept;
 void latch_for_game_start() noexcept;
@@ -23,6 +23,8 @@ NativeAspect latched_native_aspect() noexcept;
 double latched_aspect_ratio() noexcept;
 bool profile_override_active() noexcept;
 void set_live_aspect_bits(std::uint32_t bits) noexcept;
+void set_live_widescreen_request(int request) noexcept;
+int live_widescreen_request() noexcept;
 // Positive drawable dimensions; scale clamps to [1,2] (16:9..32:9).
 std::uint32_t fit_aspect_bits(int width, int height) noexcept;
 // Canonical transport: inactive0; startup bits0..1; atomic live aspect bits2..31.

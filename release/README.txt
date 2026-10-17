@@ -44,10 +44,11 @@ applies on the next fresh entry; disabling restores hold-Z at the next game
 input/state check. No restart is needed.
 
 VIDEO
-Output rate defaults to Original. Output rate, resolution scale, gameplay aspect,
+Output rate defaults to Original. Output rate, resolution scale, widescreen, gameplay aspect,
 VSync and fullscreen changes apply during play. Gameplay aspect has fixed ratios
 and Fit window (16:9–32:9), which follows the drawable window size on resize.
-Gameplay aspect is used with Widescreen On. Widescreen and Cutscene aspect
+Widescreen On/Off overrides the original game's option; Use game setting follows
+that option. Gameplay aspect applies when the game is wide. Cutscene aspect
 changes need a restart.
 Default (Original) is the former Current choice.
 

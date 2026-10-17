@@ -58,12 +58,19 @@ extern "C" void baseline_actor_cpu_root_begin(uint8_t* rdram, recomp_context* ct
     tooie_camera_cpu_root_begin(rdram, &clone);
 }
 #endif
+#if TOOIE_BASELINE_HOST
+extern "C" void tooie_baseline_widescreen_frame(uint8_t*,recomp_context*);
+#endif
 extern "C" void baseline_camera_construction_begin(uint8_t* rdram, recomp_context* ctx) {
     recomp_context clone;
     camera_clone_context(clone, *ctx);
     clone.r4 = ctx->r29;
     clone.r5 = (gpr)(int32_t)MEM_W(0x1C, ctx->r29);
     tooie_camera_construction_begin(rdram, &clone);
+#if TOOIE_BASELINE_HOST
+    camera_clone_context(clone,*ctx);
+    tooie_baseline_widescreen_frame(rdram,&clone);
+#endif
 #if TOOIE_SHADOW_SELECTED
     camera_clone_context(clone,*ctx);clone.r4=ctx->r29;tooie_shadow_reset(rdram,&clone);
 #endif

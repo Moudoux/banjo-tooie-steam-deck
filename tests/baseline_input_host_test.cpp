@@ -25,6 +25,12 @@ const Uint8* baseline_fixture_keyboard_state(int* count) noexcept {
     return fixture_keys.data();
 }
 
+// This host fixture has no renderer; actual applied-state transport is covered
+// by baseline_output_rate and the production guest widescreen-owner fixture.
+namespace baseline::host::render {
+uint32_t publication_word() noexcept { return 0; }
+}
+
 namespace {
 namespace host = baseline::host;
 using tooie::input::Action;
@@ -430,7 +436,8 @@ int main() {
             first_log.find(" utc=") != std::string::npos && first_log.find(" version=") != std::string::npos &&
             first_log.find(" game_started=0 menu=0 ") != std::string::npos &&
             first_log.find(" output_rate=") != std::string::npos && first_log.find(" fullscreen=") != std::string::npos &&
-            first_log.find(" controller=\"") != std::string::npos,
+            first_log.find(" controller=\"") != std::string::npos &&
+            first_log.find(" wide_request=-1 wide_publication=0x00000000") != std::string::npos,
             "F4 marker line lacks sequence, timestamps, version or current state");
         require(fixture.snapshot()->toast.find("#1") != std::string::npos,
             "F4 acknowledgement missing while menu closed");
@@ -490,6 +497,18 @@ int main() {
             require(host::enqueue(request), "preference queue rejected");
             host::tick(true);
         };
+        for(int request:{1,0,-1}) {
+            preference(host::Preference::Wide,request);
+            require(tooie::widescreen::live_widescreen_request()==request &&
+                host::latched_preferences().wide==startup.wide,
+                "wide request was not live or mutated startup preferences");
+        }
+        preference(host::Preference::Wide,1);
+        preference(host::Preference::Wide,2);
+        preference(host::Preference::Wide,-2);
+        require(tooie::widescreen::live_widescreen_request()==1,
+            "invalid wide request changed publication");
+        preference(host::Preference::Wide,-1);
         preference(host::Preference::NativeAspect,2);
         require(tooie::widescreen::latched_native_aspect()==tooie::widescreen::NativeAspect::Ratio32x9 &&
             host::latched_preferences().native_aspect==startup.native_aspect,
@@ -528,11 +547,15 @@ int main() {
             "live preference could not return to default");
         preference(host::Preference::QuietTalonTrot,1);
         preference(host::Preference::Resolution,8);
+        preference(host::Preference::Wide,1);
         require(tooie::frontend::settings::flush(), "live preferences did not persist");
         host::shutdown();
+        require(tooie::widescreen::live_widescreen_request()==-1, "shutdown retained live wide request");
         require(!host::requested_quiet_talon_trot() && host::requested_resolution()==1,
             "shutdown retained live request");
         host::initialize(fixture.window,fixture.profile);
+        require(tooie::widescreen::live_widescreen_request()==1, "persisted wide request missing on restart");
+        preference(host::Preference::Wide,-1);
         require(host::requested_quiet_talon_trot() && host::requested_resolution()==8,
             "persisted preferences missing on restart");
 

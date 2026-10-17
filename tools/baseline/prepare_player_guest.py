@@ -22,9 +22,9 @@ OUTPUTS = [BASELINE + '/raw', BASELINE + '/heap-patch', BASELINE + '/render-brid
 SELECTION = ['--actor-palette', '--demo-timing', '--shadow-fix', '--pre-background', '--cpu625',
              '--minimum-host', '--npc665', '--backpack621', '--shadow-coefficients']
 # Historical quiet-only image: 3ab2614823ac33e1d6f271aeb0ba6a34f8457efcbf5b75da6d2c4b952f7c7e7e
-IMAGE_SHA256 = '4ce140e2df99f283663b65cec09e6463fdac8f7c21e7fed7c57f6c8f7965053c'
-IMAGE_BYTES = 299328
-LAYOUT_SHA256 = '19fd6ff86da50efab5616fbfbbcd7836e1313d84bbb11fceed9bee0bfed0581f'
+IMAGE_SHA256 = 'b72419590be2a0f657e70232dc199eee5fe970bcddfe460dbf05510840f7db83'
+IMAGE_BYTES = 299640
+LAYOUT_SHA256 = '1176c1ca4aa81535788f1e56c2a1eaa138d7bcf47869a86583af23e6a43627d2'
 ROM_SHA256 = '9ec37fba6890362eba86fb855697a9cff1519275531b172083a1a6a045483583'
 DECOMPRESSED_SHA256 = '8c9d316b2edca686ec8393ddf95d480a7dfd9879ef434dbcfc4ea3000f2ffe89'
 # Native publication references that Baseline.cmake authenticates at configure.

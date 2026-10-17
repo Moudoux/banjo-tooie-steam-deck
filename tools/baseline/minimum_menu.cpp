@@ -83,7 +83,7 @@ void controls(const Snapshot& snapshot) {
 void video(const Snapshot& snapshot) {
     const auto& prefs=snapshot.preferences;
 #if BASELINE_PLAYER
-    ImGui::TextWrapped("Resolution, output rate, gameplay aspect, VSync and fullscreen apply now; Widescreen and Cutscene aspect take effect next launch.");
+    ImGui::TextWrapped("Resolution, output rate, Widescreen, gameplay aspect, VSync and fullscreen apply now; Cutscene aspect takes effect next launch. On/Off overrides the in-game widescreen option; Use game setting follows it.");
     bool fullscreen=prefs.fullscreen!=0;
     if(ImGui::Checkbox("Fullscreen",&fullscreen))preference(Preference::Fullscreen,int(fullscreen));
 #else
@@ -100,7 +100,7 @@ void video(const Snapshot& snapshot) {
     if(ImGui::Combo("Widescreen",&wide,"Use game setting\0Off\0On\0"))preference(Preference::Wide,wide-1);
     int aspect=prefs.native_aspect;
     if(ImGui::Combo("Gameplay aspect",&aspect,"16:9\0" "21:9\0" "32:9\0" "43:18\0" "Fit window (16:9\xe2\x80\x93" "32:9)\0"))preference(Preference::NativeAspect,aspect);
-    ImGui::TextDisabled("Gameplay aspect is used when Widescreen was On at game start.");
+    ImGui::TextDisabled("Gameplay aspect is used when the game is widescreen.");
     int cutscene=prefs.cutscene_aspect;
     if(ImGui::Combo("Cutscene aspect",&cutscene,"Original (4:3)\0Match gameplay\0"))preference(Preference::CutsceneAspect,cutscene);
     bool sync=prefs.vsync<0?render::effective_vsync():prefs.vsync!=0;

@@ -19,5 +19,5 @@ Status aspect_status() noexcept;
 bool effective_vsync() noexcept;
 uint32_t settings_word() noexcept;
 uint32_t publication_word() noexcept;
-void publish_guest(uint32_t generation,uint32_t pillarbox) noexcept;
+void publish_guest(uint32_t generation,uint32_t flags) noexcept;
 }

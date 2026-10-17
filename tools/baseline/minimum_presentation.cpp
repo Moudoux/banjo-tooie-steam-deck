@@ -59,31 +59,33 @@ void latch_startup(bool pillarbox_capable) {
     if(pillarbox_capable)word|=BASELINE_PRESENT_PILLARBOX_CAPABLE;
     if(prefs.cutscene_aspect==0)word|=BASELINE_PRESENT_ORIGINAL_CUTSCENE;
     word|=uint32_t(prefs.native_aspect<fit_aspect?prefs.native_aspect:0)<<BASELINE_PRESENT_ASPECT_SHIFT;
-    if(prefs.wide>=0) {
-        tooie::widescreen::configure_profile(prefs.wide!=0);
-        tooie::widescreen::configure_native_aspect(tooie::widescreen::NativeAspect(prefs.native_aspect));
-        tooie::widescreen::latch_for_game_start();
-        word|=BASELINE_PRESENT_ACTIVE;
-        if(prefs.wide)word|=BASELINE_PRESENT_WIDE;
-    }
-    // Missing preference never activates the existing G07 override.
+    // G07 substitution is retired in this composition. Original game_wide
+    // remains the projection gate; the guest alone applies the request.
+    tooie::widescreen::configure_profile(true);
+    tooie::widescreen::configure_native_aspect(tooie::widescreen::NativeAspect(prefs.native_aspect));
+    tooie::widescreen::latch_for_game_start();
+    word|=BASELINE_PRESENT_ACTIVE;
+    if(prefs.wide==1)word|=BASELINE_PRESENT_WIDE; // Startup diagnostic only.
     publication.store(0,std::memory_order_release);
     settings.store(word,std::memory_order_release);
 }
-uint32_t settings_word() noexcept{return settings.load(std::memory_order_acquire);}
+uint32_t settings_word() noexcept {
+    return settings.load(std::memory_order_acquire) |
+        ((uint32_t(tooie::widescreen::live_widescreen_request()+1)&BASELINE_PRESENT_WIDE_REQUEST_MASK)<<BASELINE_PRESENT_WIDE_REQUEST_SHIFT);
+}
 uint32_t publication_word() noexcept{return publication.load(std::memory_order_acquire);}
-void publish_guest(uint32_t generation,uint32_t pillarbox) noexcept {
-    publication.store((generation<<1)|(pillarbox&1u),std::memory_order_release);
+void publish_guest(uint32_t generation,uint32_t flags) noexcept {
+    publication.store((generation<<BASELINE_PUBLISH_GENERATION_SHIFT)|(flags&BASELINE_PUBLISH_FLAGS_MASK),std::memory_order_release);
 }
 Status reconcile_aspect(RT64::SharedQueueResources& shared,uint32_t word,uint32_t guest) {
     using Aspect=RT64::UserConfiguration::AspectRatio;
-    const bool wide=(word&(BASELINE_PRESENT_ACTIVE|BASELINE_PRESENT_WIDE))==
-        (BASELINE_PRESENT_ACTIVE|BASELINE_PRESENT_WIDE);
-    const bool bars=wide && (word&BASELINE_PRESENT_PILLARBOX_CAPABLE) &&
-        (word>>BASELINE_PRESENT_GENERATION_SHIFT)==(guest>>1) && (guest&1u);
+    const uint32_t generation=word>>BASELINE_PRESENT_GENERATION_SHIFT;
+    const bool applied=generation && generation==(guest>>BASELINE_PUBLISH_GENERATION_SHIFT);
+    const bool bars=applied && (guest&BASELINE_PUBLISH_PILLARBOX);
+    const bool wide=applied && (guest&BASELINE_PUBLISH_FLAGS_MASK);
     const Aspect wanted=wide?Aspect::Manual:Aspect::Original;
     // One atomic ratio load, shared with guest projection. The two owners may
-    // apply a change in adjacent frames; this is not a frame-coherent commit.
+    // apply/defer/coalesce independently; no frame-lag bound is promised.
     const double target=bars?4.0/3.0:tooie::widescreen::latched_aspect_ratio();
     std::unique_lock lock(shared.configurationMutex,std::try_to_lock);
     if(!lock.owns_lock())return Status::Pending;

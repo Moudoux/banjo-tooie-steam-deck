@@ -101,11 +101,12 @@ settings**. **Resume** returns to the game and **Quit** exits.
 - **Fullscreen** checkbox (borderless desktop), **Resolution scale** (1x–8x),
   **Output rate** (Default (Original), Original, Display or Manual, 20–360 Hz),
   **Widescreen**, **Gameplay aspect**, **Cutscene aspect** and **VSync**.
-- Resolution, output rate, gameplay aspect, VSync and fullscreen apply during
+- Resolution, output rate, widescreen, gameplay aspect, VSync and fullscreen apply during
   play. **Gameplay aspect** offers fixed ratios and **Fit window (16:9–32:9)**,
   which follows the drawable window size as it resizes within that range.
-  Gameplay aspect is used with Widescreen On. **Widescreen** and **Cutscene
-  aspect** changes take effect the next time you start the game. If fullscreen
+  Widescreen **On/Off** overrides the original game's option. **Use game setting**
+  follows that option. Gameplay aspect applies when the game is wide.
+  **Cutscene aspect** changes take effect the next time you start the game. If fullscreen
   cannot change, the menu shows an error and keeps the actual window state.
 - Default (Original) uses the game's original output rate. This label replaces
   Current; it does not change an existing output-rate choice.

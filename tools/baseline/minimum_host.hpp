@@ -11,7 +11,7 @@
 #include <vector>
 
 namespace baseline::host {
-// Widescreen and cutscene policy are latched before the guest starts. Other preferences apply
+// Cutscene policy is latched before the guest starts. Widescreen and other preferences apply
 // at their owner's next safe boundary and persist for the next process.
 inline constexpr int fit_aspect = 4;
 struct Preferences {
