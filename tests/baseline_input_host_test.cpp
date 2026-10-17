@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -16,6 +17,11 @@
 // Synthetic window/key events do not test native focus or SDL keyboard state.
 SDL_Window* fixture_focus = nullptr;
 SDL_Window* baseline_fixture_keyboard_focus() noexcept { return fixture_focus; }
+std::array<Uint8, SDL_NUM_SCANCODES> fixture_keys{};
+const Uint8* baseline_fixture_keyboard_state(int* count) noexcept {
+    if (count) *count = SDL_NUM_SCANCODES;
+    return fixture_keys.data();
+}
 
 namespace {
 namespace host = baseline::host;
@@ -37,6 +43,7 @@ struct Fixture {
     ~Fixture() {
         host::shutdown();
         fixture_focus = nullptr;
+        fixture_keys.fill(0);
         for (auto* controller : controllers) if (controller) SDL_GameControllerClose(controller);
         for (auto* pad : pads) if (pad) {
             const auto instance = SDL_JoystickInstanceID(pad);
@@ -82,10 +89,10 @@ struct Fixture {
         require(redirected, "fixture stderr redirection failed");
         SDL_SetMainReady();
         require(SDL_setenv("SDL_VIDEODRIVER", "dummy", 1) == 0, "fixture dummy driver selection failed");
-        // The dummy driver's internal focus stays NULL. Keep SDL virtual-pad
-        // transport enabled; the real mapper's baseline focus policy still runs.
+        // Bootstrap virtual pads without an override: production initialization
+        // must retain/change the normal-priority transport hint itself.
         require(SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,
-            "1", SDL_HINT_OVERRIDE) == SDL_TRUE, "fixture virtual event transport hint rejected");
+            "1", SDL_HINT_NORMAL) == SDL_TRUE, "fixture virtual event transport hint rejected");
         require(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_JOYSTICK |
             SDL_INIT_GAMECONTROLLER) == 0, "fixture SDL dummy initialization failed");
         sdl = true;
@@ -118,7 +125,9 @@ struct Fixture {
             }
         window = SDL_CreateWindow("baseline input host test", 0, 0, 64, 64, SDL_WINDOW_SHOWN);
         require(window != nullptr, "fixture dummy window creation failed");
-        host::initialize(window, profile);
+        host::initialize(window, profile, true);
+        require(std::string(SDL_GetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS)) == "1",
+            "manual-player production transport hint disabled");
         host::publish_ready(true); // No renderer needed for host admission.
         drain();
         focus(); // Synthetic admission; resolve the real mapper's focus transition.
@@ -165,6 +174,14 @@ struct Fixture {
             "fixture mapped trigger state incorrect");
         require(drain(SDL_CONTROLLERAXISMOTION, SDL_JoystickInstanceID(pads[0]),
             SDL_CONTROLLER_AXIS_TRIGGERRIGHT), "fixture SDL controller axis event missing");
+    }
+
+    void axis(SDL_GameControllerAxis axis, Sint16 value) {
+        require(SDL_JoystickSetVirtualAxis(pads[0], axis, value) == 0,
+            "fixture virtual stick assignment failed");
+        SDL_GameControllerUpdate();
+        require(drain(SDL_CONTROLLERAXISMOTION, SDL_JoystickInstanceID(pads[0]), axis),
+            "fixture SDL stick event missing");
     }
 
     void f4(Uint16 modifiers = KMOD_NONE, Uint8 repeat = 0, Uint32 type = SDL_KEYDOWN) {
@@ -243,7 +260,9 @@ int main() {
         // reject selected-pad capture while our admitted focus is absent.
         fixture.focus(false);
         fixture.button(0, SDL_CONTROLLER_BUTTON_X, true);
-        require(!host::tick(false).focused && fixture.snapshot()->capture.active,
+        const auto unfocused_capture = host::tick(true);
+        require(!unfocused_capture.focused && !unfocused_capture.physical_admitted &&
+            !unfocused_capture.physical.nonneutral() && fixture.snapshot()->capture.active,
             "unfocused selected press completed capture");
         fixture.button(0, SDL_CONTROLLER_BUTTON_X, false);
         fixture.focus(true);
@@ -288,6 +307,74 @@ int main() {
         fixture.button(0, SDL_CONTROLLER_BUTTON_START, true);
         require((host::tick(true).physical.buttons & 0x1000) == 0, "old START button still published Start gameplay bit");
         fixture.button(0, SDL_CONTROLLER_BUTTON_START, false);
+
+        // C2: Exercise the final Player admission too, not just mapper output.
+        baseline::input::Player manual;
+        uint64_t sample_time = 0;
+        const auto delivered = [&](bool stopping = false) {
+            const auto publication = host::tick(true);
+            manual.publish(stopping ? baseline::input::State{} : publication.physical,
+                publication.activity, stopping, ++sample_time,
+                (publication.focused || publication.physical_admitted) && !stopping);
+            return manual.read(sample_time);
+        };
+        fixture_keys[SDL_SCANCODE_J] = fixture_keys[SDL_SCANCODE_W] = 1;
+        require((delivered().buttons & 0x8000) != 0 && delivered().y > 0,
+            "foreground synthetic keyboard state did not map");
+        fixture.focus(false);
+        require(!delivered().nonneutral(), "background keyboard leaked through Player");
+        fixture.button(1, SDL_CONTROLLER_BUTTON_A, true);
+        require(!delivered().nonneutral(), "foreign background controller leaked through Player");
+        fixture.button(1, SDL_CONTROLLER_BUTTON_A, false);
+        fixture.button(0, SDL_CONTROLLER_BUTTON_A, true);
+        fixture.axis(SDL_CONTROLLER_AXIS_LEFTX, 24000);
+        const auto background = host::tick(true);
+        require(!background.focused && background.physical_admitted,
+            "background admission changed real focus or stayed disabled");
+        require((delivered().buttons & 0x8000) != 0 && delivered().x > 0,
+            "selected held background controller neutralized by Player");
+        require(!fixture.snapshot()->gamepad.connected, "background pad reached menu navigation");
+        fixture.button(0, SDL_CONTROLLER_BUTTON_BACK, true);
+        require(!host::menu_open(), "background controller opened menu");
+        fixture.button(0, SDL_CONTROLLER_BUTTON_BACK, false);
+        host::take_render_input();
+        fixture.f4();
+        SDL_Event ignored{};
+        ignored.type = SDL_TEXTINPUT; ignored.text.windowID = SDL_GetWindowID(fixture.window);
+        host::handle_event(ignored);
+        ignored.type = SDL_MOUSEBUTTONDOWN; ignored.button.windowID = SDL_GetWindowID(fixture.window);
+        host::handle_event(ignored);
+        require(host::take_render_input().events.empty() &&
+            fixture.log().find("issue-marker seq=") == std::string::npos,
+            "background keyboard/text/mouse activity reached menu or marker");
+        fixture.focus(true);
+        require((delivered().buttons & 0x8000) != 0 && delivered().x > 0 && delivered().y == 0,
+            "focus regain suppressed pad or admitted held keyboard movement");
+        fixture.button(0, SDL_CONTROLLER_BUTTON_A, false);
+        fixture.axis(SDL_CONTROLLER_AXIS_LEFTX, 0);
+        require(!delivered().nonneutral(), "focus regain admitted held keyboard button");
+        fixture_keys.fill(0);
+        delivered();
+        fixture.focus(false);
+        fixture.button(0, SDL_CONTROLLER_BUTTON_A, true);
+        fixture.button(0, SDL_CONTROLLER_BUTTON_A, false);
+        require((delivered().buttons & 0x8000) != 0 && !delivered().nonneutral(),
+            "short background press/release edge lost or stuck");
+        fixture.focus(true);
+        tooie::input::host().set_menu_open(true);
+        host::tick(true);
+        fixture.focus(false);
+        fixture.button(0, SDL_CONTROLLER_BUTTON_A, true);
+        const auto unfocused_menu = host::tick(true);
+        require(!unfocused_menu.physical.nonneutral() && !unfocused_menu.physical_admitted &&
+            !fixture.snapshot()->gamepad.connected, "unfocused open menu admitted gameplay/navigation");
+        fixture.button(0, SDL_CONTROLLER_BUTTON_A, false);
+        host::request_close(); host::tick(true);
+        fixture.button(0, SDL_CONTROLLER_BUTTON_A, true);
+        require((delivered().buttons & 0x8000) != 0, "background stop setup missing pad input");
+        require(!delivered(true).nonneutral(), "stopping Player retained background input");
+        fixture.button(0, SDL_CONTROLLER_BUTTON_A, false);
+        fixture.focus(true);
         host::tick(true);
 
         // D: Re-read real on-disk settings; no fake settings store or host adapter.
@@ -310,7 +397,7 @@ int main() {
         require(std::filesystem::is_regular_file(fixture.profile / "tooie_imgui.json"),
             "binding settings file missing");
         host::shutdown();
-        host::initialize(fixture.window, fixture.profile);
+        host::initialize(fixture.window, fixture.profile, true);
         fixture.focus();
         require(tooie::input::selected_controller_instance() == SDL_JoystickInstanceID(fixture.pads[0]),
             "selected controller identity did not survive host restart");
@@ -412,7 +499,51 @@ int main() {
         host::initialize(fixture.window,fixture.profile);
         require(host::requested_quiet_talon_trot() && host::requested_resolution()==8,
             "persisted preferences missing on restart");
-        std::cout << "baseline input host A-F passed (virtual SDL controller; synthetic focus/keys; "
+
+        // G: Default/script policy stays focus-bound, even with fixture transport
+        // forced on to distinguish SDL delivery from mapper rejection.
+        require(std::string(SDL_GetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS)) == "0",
+            "default/script initialization enabled background transport");
+        require(SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,
+            "1", SDL_HINT_OVERRIDE) == SDL_TRUE, "script-policy transport isolation failed");
+        host::publish_ready(true); host::note_game_started();
+        fixture.focus(false);
+        fixture.button(0, SDL_CONTROLLER_BUTTON_A, true);
+        const auto script_publication = host::tick(true);
+        require(!script_publication.focused && !script_publication.physical_admitted &&
+            !script_publication.physical.nonneutral() && !script_publication.activity,
+            "default/script policy admitted background physical input");
+        std::istringstream tape("hold first 1 A\ncheckpoint done 1\n");
+        baseline::input::Player scripted(baseline::input::parse(tape));
+        scripted.publish(script_publication.physical, script_publication.activity, false, 0,
+            script_publication.focused || script_publication.physical_admitted);
+        require(scripted.owns_port() && scripted.read(0).buttons == 0x8000,
+            "background input aborted tape or focus blocked scripted delivery");
+        scripted.read(1); scripted.read(2); scripted.read(3); scripted.read(4);
+        require(scripted.finished() && !scripted.owns_port() && scripted.has_script() &&
+            !scripted.read(5).nonneutral(), "completed tape changed immutable session policy/latch");
+        std::istringstream abort_tape("hold first 1 A\ncheckpoint done 1\n");
+        baseline::input::Player aborted(baseline::input::parse(abort_tape));
+        aborted.publish({0x8000,0,0}, true, false, 0, true);
+        require(aborted.finished() && aborted.has_script() && !aborted.read(0).nonneutral(),
+            "physical tape abort lost neutral latch or script-session identity");
+        fixture.button(0, SDL_CONTROLLER_BUTTON_A, false);
+        host::shutdown();
+        SDL_ResetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS);
+        host::initialize(fixture.window, fixture.profile, true);
+        host::publish_ready(true); host::note_game_started();
+        fixture.focus(true); fixture.focus(false);
+        fixture.button(0, SDL_CONTROLLER_BUTTON_A, true);
+        require((host::tick(true).physical.buttons & 0x8000) != 0,
+            "background disconnect setup missing selected controller");
+        int selected_index = -1;
+        for (int i = 0; i < SDL_NumJoysticks(); ++i)
+            if (SDL_JoystickGetDeviceInstanceID(i) == SDL_JoystickInstanceID(fixture.pads[0])) selected_index = i;
+        require(selected_index >= 0 && SDL_JoystickDetachVirtual(selected_index) == 0,
+            "fixture selected-controller detach failed");
+        fixture.drain();
+        require(!host::tick(true).physical.nonneutral(), "disconnect retained background controller state");
+        std::cout << "baseline input host A-G passed (virtual SDL controller; synthetic focus/keys; "
             "no native focus, keyboard-state or gameplay/hardware acceptance)\n";
         return 0;
     } catch (const std::exception& error) {

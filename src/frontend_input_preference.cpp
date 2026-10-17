@@ -153,6 +153,7 @@ bool focus_transition_pending = false;
 SDL_Window* frontend_window = nullptr; // SDL/UI thread only.
 bool background_hint_initialized = false;
 bool last_background_hint = false;
+bool baseline_background_controller = false; // Immutable session policy, SDL owner only.
 bool was_menu_open = true;
 std::uint16_t suppressed_buttons = 0;
 std::uint16_t suppressed_keyboard_buttons = 0;
@@ -174,7 +175,8 @@ std::atomic_bool last_repeat{false}, last_game_started{false}, last_keyboard_foc
     last_all_input_disabled{false}, last_context_capture{false}, last_binding_scan{false}, last_skip_events{false};
 
 bool background_input_enabled() {
-    return !host().baseline && tooie::frontend::settings::get_bool("background_input_mode", true);
+    return host().baseline ? baseline_background_controller :
+        tooie::frontend::settings::get_bool("background_input_mode", true);
 }
 bool analog_camera_input_enabled() {
     return !host().baseline && tooie::frontend::settings::get_bool("tooie_analog_camera_enabled", false);
@@ -1233,7 +1235,8 @@ void set_preferred_guid(std::string guid) {
     tooie::frontend::settings::set_string("tooie_preferred_controller_id", "");
     tooie::frontend::settings::set_bool("tooie_controller_auto", guid.empty());
 }
-void initialize_settings(const std::filesystem::path& config_root) {
+void initialize_settings(const std::filesystem::path& config_root, bool allow_background_controller) {
+    baseline_background_controller = allow_background_controller;
     sync_background_joystick_events(background_input_enabled());
     auto next = defaults();
     const auto saved_guid = tooie::frontend::settings::get_string("tooie_preferred_controller_guid", "");
@@ -1284,6 +1287,7 @@ void shutdown() noexcept {
     last_menu_binding = false; last_focused = false; focus_transition_pending = false;
     frontend_window = nullptr;
     background_hint_initialized = false;
+    baseline_background_controller = false;
     was_menu_open = true; suppressed_buttons = suppressed_keyboard_buttons = 0;
     suppress_move = suppress_camera = suppress_keyboard_move = false;
     suppress_fast_forward = suppress_free_camera_reset = false;

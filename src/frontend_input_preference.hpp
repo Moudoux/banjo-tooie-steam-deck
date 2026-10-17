@@ -81,7 +81,7 @@ bool set_trigger_thresholds(int press_percent, int release_percent);
 std::pair<int, int> get_trigger_thresholds();
 std::string preferred_guid();
 void set_preferred_guid(std::string guid);
-void initialize_settings(const std::filesystem::path& config_root);
+void initialize_settings(const std::filesystem::path& config_root, bool baseline_background_controller = false);
 void shutdown() noexcept;
 void handle_event(const SDL_Event& event);
 void tick(SDL_Window* window, bool gameplay, bool menu_open);

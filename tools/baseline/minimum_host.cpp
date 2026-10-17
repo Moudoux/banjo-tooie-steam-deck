@@ -197,7 +197,7 @@ void queue_event(const SDL_Event& event) {
     render_input.events.push_back(event);
 }
 }
-void initialize(SDL_Window* target, const std::filesystem::path& profile) {
+void initialize(SDL_Window* target, const std::filesystem::path& profile, bool allow_background_controller) {
     if (initialized || !target) throw std::runtime_error("Invalid baseline host initialization");
     window = target; window_id = SDL_GetWindowID(target);
     focused = (SDL_GetWindowFlags(target) & SDL_WINDOW_INPUT_FOCUS) != 0;
@@ -225,7 +225,7 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile) {
 #endif
     if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0)
         std::fprintf(stderr, "baseline mapper keyboard-only: %s\n", SDL_GetError());
-    tooie::input::initialize_settings(profile);
+    tooie::input::initialize_settings(profile, allow_background_controller);
     initialized = true;
 }
 void shutdown() noexcept {
@@ -251,6 +251,12 @@ void handle_event(const SDL_Event& event) {
         if (event.window.event == SDL_WINDOWEVENT_CLOSE) request_quit();
         if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) focused = false;
         if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) focused = true;
+    }
+    if (!focused) switch (event.type) {
+    case SDL_KEYDOWN: case SDL_KEYUP: case SDL_TEXTINPUT:
+    case SDL_MOUSEMOTION: case SDL_MOUSEBUTTONDOWN: case SDL_MOUSEBUTTONUP: case SDL_MOUSEWHEEL:
+        return; // Other-app activity must not reach mapper shortcuts or menu UI.
+    default: break;
     }
 #if BASELINE_PLAYER
     if (event.type == SDL_KEYDOWN && !event.key.repeat && event.key.keysym.scancode == SDL_SCANCODE_F4 &&
@@ -312,7 +318,7 @@ InputPublication tick(bool gameplay) {
     }
     { std::lock_guard lock(render_mutex); render_input.snapshot = std::move(snapshot); }
     tooie::frontend::settings::flush();
-    return {physical, activity, focused, quit};
+    return {physical, activity, focused, quit, mapped.game_enabled};
 }
 const Preferences& latched_preferences() noexcept { return latched; }
 void note_game_started() noexcept { started.store(true, std::memory_order_release); }

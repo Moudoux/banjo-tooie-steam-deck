@@ -143,6 +143,7 @@ class Player {
     }
 public:
     explicit Player(Plan value = {}) : plan(std::move(value)) {}
+    bool has_script() const { return !plan.steps.empty(); }
     bool owns_port() const { return scripted(); }
     bool started() const { return begun; }
     bool finished() const { return done; }

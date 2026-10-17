@@ -766,7 +766,15 @@ ultramodern::renderer::WindowHandle open_devices(const std::filesystem::path& ro
 #endif
     }
 #if TOOIE_BASELINE_HOST
-    host::initialize(window,root);
+    bool allow_background_controller = false;
+#ifdef BASELINE_PLAYER
+    {
+        std::lock_guard guard(input_mutex);
+        // Tape sessions keep their original focus policy even after completion.
+        allow_background_controller = !input_player.has_script();
+    }
+#endif
+    host::initialize(window,root,allow_background_controller);
     host::render::install();
 #else
     input_window_id = SDL_GetWindowID(window);
@@ -876,7 +884,8 @@ void update_gfx(void*) {
     const auto now=input_now();
     {
         std::lock_guard guard(input_mutex);
-        input_player.publish(physical,activity,stopping,now,publication.focused && !stopping,&events);
+        input_player.publish(physical,activity,stopping,now,
+            (publication.focused || publication.physical_admitted) && !stopping,&events);
     }
     print_input_events(events);
     if(!quit_requested && (close || deadline_reached || start_failed || start_refused)) {

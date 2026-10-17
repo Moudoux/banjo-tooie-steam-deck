@@ -62,9 +62,10 @@ struct RenderInput {
 struct InputPublication {
     input::State physical;
     bool activity = false, focused = false, quit = false;
+    bool physical_admitted = false; // Mapper admission, distinct from actual window focus.
 };
 // SDL owner only, except the explicitly identified render-thread methods.
-void initialize(SDL_Window*, const std::filesystem::path& profile);
+void initialize(SDL_Window*, const std::filesystem::path& profile, bool allow_background_controller = false);
 void shutdown() noexcept;
 void handle_event(const SDL_Event&);
 InputPublication tick(bool gameplay);
