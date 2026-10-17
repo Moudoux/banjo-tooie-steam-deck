@@ -104,7 +104,7 @@ settings**. **Resume** returns to the game and **Quit** exits.
   on the next movement sound, without restarting. Long-legged and stilt movement
   sounds are unchanged.
 
-### Texture packs (local, unreleased build)
+### Texture packs (experimental, Alpha 4.3)
 
 - Place RT64 `.rtz` texture packs in
   `%LOCALAPPDATA%\BanjoTooieScurvyDogPort\mods`, then restart the game. There is
@@ -129,8 +129,11 @@ settings**. **Resume** returns to the game and **Quit** exits.
 ## Known issues
 
 - Mayahem Temple can render black in the distance.
-- Audio may clip at the Original output rate.
-- Menus and some animations are limited.
+- Widescreen can render incorrect geometry at the edges; aspect sizing is manual.
+- Mumbo title-demo shadows can distort at Display or Manual output.
+- The save-select arm animation remains low-rate.
+- Controller input stops when the game window loses focus.
+- F6 fast-forward is not available in this player.
 - The full game has not been verified start to finish.
 
 ## Troubleshooting

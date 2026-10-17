@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "product": "Banjo-Tooie: Scurvy Dog Port",
-  "version": "0.1.0-alpha.4.2",
-  "tag": "v0.1.0-alpha.4.2",
-  "archive": "BanjoTooieScurvyDogPort-Alpha4.2-Windows-x64.zip",
+  "version": "0.1.0-alpha.4.3",
+  "tag": "v0.1.0-alpha.4.3",
+  "archive": "BanjoTooieScurvyDogPort-Alpha4.3-Windows-x64.zip",
   "executable": "BanjoTooieScurvyDogPort.exe",
   "reviewRule": "Package exactly these paths plus package-manifest.json. Build rows come from the gated build directory; source rows must be tracked files of the clean release commit. Keep every existing third-party notice; never prune attribution.",
   "guest": {

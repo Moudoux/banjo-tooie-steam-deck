@@ -1,4 +1,4 @@
-Banjo-Tooie: Scurvy Dog Port 0.1.0-alpha.4.2 - Windows x64
+Banjo-Tooie: Scurvy Dog Port 0.1.0-alpha.4.3 - Windows x64
 ================================================
 
 Unofficial alpha. The game is not included; you need your own copy.
@@ -37,7 +37,8 @@ Controller: left stick moves, A = A, B = B, Start = Start,
             right stick = C buttons.
 
 VIDEO
-Output rate defaults to Original and changes apply during play.
+Output rate defaults to Original. Output rate, resolution scale, VSync and
+fullscreen changes apply during play. Widescreen/aspect changes need a restart.
 Default (Original) is the former Current choice.
 
 TEXTURE PACKS (EXPERIMENTAL)
@@ -45,15 +46,26 @@ Place RT64 .rtz packs in %LOCALAPPDATA%\BanjoTooieScurvyDogPort\mods and restart
 Only texture replacements are supported; code mods and ROM patches are not.
 In-game texture appearance has not yet been verified.
 
+AUDIO
+Mute Talon Trot movement sound is optional and applies to the next movement sound.
+
 KNOWN ISSUES
+- Widescreen can show incorrect geometry at the edges; aspect sizing is manual.
 - Mayahem Temple can render black in the distance.
-- Audio may clip at the Original output rate.
-- Menus and some animations are limited.
+- Mumbo title-demo shadows can distort at Display or Manual output.
+- The save-select arm animation remains low-rate.
+- Controller input stops when the game window loses focus.
+- F6 fast-forward is not available in this player.
 - The full game has not been verified start to finish.
 
 Report problems:
 https://github.com/some-scurvy-dog/banjo-tooie-scurvy-dog-port/issues
-Never attach ROMs, saves or unreviewed logs.
+Press F4 during the problem to mark player.log (not a video capture).
+After closing the game, copy player.log from the profile before launching again.
+Review it for usernames/local paths, then ZIP only that copy and attach it to the
+issue. For private delivery, email somescurvydog@gmail.com with the issue number,
+version and marker number. Include a short video separately for visual problems.
+Never attach ROMs, saves, the whole profile or unreviewed logs.
 
 License: LICENSE. Third-party notices: THIRD_PARTY_NOTICES.md and
 third_party/notices. Unofficial; not affiliated with Nintendo, Rare or
