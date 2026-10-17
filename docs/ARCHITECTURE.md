@@ -155,8 +155,8 @@ These are open cleanup items, not finished architecture.
 
 - **Native hooks.** The maintained raw condition declares start-up, overlay, audio and scheduler hooks into native code.
 - **Render hooks.** The selected render hooks include `func_800A7840` at `0x800A7888` and `0x800A7900`, and `func_800DE498` at `0x800DEFA0` and `0x800DEFB0`. Shadow, background, demo-timing, CPU625, NPC665 and minimum-host hooks are added by flag.
-- **Register writes from hooks.** Three hooks in `func_80082088` assign guest registers from `baseline_overlay_hardware_word`.
-- **Instruction edits.** `baseline_raw_condition.toml` declares nine instruction replacements. Some write `0x03E00008` (`jr $ra`) and some write `0`.
+- **Register writes from hooks.** One hook in `func_80082088` assigns `r21` from the original ROM-key word through `baseline_overlay_hardware_word`.
+- **Instruction edits.** `baseline_raw_condition.toml` declares nine instruction replacements, including two PI-status reads replaced by `0x340A0000` (`ori $t2,$zero,0`). Other replacements include `0x03E00008` (`jr $ra`) and `0`.
 - **Native player checks.** `baseline_render_construction_begin` in [adapters.cpp](../tools/baseline/adapters.cpp) publishes the player-boundary build flag once and reads the player tripwire. The selected camera composition advances its frame counter in guest `tooie_camera_construction_begin`. Bridge-only engineering compositions keep the native increment.
 - **Native reads of guest memory.** `adapters.cpp` also holds start-up observers, thread admission checks, rejected-function providers, an SI adapter and core1/core2 publication.
 - **Raw offsets.** Guest patches still use offsets such as `player_body(self)+0x11` and fixed addresses such as `0x80122DC8`.

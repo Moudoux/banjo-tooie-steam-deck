@@ -1520,7 +1520,6 @@ void register_overlay_metadata(std::span<SectionTableEntry> sections, std::span<
 }
 }
 extern "C" int32_t baseline_overlay_hardware_word(uint32_t address) {
-    if (address == 0xA4600010) return 0;
     const auto rom = recomp::get_rom();
     const uint32_t offset = address - 0xB0000000;
     if (address < 0xB0000040 || (address & 3) || offset > rom.size() || rom.size() - offset < 4)

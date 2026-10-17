@@ -98,16 +98,6 @@ text = "baseline_completed_pcm(rdram, ctx);"
 
 [[patches.hook]]
 func = "func_80082088"
-before_vram = 2148016440
-text = "ctx->r10 = baseline_overlay_hardware_word((uint32_t)ctx->r9);"
-
-[[patches.hook]]
-func = "func_80082088"
-before_vram = 2148016452
-text = "ctx->r10 = baseline_overlay_hardware_word((uint32_t)ctx->r9);"
-
-[[patches.hook]]
-func = "func_80082088"
 before_vram = 2148016456
 text = "ctx->r21 = baseline_overlay_hardware_word((uint32_t)(ctx->r21 + 0x40));"
 
@@ -273,12 +263,12 @@ value = 1008238640
 [[patches.instruction]]
 func = "func_80082088"
 vram = 2148016440
-value = 0
+value = 873070592
 
 [[patches.instruction]]
 func = "func_80082088"
 vram = 2148016452
-value = 0
+value = 873070592
 
 [[patches.instruction]]
 func = "func_80082088"
