@@ -417,6 +417,10 @@ public:
     void update_screen() override {
         if (!valid()) fail("Screen update on invalid renderer");
 #if BASELINE_PLAYER
+        const int resolution = host::requested_resolution();
+        if (host::render::update_resolution(app->userConfig, *app->sharedQueueResources, resolution)) {
+            std::fprintf(stderr, "baseline resolution config-applied scale=%d owner=gfx presented=unobserved\n", resolution);
+        }
         const auto requested = host::requested_output_rate();
         auto config = ultramodern::renderer::get_graphics_config(); // Graphics owner only after startup.
         host::render::preference_rate(config, requested.option, requested.manual_hz);

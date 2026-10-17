@@ -19,7 +19,8 @@ bool focused = false, previously_ready = false, quarantine = false;
 bool reported_unready = false, initialized = false;
 std::atomic<bool> menu{false}, ready{false}, started{false};
 std::atomic<bool> sticky_close{false}, sticky_quit{false}, overflow{false};
-std::atomic<int> vsync{-1};
+std::atomic<int> vsync{-1}, resolution{1};
+std::atomic<bool> quiet_talon_trot{false};
 std::atomic<uint32_t> output_rate{pack_output_rate({})};
 Preferences latched, selected;
 std::string notice;
@@ -70,7 +71,7 @@ void mark_issue() {
         "resolution=%d wide=%d native_aspect=%d cutscene_aspect=%d output_rate=%d manual_hz=%d vsync=%d fullscreen=%d controller=\"%s\"\n",
         marker_seq, local_stamp, utc_stamp, baseline::player::build::version,
         int(started.load(std::memory_order_acquire)), int(menu.load(std::memory_order_acquire)),
-        latched.resolution, latched.wide, latched.native_aspect, latched.cutscene_aspect,
+        selected.resolution, latched.wide, latched.native_aspect, latched.cutscene_aspect,
         selected.output_rate, selected.manual_hz, selected.vsync, selected.fullscreen, controller.c_str()) > 0 && std::fflush(stderr) == 0;
     marker_toast = "Issue marker #" + std::to_string(marker_seq) + (saved
         ? std::string(" saved at ") + clock_stamp + ". Send player.log."
@@ -117,7 +118,8 @@ void update_preference(Preference key, int value) {
     switch (key) {
     case Preference::Resolution:
         if (value < 1 || value > 8) return;
-        selected.resolution = value; settings::set_int("baseline_resolution", value); break;
+        selected.resolution = value; settings::set_int("baseline_resolution", value);
+        resolution.store(value, std::memory_order_release); break;
     case Preference::OutputRate:
         if (value < 0 || value > 3) return;
         selected.output_rate = value; settings::set_int("baseline_output_rate", value);
@@ -138,7 +140,11 @@ void update_preference(Preference key, int value) {
     case Preference::QuietTalonTrot:
         if (value < 0 || value > 1) return;
         selected.quiet_talon_trot = value;
-        settings::set_int("tooie_quiet_talon_trot", value); break;
+        settings::set_int("tooie_quiet_talon_trot", value);
+#if BASELINE_PLAYER
+        quiet_talon_trot.store(value != 0, std::memory_order_release);
+#endif
+        break;
     case Preference::VSync:
         if (value < 0 || value > 1) return;
         selected.vsync = value; settings::set_int("baseline_vsync", value);
@@ -211,6 +217,8 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile) {
     selected.quiet_talon_trot = 0;
 #endif
     latched = selected; vsync.store(selected.vsync, std::memory_order_release);
+    resolution.store(selected.resolution, std::memory_order_release);
+    quiet_talon_trot.store(selected.quiet_talon_trot != 0, std::memory_order_release);
     output_rate.store(pack_output_rate({latched.output_rate, latched.manual_hz}), std::memory_order_release);
 #if BASELINE_PLAYER
     if (selected.fullscreen) set_fullscreen(true);
@@ -225,6 +233,8 @@ void shutdown() noexcept {
     initialized = false; window = nullptr; window_id = 0;
     ready = menu = started = sticky_close = sticky_quit = overflow = false;
     previously_ready = quarantine = reported_unready = false; vsync = -1;
+    resolution.store(1, std::memory_order_release);
+    quiet_talon_trot.store(false, std::memory_order_release);
     output_rate.store(pack_output_rate({}), std::memory_order_release);
 #if BASELINE_PLAYER
     marker_seq = 0; marker_conflict_reported = false;
@@ -324,6 +334,8 @@ RenderInput take_render_input() {
     out.events.swap(render_input.events); render_input.reset_input = false; return out;
 }
 int requested_vsync() noexcept { return vsync.load(std::memory_order_acquire); }
+int requested_resolution() noexcept { return resolution.load(std::memory_order_acquire); }
+bool requested_quiet_talon_trot() noexcept { return quiet_talon_trot.load(std::memory_order_acquire); }
 OutputRate requested_output_rate() noexcept { return unpack_output_rate(output_rate.load(std::memory_order_acquire)); }
 }
 namespace tooie::input {

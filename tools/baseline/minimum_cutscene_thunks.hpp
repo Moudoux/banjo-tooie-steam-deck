@@ -12,5 +12,5 @@ extern "C" void tooie_baseline_presentation_publish(uint8_t*,recomp_context* ctx
     baseline::host::render::publish_guest(uint32_t(ctx->r4),uint32_t(ctx->r5));
 }
 extern "C" void tooie_baseline_quiet_talon_trot(uint8_t*,recomp_context* ctx) {
-    ctx->r2=baseline::host::latched_preferences().quiet_talon_trot!=0;
+    ctx->r2=baseline::host::requested_quiet_talon_trot();
 }

@@ -134,6 +134,17 @@ Native code must not decide game semantics. It must not silently own guest lifet
 - Emit renderer intent as extended GBI commands in the guest display list.
 - Pair each push with a pop in the same scope.
 - Use runtime and RT64 settings for frame rate, resolution and aspect ratio.
+- Apply menu changes during play when the owning system supports it. Queue the
+  request to that owner, or publish a small atomic value. Keep related fields
+  together. The consumer applies the change at its next safe boundary.
+- Do not read mutable menu state from guest or renderer threads. Do not change
+  guest memory from menu callbacks. Persist a preference separately from applying it.
+- Require restart only for a documented initialization dependency. Show that
+  limit beside the option. A new setting must not inherit restart behavior by default.
+- Resolution is applied by the graphics owner through RT64 configuration. Quiet
+  Talon Trot is read by its guest sound helper through a live host preference.
+  Aspect remains startup-only until guest widescreen and cutscene transitions can
+  be applied together; changing only the renderer would leave game policy stale.
 - Name overlay functions with their overlay suffix.
 - Declare every native access to guest memory. Name the function, the offsets and the reason.
 - Regenerate after each guest edit. Update image pins only after you review the change.

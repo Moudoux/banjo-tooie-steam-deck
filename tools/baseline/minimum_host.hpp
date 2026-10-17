@@ -11,14 +11,14 @@
 #include <vector>
 
 namespace baseline::host {
-// Resolution and aspect are latched before the guest starts. Output rate,
-// VSync and fullscreen apply live in the player and persist for the next process.
+// Aspect is latched before the guest starts. Other player preferences apply
+// at their owner's next safe boundary and persist for the next process.
 struct Preferences {
     int resolution = 1, output_rate = 0, manual_hz = 60;
     int wide = -1, native_aspect = 0, cutscene_aspect = 0;
     int vsync = -1; // Missing preserves the backend's current value.
     int fullscreen = 0;
-    int quiet_talon_trot = 0; // Latched before guest startup.
+    int quiet_talon_trot = 0;
 };
 enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot };
 struct OutputRate { int option = 0, manual_hz = 60; };
@@ -78,6 +78,8 @@ void request_quit() noexcept;
 void publish_ready(bool) noexcept;
 RenderInput take_render_input();
 int requested_vsync() noexcept;
+int requested_resolution() noexcept; // Graphics owner; range 1..8.
+bool requested_quiet_talon_trot() noexcept; // Guest sound-call boundary.
 // Graphics owner only: consume the SDL owner's atomic requested pair.
 OutputRate requested_output_rate() noexcept;
 }

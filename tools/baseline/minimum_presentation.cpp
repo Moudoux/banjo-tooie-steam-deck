@@ -43,6 +43,15 @@ bool update_rate(RT64::UserConfiguration& app_user,RT64::SharedQueueResources& s
     shared.userConfigChanged=true;shared.newConfigValidated=false;
     return true;
 }
+bool update_resolution(RT64::UserConfiguration& app_user,RT64::SharedQueueResources& shared,int scale) {
+    if(scale<1 || scale>8)throw std::runtime_error("Invalid resolution scale");
+    std::lock_guard lock(shared.configurationMutex);
+    if(shared.userConfig.resolutionMultiplier==scale && app_user.resolutionMultiplier==scale)return false;
+    // RT64's workload owner rebuilds targets after this configuration change.
+    shared.userConfig.resolutionMultiplier=app_user.resolutionMultiplier=scale;
+    shared.userConfigChanged=true;shared.fbConfigChanged=true;shared.newConfigValidated=false;
+    return true;
+}
 void latch_startup(bool pillarbox_capable) {
     if(settings.load(std::memory_order_acquire))throw std::runtime_error("Baseline supports one game per process");
     const auto& prefs=latched_preferences();

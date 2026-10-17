@@ -94,14 +94,15 @@ settings**. **Resume** returns to the game and **Quit** exits.
 - **Fullscreen** checkbox (borderless desktop), **Resolution scale** (1x–8x),
   **Output rate** (Default (Original), Original, Display or Manual, 20–360 Hz),
   **Widescreen**, **Gameplay aspect**, **Cutscene aspect** and **VSync**.
-- Output rate, VSync and fullscreen apply during play. Resolution and aspect
+- Resolution, output rate, VSync and fullscreen apply during play. Aspect
   changes take effect the next time you start the game. If fullscreen cannot
   change, the menu shows an error and keeps the actual window state.
 - Default (Original) uses the game's original output rate. This label replaces
   Current; it does not change an existing output-rate choice.
 
-- **Audio:** **Mute Talon Trot movement sound** is off by default and takes effect
-  next launch. Long-legged and stilt movement sounds are unchanged.
+- **Audio:** **Mute Talon Trot movement sound** is off by default. Changes apply
+  on the next movement sound, without restarting. Long-legged and stilt movement
+  sounds are unchanged.
 
 ### Texture packs (local, unreleased build)
 
@@ -153,6 +154,22 @@ appears to add a numbered marker with the time and current settings to the
 existing `player.log`. A message appears for four seconds to confirm the marker
 or report that it could not be written. F4 does not take a screenshot or video.
 If F4 is assigned to an action or a binding capture is active, that input
-takes precedence and no marker is added. Review `player.log` before sharing:
-it can include usernames and local paths. Never upload a ROM, saves, generated
-game files, a whole profile or unreviewed logs.
+takes precedence and no marker is added.
+
+To send an F4 report:
+
+1. Press F4 while the problem is visible. Note the marker number. For a visual
+   problem, also record a short video; F4 does not record it.
+2. Close the game. Before starting it again, press Win+R and open
+   `%LOCALAPPDATA%\BanjoTooieScurvyDogPort`.
+3. Copy `player.log` to a separate folder. Check the copy for usernames and local
+   paths; redact them if needed. ZIP **only that reviewed copy**. The next launch
+   moves the current log to `player-previous.log`; later launches replace it.
+4. Attach the ZIP and video to the GitHub issue. Include the marker number,
+   scene, action and settings. If private delivery is preferable, email them to
+   **somescurvydog@gmail.com** with the issue number and game version in the subject.
+
+Keep large videos separate from the small log ZIP. Never send the whole profile
+folder: it includes your ROM and saves. Do not upload ROMs, saves or generated
+game files. A marker identifies the time and requested settings; it does not
+contain actor, vertex or matrix captures.

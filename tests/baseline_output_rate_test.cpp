@@ -79,4 +79,28 @@ int main() {
         assert(json(shared.userConfig)==before_shared && json(app)==before_app);
         assert(shared.userConfigChanged==changed && shared.newConfigValidated==validated && shared.fbConfigChanged==pending);
     }
+
+    // Resolution shares the configuration lock but must preserve live aspect/rate.
+    app.resolution=shared.userConfig.resolution=RT64::UserConfiguration::Resolution::Manual;
+    app.resolutionMultiplier=shared.userConfig.resolutionMultiplier=1;
+    for(int scale:{4,8,1}) {
+        auto expected_shared=shared.userConfig,expected_app=app;
+        expected_shared.resolutionMultiplier=expected_app.resolutionMultiplier=scale;
+        const bool rt_changed=shared.rtConfigChanged,swap_changed=shared.swapChainSizeChanged;
+        shared.userConfigChanged=false;shared.fbConfigChanged=false;shared.newConfigValidated=true;
+        assert(update_resolution(app,shared,scale));
+        assert(json(shared.userConfig)==json(expected_shared) && json(app)==json(expected_app));
+        assert(shared.userConfigChanged && shared.fbConfigChanged && !shared.newConfigValidated);
+        assert(shared.rtConfigChanged==rt_changed && shared.swapChainSizeChanged==swap_changed);
+        shared.userConfigChanged=false;shared.fbConfigChanged=false;shared.newConfigValidated=true;
+        assert(!update_resolution(app,shared,scale));
+        assert(!shared.userConfigChanged && !shared.fbConfigChanged && shared.newConfigValidated);
+    }
+    for(int scale:{0,9}) {
+        const json before_shared=shared.userConfig,before_app=app;
+        bool threw=false;
+        try { update_resolution(app,shared,scale); } catch(const std::runtime_error&) { threw=true; }
+        assert(threw && json(shared.userConfig)==before_shared && json(app)==before_app);
+        assert(!shared.userConfigChanged && !shared.fbConfigChanged && shared.newConfigValidated);
+    }
 }

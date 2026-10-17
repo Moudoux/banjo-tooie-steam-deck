@@ -77,7 +77,7 @@ void controls(const Snapshot& snapshot) {
 void video(const Snapshot& snapshot) {
     const auto& prefs=snapshot.preferences;
 #if BASELINE_PLAYER
-    ImGui::TextWrapped("Output rate, VSync and fullscreen apply now; resolution and aspect take effect next launch.");
+    ImGui::TextWrapped("Resolution, output rate, VSync and fullscreen apply now; aspect takes effect next launch.");
     bool fullscreen=prefs.fullscreen!=0;
     if(ImGui::Checkbox("Fullscreen",&fullscreen))preference(Preference::Fullscreen,int(fullscreen));
 #else
@@ -106,7 +106,7 @@ void audio(const Snapshot& snapshot) {
     bool quiet=snapshot.preferences.quiet_talon_trot!=0;
     if(ImGui::Checkbox("Mute Talon Trot movement sound",&quiet))
         preference(Preference::QuietTalonTrot,int(quiet));
-    ImGui::TextWrapped("Takes effect next launch. Long-legged and stilt movement sounds are unchanged.");
+    ImGui::TextWrapped("Applies on the next movement sound. Long-legged and stilt movement sounds are unchanged.");
 }
 #endif
 }

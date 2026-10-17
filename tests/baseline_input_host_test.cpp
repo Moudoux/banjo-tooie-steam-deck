@@ -379,7 +379,40 @@ int main() {
         require(fixture.log().find("issue-marker seq=2 ") != std::string::npos &&
             fixture.snapshot()->toast.find("#2") != std::string::npos,
             "reset bindings did not re-enable F4 marker");
-        std::cout << "baseline input host A-E passed (virtual SDL controller; synthetic focus/keys; "
+        // F: The SDL queue publishes live preferences without changing startup state.
+        const auto startup=host::latched_preferences();
+        const auto preference=[&](host::Preference key,int value) {
+            host::Request request{};
+            request.kind=host::RequestKind::Preference;
+            request.preference=key;request.value=value;
+            require(host::enqueue(request), "preference queue rejected");
+            host::tick(true);
+        };
+        preference(host::Preference::QuietTalonTrot,1);
+        preference(host::Preference::Resolution,4);
+        require(host::requested_quiet_talon_trot() && host::requested_resolution()==4,
+            "live preference not published");
+        require(host::latched_preferences().quiet_talon_trot==startup.quiet_talon_trot &&
+            host::latched_preferences().resolution==startup.resolution,
+            "live preference mutated startup snapshot");
+        preference(host::Preference::QuietTalonTrot,2);
+        preference(host::Preference::Resolution,9);
+        require(host::requested_quiet_talon_trot() && host::requested_resolution()==4,
+            "invalid preference changed live request");
+        preference(host::Preference::QuietTalonTrot,0);
+        preference(host::Preference::Resolution,1);
+        require(!host::requested_quiet_talon_trot() && host::requested_resolution()==1,
+            "live preference could not return to default");
+        preference(host::Preference::QuietTalonTrot,1);
+        preference(host::Preference::Resolution,8);
+        require(tooie::frontend::settings::flush(), "live preferences did not persist");
+        host::shutdown();
+        require(!host::requested_quiet_talon_trot() && host::requested_resolution()==1,
+            "shutdown retained live request");
+        host::initialize(fixture.window,fixture.profile);
+        require(host::requested_quiet_talon_trot() && host::requested_resolution()==8,
+            "persisted preferences missing on restart");
+        std::cout << "baseline input host A-F passed (virtual SDL controller; synthetic focus/keys; "
             "no native focus, keyboard-state or gameplay/hardware acceptance)\n";
         return 0;
     } catch (const std::exception& error) {
