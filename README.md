@@ -50,8 +50,9 @@ Alpha 4 changes direction:
   commands.
 
 This is progress, not a finished migration. Native hooks, carried upstream
-patches, raw memory offsets and the custom menu remain. There is no mod
-support yet. [Architecture](docs/ARCHITECTURE.md) lists what is still open.
+patches, raw memory offsets and the custom menu remain. Current source supports
+[RT64 texture packs](docs/PLAYER_GUIDE.md); code mods and ROM patches are not
+supported. [Architecture](docs/ARCHITECTURE.md) lists what is still open.
 
 ## Build and contribute
 
