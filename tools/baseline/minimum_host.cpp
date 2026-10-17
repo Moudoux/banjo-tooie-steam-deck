@@ -1,6 +1,7 @@
 #include "minimum_host.hpp"
 #include "frontend_input_host.hpp"
 #include "frontend_config.hpp"
+#include "widescreen.hpp"
 #if BASELINE_PLAYER
 #include "player_version.hpp"
 #endif
@@ -17,10 +18,11 @@ SDL_Window* window = nullptr; // SDL owner, never dereferenced by Draw.
 Uint32 window_id = 0;
 bool focused = false, previously_ready = false, quarantine = false;
 bool reported_unready = false, initialized = false;
+uint32_t applied_live_aspect = UINT32_MAX; // SDL owner only; startup prefs remain immutable.
 std::atomic<bool> menu{false}, ready{false}, started{false};
 std::atomic<bool> sticky_close{false}, sticky_quit{false}, overflow{false};
 std::atomic<int> vsync{-1}, resolution{1};
-std::atomic<bool> quiet_talon_trot{false};
+std::atomic<bool> quiet_talon_trot{false}, talon_trot_toggle{false};
 std::atomic<uint32_t> output_rate{pack_output_rate({})};
 Preferences latched, selected;
 std::string notice;
@@ -66,13 +68,16 @@ void mark_issue() {
     }
     // Keep a hardware-supplied name inside this single quoted log field/line.
     for (auto& ch : controller) if (ch == '\r' || ch == '\n' || ch == '"' || ch == '\\') ch = '?';
+    int pixel_width = 0, pixel_height = 0;
+    SDL_GetWindowSizeInPixels(window, &pixel_width, &pixel_height);
     ++marker_seq;
     const bool saved = std::fprintf(stderr, "baseline issue-marker seq=%u local=%s utc=%s version=%s game_started=%d menu=%d "
-        "resolution=%d wide=%d native_aspect=%d cutscene_aspect=%d output_rate=%d manual_hz=%d vsync=%d fullscreen=%d controller=\"%s\"\n",
+        "resolution=%d wide=%d native_aspect=%d cutscene_aspect=%d output_rate=%d manual_hz=%d vsync=%d fullscreen=%d controller=\"%s\" live_aspect=0x%08x selected_aspect=%d drawable=%dx%d\n",
         marker_seq, local_stamp, utc_stamp, baseline::player::build::version,
         int(started.load(std::memory_order_acquire)), int(menu.load(std::memory_order_acquire)),
         selected.resolution, latched.wide, latched.native_aspect, latched.cutscene_aspect,
-        selected.output_rate, selected.manual_hz, selected.vsync, selected.fullscreen, controller.c_str()) > 0 && std::fflush(stderr) == 0;
+        selected.output_rate, selected.manual_hz, selected.vsync, selected.fullscreen, controller.c_str(),
+        applied_live_aspect, selected.native_aspect, pixel_width, pixel_height) > 0 && std::fflush(stderr) == 0;
     marker_toast = "Issue marker #" + std::to_string(marker_seq) + (saved
         ? std::string(" saved at ") + clock_stamp + ". Send player.log."
         : std::string(" at ") + clock_stamp + " could not be written to player.log.");
@@ -132,7 +137,7 @@ void update_preference(Preference key, int value) {
         if (value < -1 || value > 1) return;
         selected.wide = value; settings::set_int("tooie_game_widescreen", value); break;
     case Preference::NativeAspect:
-        if (value < 0 || value > 3) return;
+        if (value < 0 || value > fit_aspect) return;
         selected.native_aspect = value; settings::set_int("tooie_native_aspect", value); break;
     case Preference::CutsceneAspect:
         if (value < 0 || value > 1) return;
@@ -143,6 +148,14 @@ void update_preference(Preference key, int value) {
         settings::set_int("tooie_quiet_talon_trot", value);
 #if BASELINE_PLAYER
         quiet_talon_trot.store(value != 0, std::memory_order_release);
+#endif
+        break;
+    case Preference::TalonTrotToggle:
+        if (value < 0 || value > 1) return;
+        selected.talon_trot_toggle = value;
+        settings::set_int("tooie_talon_trot_toggle", value);
+#if BASELINE_PLAYER
+        talon_trot_toggle.store(value != 0, std::memory_order_release);
 #endif
         break;
     case Preference::VSync:
@@ -207,18 +220,21 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     selected.output_rate = bounded(settings::get_int("baseline_output_rate", 0), 0, 3, 0);
     selected.manual_hz = bounded(settings::get_int("baseline_manual_hz", 60), 20, 360, 60);
     selected.wide = bounded(settings::get_int("tooie_game_widescreen", -1), -1, 1, -1);
-    selected.native_aspect = bounded(settings::get_int("tooie_native_aspect", 0), 0, 3, 0);
+    selected.native_aspect = bounded(settings::get_int("tooie_native_aspect", 0), 0, fit_aspect, 0);
     selected.cutscene_aspect = bounded(settings::get_int("tooie_cutscene_aspect", 0), 0, 1, 0);
     selected.vsync = bounded(settings::get_int("baseline_vsync", -1), -1, 1, -1);
     selected.fullscreen = bounded(settings::get_int("baseline_fullscreen", 0), 0, 1, 0);
 #if BASELINE_PLAYER
     selected.quiet_talon_trot = bounded(settings::get_int("tooie_quiet_talon_trot", 0), 0, 1, 0);
+    selected.talon_trot_toggle = bounded(settings::get_int("tooie_talon_trot_toggle", 0), 0, 1, 0);
 #else
     selected.quiet_talon_trot = 0;
+    selected.talon_trot_toggle = 0;
 #endif
     latched = selected; vsync.store(selected.vsync, std::memory_order_release);
     resolution.store(selected.resolution, std::memory_order_release);
     quiet_talon_trot.store(selected.quiet_talon_trot != 0, std::memory_order_release);
+    talon_trot_toggle.store(selected.talon_trot_toggle != 0, std::memory_order_release);
     output_rate.store(pack_output_rate({latched.output_rate, latched.manual_hz}), std::memory_order_release);
 #if BASELINE_PLAYER
     if (selected.fullscreen) set_fullscreen(true);
@@ -233,8 +249,10 @@ void shutdown() noexcept {
     initialized = false; window = nullptr; window_id = 0;
     ready = menu = started = sticky_close = sticky_quit = overflow = false;
     previously_ready = quarantine = reported_unready = false; vsync = -1;
+    applied_live_aspect = UINT32_MAX;
     resolution.store(1, std::memory_order_release);
     quiet_talon_trot.store(false, std::memory_order_release);
+    talon_trot_toggle.store(false, std::memory_order_release);
     output_rate.store(pack_output_rate({}), std::memory_order_release);
 #if BASELINE_PLAYER
     marker_seq = 0; marker_conflict_reported = false;
@@ -295,6 +313,16 @@ InputPublication tick(bool gameplay) {
     auto snapshot = std::make_shared<Snapshot>();
     SDL_GetWindowSize(window, &snapshot->width, &snapshot->height);
     SDL_GetWindowSizeInPixels(window, &snapshot->pixel_width, &snapshot->pixel_height);
+    if (started.load(std::memory_order_acquire) && !(SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) &&
+        snapshot->pixel_width > 0 && snapshot->pixel_height > 0) {
+        const uint32_t live = selected.native_aspect == fit_aspect ?
+            tooie::widescreen::fit_aspect_bits(snapshot->pixel_width, snapshot->pixel_height) :
+            uint32_t(selected.native_aspect) << TOOIE_WIDESCREEN_SETTINGS_ASPECT_SHIFT;
+        if (live != applied_live_aspect) {
+            applied_live_aspect = live;
+            tooie::widescreen::set_live_aspect_bits(live);
+        }
+    }
     snapshot->focused = focused;
     snapshot->minimized = (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) != 0;
     snapshot->menu = menu_open(); snapshot->suppressed = tooie::input::input_suppressed();
@@ -342,6 +370,7 @@ RenderInput take_render_input() {
 int requested_vsync() noexcept { return vsync.load(std::memory_order_acquire); }
 int requested_resolution() noexcept { return resolution.load(std::memory_order_acquire); }
 bool requested_quiet_talon_trot() noexcept { return quiet_talon_trot.load(std::memory_order_acquire); }
+bool requested_talon_trot_toggle() noexcept { return talon_trot_toggle.load(std::memory_order_acquire); }
 OutputRate requested_output_rate() noexcept { return unpack_output_rate(output_rate.load(std::memory_order_acquire)); }
 }
 namespace tooie::input {

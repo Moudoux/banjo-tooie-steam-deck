@@ -240,7 +240,7 @@ Keep three outputs apart:
 - **Recompiled patch code** (`boot.c`): PC-executable code built from guest C. Calls into patch functions run this code.
 - **Patch data image** (`boot.bin`): bytes mapped into guest memory from `0x80801000`, outside the original 8 MiB RDRAM.
 
-The selected image is 297,712 bytes, SHA-256 `3ab26148…`. It contains:
+The selected image is 299,328 bytes, SHA-256 `4ce140e2…`. It contains:
 
 - the 2,760-byte boot and heap image at its start;
 - `tooie_render_bridge_state` (18,844 bytes);
@@ -257,7 +257,7 @@ tools/baseline/prepare_player_guest.py --rom … (WSL)
   ├─ prepare_silo_bridge.py       silo-candidate/*.c → Silo raw + image
   └─ prepare_render_bridge.py --camera --raw --image <SELECTION>
                                   → composition-v2/{raw/, boot.c, boot.bin, recomp_overlays.inl, *_layout.h}
-cmake --preset windows-player     checks guest image SHA-256 3ab26148…; composes the runtime sources
+cmake --preset windows-player     checks guest image SHA-256 4ce140e2…; composes the runtime sources
   BaselineRecompiledFuncs  ← composition-v2/raw/funcs_*.c   (raw recompiled game code)
   BaselineBootPatch        ← composition-v2/boot.c          (recompiled guest patches)
   TooieBaseline            ← boot.bin via file_to_c → register_boot_patch → recomp::overlays::register_patches

@@ -11,6 +11,9 @@
 #if !defined(TOOIE_PLAYER_STATE_ADDRESS) || !defined(TOOIE_PLAYER_INIT_FRAME_BYTES) || !defined(TOOIE_PLAYER_FREE_FRAME_BYTES)
 #error Supply selected guest state address and both measured candidate frame sizes
 #endif
+#if !defined(TOOIE_TROT_SELECTED) || (TOOIE_TROT_SELECTED != 0 && TOOIE_TROT_SELECTED != 1)
+#error Supply an explicit boolean selected Trot fixture flag
+#endif
 extern "C" {
 void _babackpack_entrypoint_9(uint8_t*,recomp_context*);
 void func_800936E8(uint8_t*,recomp_context*);
@@ -31,6 +34,9 @@ void func_80098E64(uint8_t*,recomp_context*);
 void heap_free(uint8_t*,recomp_context*);
 void tooie_cpu625_retire(uint8_t*,recomp_context*);
 void tooie_backpack621_retire(uint8_t*,recomp_context*);
+#if TOOIE_TROT_SELECTED
+void tooie_trot_toggle_retire(uint8_t*,recomp_context*);
+#endif
 }
 #define func_80092898 original_92898
 #define func_800F3880 original_F3880
@@ -58,7 +64,7 @@ struct Event {
         return kind==b.kind && a0==b.a0 && a1==b.a1 && memory==b.memory;
     }
 };
-enum RetireKind { CpuRetire, BackpackRetire };
+enum RetireKind { CpuRetire, BackpackRetire, TrotRetire };
 struct RetireEvent {
     RetireKind kind; uint32_t self, requested, reason, idbase, stamp;
     size_t original_calls;
@@ -144,15 +150,24 @@ void retire(RetireKind kind,uint8_t* rdram,recomp_context* c) {
     c->r2=0; // Accepted helper result; producer retirement effects are outside this fixture.
 }
 void check_retirements(const Output& out,bool freeing) {
-    require(out.retire.size()==2,"exact CPU625/backpack621 retirement calls");
+    require(out.retire.size()==2+TOOIE_TROT_SELECTED,
+        "exact CPU625/backpack621/selected Trot retirement calls");
     for(unsigned i=0;i<2;++i) {
         const auto& e=out.retire[i];
         require(e.kind==(i==0?CpuRetire:BackpackRetire),"CPU625 retires before backpack621");
         require(e.self==owner && e.requested==0 && e.reason==(freeing?4u:3u),
             "retirement owner, request and init/free reason");
         require(e.original_calls==0 && e.idbase==0x90000200 && e.stamp==7,
-            "both retirements precede original calls and lifecycle tombstone");
+            "CPU625/backpack621 retirements precede original calls and lifecycle tombstone");
     }
+#if TOOIE_TROT_SELECTED
+    const auto& trot=out.retire[2];
+    require(trot.kind==TrotRetire && trot.self==owner,
+        "Trot retires after CPU625/backpack621 with the same self");
+    // Trot retirement is unary; unused a1/a2 are not part of its ABI contract.
+    require(trot.original_calls==0 && trot.idbase==0x90000200 && trot.stamp==7,
+        "Trot retirement precedes original calls and lifecycle tombstone");
+#endif
 }
 recomp_context context() {
     recomp_context c{};c.r4=guest(owner);c.r29=guest(stack);c.r31=guest(0x80045678);
@@ -247,6 +262,15 @@ STUB(heap_free,Free)
 #undef STUB
 extern "C" void tooie_cpu625_retire(uint8_t* r,recomp_context* c) { retire(CpuRetire,r,c); }
 extern "C" void tooie_backpack621_retire(uint8_t* r,recomp_context* c) { retire(BackpackRetire,r,c); }
+#if TOOIE_TROT_SELECTED
+extern "C" void tooie_trot_toggle_retire(uint8_t* r,recomp_context* c) {
+    // Only r4 is an argument of this unary helper; never read unused a1/a2.
+    require(uint32_t(c->r4)==owner,"Trot retirement stable self argument");
+    retire_events.push_back({TrotRetire,uint32_t(c->r4),0,0,
+        word(r,PF(idbase)),word(r,PF(stamp)),events.size()});
+    c->r2=0;
+}
+#endif
 int main() {
     try {
         const std::array<uint32_t,2> edges[]={{0x12340001,0xABCD0001},{0xFFFF7FFF,0x12347FFF},

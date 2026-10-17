@@ -12,6 +12,7 @@ import prepare_npc665 as npc_owner
 import prepare_backpack621 as backpack_owner
 import prepare_graphics_rate as rate_owner
 import prepare_quiet_talon_trot as quiet_owner
+import prepare_talon_trot_toggle as trot_owner
 from npc665_hooks import add_hooks as add_npc_hooks, strip_hooks as strip_npc_hooks, HOOKS as NPC_HOOKS
 from cpu625_hooks import add_cpu625_hooks, CPU625_HOOKS
 sha,win=accepted.sha,accepted.win
@@ -28,7 +29,7 @@ def write_if_changed(path,text):
     data=text.encode('utf-8')
     if not path.exists() or path.read_bytes()!=data:path.write_bytes(data)
 
-def prepare_honey_containment(root, output, run, npc665=False, backpack621=False):
+def prepare_honey_containment(root, output, run, npc665=False, backpack621=False, talon_trot_toggle=False):
     """Exact camera-only insertion derivative; the accepted OFF bridge stays untouched."""
     from elftools.elf.elffile import ELFFile
     from elftools.elf.relocation import RelocationSection
@@ -86,7 +87,7 @@ def prepare_honey_containment(root, output, run, npc665=False, backpack621=False
     compiler=root/'deps/LLVM-19.1.3-Windows-X64/bin/clang.exe'
     includes=[root/'tools/baseline/guest/silo-candidate',root/'tools/baseline/guest',root/'deps/banjo-tooie/include',root/'deps/banjo-tooie/lib/ultralib/include',root/'deps/rt64/include']
     flags=[compiler,'-target','mips','-EB','-mips2','-mabi=32','-O2','-G0','-mno-abicalls','-mno-odd-spreg','-nostdinc','-D_LANGUAGE_C','-DMIPS','-fno-builtin']+['-I'+win(p) for p in includes]+['-I'+win(root/SOURCE)]
-    flags+=['-DTOOIE_NPC665='+str(int(npc665)),'-DTOOIE_BACKPACK621='+str(int(backpack621))]
+    flags+=['-DTOOIE_NPC665='+str(int(npc665)),'-DTOOIE_BACKPACK621='+str(int(backpack621)),'-DTOOIE_TROT_TOGGLE='+str(int(talon_trot_toggle))]
     object_path=output/'camera_honey_bridge.o'
     run(flags+['-c',win(derivative),'-o',win(object_path)],'camera-honey-compile.log')
     prior=root/'build/windows-dev/baseline/render-bridge-silo-candidate/bridge.o'
@@ -115,8 +116,9 @@ def roster(root):
     assert {'func_8001A3A0','func_8001A324','func_800DE498','ncpod_entrypoint_12','ncpod_entrypoint_14'} <= {r['name'] for r in rows}
     return rows
 
-def prepare_raw(root,output,run,shadow_observer=False,demo_timing=False,shadow_fix=False,pre_background=False,actor_palette=False,cpu625=False,minimum_host=False,npc665=False,backpack621=False,quiet_talon_trot=False):
+def prepare_raw(root,output,run,shadow_observer=False,demo_timing=False,shadow_fix=False,pre_background=False,actor_palette=False,cpu625=False,minimum_host=False,npc665=False,backpack621=False,quiet_talon_trot=False,talon_trot_toggle=False):
     assert type(quiet_talon_trot) is bool and (not quiet_talon_trot or (backpack621 and minimum_host))
+    assert type(talon_trot_toggle) is bool and (not talon_trot_toggle or (backpack621 and minimum_host))
     assert type(backpack621) is bool and (not backpack621 or cpu625), "621 requires existing selected CPU625 transports"
     parent=root/'build/windows-dev/baseline/render-bridge-silo-candidate/raw.toml'
     parent_receipt=json.loads((parent.parent/'RAW_BINDING.json').read_text())
@@ -129,6 +131,7 @@ def prepare_raw(root,output,run,shadow_observer=False,demo_timing=False,shadow_f
     if minimum_host:functions.append(host_owner.PROJECTION);omitted.append(host_owner.PROJECTION)
     if backpack621:functions.append(rate_owner.BODY);omitted.append(rate_owner.BODY)
     if quiet_talon_trot:functions.append(quiet_owner.BODY);omitted.append(quiet_owner.BODY)
+    if talon_trot_toggle:functions+=trot_owner.BODIES;omitted+=trot_owner.BODIES
     assert set(held.GENERATED_FUNCTIONS)<=set(functions) and len(set(omitted))==len(omitted)
     assert 'func_800DE498' not in omitted
     config=toml.loads(parent.read_text());patches=config['patches'];hooks=patches['hook']
@@ -242,9 +245,9 @@ def prepare_raw(root,output,run,shadow_observer=False,demo_timing=False,shadow_f
     assert '    skip_19:\n'+ignore+'    // 0x800DEFB0:' in de
     assert 'L_800DEFB0:' not in de
     assert {'_ncpod_entrypoint_12','_ncpod_entrypoint_14'} <= set(after)
-    return dict(quiet_talon_trot=quiet_talon_trot,backpack621=backpack621,condition='BASELINE-CAMERA-DEFAULT-OFF-CANDIDATE',parent_sha256=sha(parent),definitions=functions,omitted=omitted,changed=changed,changed_scope='After exact CPU625/HOST/NPC665 insertion inverses; legacy camera changes only',actual_changed=sorted(n for n in actual_after if actual_after[n]!=before[n]),actual_unchanged_body_count=sum(actual_after[n]==before[n] for n in actual_after),original_body_count=len(before),child_body_count=len(after),unchanged_body_count=len(after)-len(changed),npc665=npc665,npc665_hook_pcs=[hex(pc) for _,pc,_ in NPC_HOOKS] if npc665 else [],npc665_changed=sorted({f for f,_,_ in NPC_HOOKS}) if npc665 else [],minimum_host=minimum_host,host_hook_functions=[host_hooks.GLOBAL_FUNCTION,host_hooks.CUTSCENE_FUNCTION] if minimum_host else [],cpu625=cpu625,cpu625_hook_pcs=[hex(pc) for _,pc,_ in CPU625_HOOKS] if cpu625 else [],cpu625_changed=sorted({f for f,_,_ in CPU625_HOOKS}) if cpu625 else [],actor_palette=actor_palette,demo_timing=demo_timing,demo_hook_pcs=[hex(pc) for _,pc,_ in demo_hooks] if demo_timing else [],shadow_observer=shadow_observer,shadow_hook_pcs=[hex(pc) for _,pc,_ in shadow_hooks] if shadow_observer else [],pre_background=pre_background,pre_hook_pcs=[hex(pc) for _,pc,_ in pre_hooks] if pre_background else [],shadow_fix=shadow_fix,shadow_fix_hook_pcs=[hex(pc) for _,pc,_ in shadow_fix_hooks] if shadow_fix else [],hook_pcs=['800A7888','800A7900','800DEFB0'],helper_lookup_contract=branch['helper_lookup'],contract_sha256=sha(root/SOURCE/'camera_hook_contract.json'),allocation_instruction_edits=False,roster_sha256=sha(root/SOURCE/'camera_roster.json'),original_raw={p.name:sha(p) for p in (root/'build/windows-dev/baseline/raw').iterdir() if p.is_file()},outputs={p.name:sha(p) for p in destination.iterdir() if p.is_file()})
+    return dict(talon_trot_toggle=talon_trot_toggle,quiet_talon_trot=quiet_talon_trot,backpack621=backpack621,condition='BASELINE-CAMERA-DEFAULT-OFF-CANDIDATE',parent_sha256=sha(parent),definitions=functions,omitted=omitted,changed=changed,changed_scope='After exact CPU625/HOST/NPC665 insertion inverses; legacy camera changes only',actual_changed=sorted(n for n in actual_after if actual_after[n]!=before[n]),actual_unchanged_body_count=sum(actual_after[n]==before[n] for n in actual_after),original_body_count=len(before),child_body_count=len(after),unchanged_body_count=len(after)-len(changed),npc665=npc665,npc665_hook_pcs=[hex(pc) for _,pc,_ in NPC_HOOKS] if npc665 else [],npc665_changed=sorted({f for f,_,_ in NPC_HOOKS}) if npc665 else [],minimum_host=minimum_host,host_hook_functions=[host_hooks.GLOBAL_FUNCTION,host_hooks.CUTSCENE_FUNCTION] if minimum_host else [],cpu625=cpu625,cpu625_hook_pcs=[hex(pc) for _,pc,_ in CPU625_HOOKS] if cpu625 else [],cpu625_changed=sorted({f for f,_,_ in CPU625_HOOKS}) if cpu625 else [],actor_palette=actor_palette,demo_timing=demo_timing,demo_hook_pcs=[hex(pc) for _,pc,_ in demo_hooks] if demo_timing else [],shadow_observer=shadow_observer,shadow_hook_pcs=[hex(pc) for _,pc,_ in shadow_hooks] if shadow_observer else [],pre_background=pre_background,pre_hook_pcs=[hex(pc) for _,pc,_ in pre_hooks] if pre_background else [],shadow_fix=shadow_fix,shadow_fix_hook_pcs=[hex(pc) for _,pc,_ in shadow_fix_hooks] if shadow_fix else [],hook_pcs=['800A7888','800A7900','800DEFB0'],helper_lookup_contract=branch['helper_lookup'],contract_sha256=sha(root/SOURCE/'camera_hook_contract.json'),allocation_instruction_edits=False,roster_sha256=sha(root/SOURCE/'camera_roster.json'),original_raw={p.name:sha(p) for p in (root/'build/windows-dev/baseline/raw').iterdir() if p.is_file()},outputs={p.name:sha(p) for p in destination.iterdir() if p.is_file()})
 
-def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,host=None,npc=None,backpack=None,quiet_talon_trot=False):
+def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,host=None,npc=None,backpack=None,quiet_talon_trot=False,talon_trot_toggle=False,trot=None):
     assert type(actor_palette) is bool, 'Explicit registry actor selection'
     rows=roster(root)
     rows=[row for row in rows if row['name']!='func_800DE498']
@@ -280,9 +283,11 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
     expected_names=base_functions+contract['providers']+([CPU_ROOT_HELPERS[1],FEATHER_LEAF_PATCH] if actor_palette else [])+(DEMO_HELPERS if demo else [])+(SHADOW_HELPERS if shadow else [])+(PRE_HELPERS if pre else [])+(cpu_owner.HELPERS if cpu else [])+([host_owner.PROJECTION,host_owner.HELPER] if host else [])+([npc_owner.CHECKED if n==npc_owner.END else n for n in npc_owner.HELPERS] if npc else [])
     expected_names+=(backpack_owner.HELPERS+[rate_owner.BODY]) if backpack else []
     expected_names+=[quiet_owner.BODY] if quiet_talon_trot else []
+    expected_names+=trot_owner.BODIES+trot_owner.HELPERS if talon_trot_toggle else []
     for name in dict.fromkeys(expected_names):
         section=(5+int(bool(demo))+int(bool(shadow))+int(bool(pre))+int(bool(cpu))+int(bool(host))) if name in npc_owner.HELPERS or name==npc_owner.CHECKED else (5+int(bool(demo))+int(bool(shadow))+int(bool(pre))+int(bool(cpu))) if name==host_owner.HELPER else (5+int(bool(demo))+int(bool(shadow))+int(bool(pre))) if name in cpu_owner.HELPERS else (5+int(bool(demo))+int(bool(shadow))) if name in PRE_HELPERS else 6 if name in SHADOW_HELPERS else 5 if name in DEMO_HELPERS else helpers.get(name,0)
         if name in backpack_owner.HELPERS:section=5+int(bool(demo))+int(bool(shadow))+int(bool(pre))+int(bool(cpu))+int(bool(host))+int(bool(npc))
+        if name in trot_owner.HELPERS:section=5+int(bool(demo))+int(bool(shadow))+int(bool(pre))+int(bool(cpu))+int(bool(host))+int(bool(npc))+int(bool(backpack))
         lines.append('    {baseline_boot_patch_registry::%s,%d},'%(name,section))
     lines+=['};']
     layout='#pragma once\n#define TOOIE_DEMO_TIMING_SELECTED %du\n'%int(bool(demo))
@@ -298,24 +303,33 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
         for key,value in pre.items():layout+='#define TOOIE_PRE_%s 0x%Xu\n'%(key.upper(),value)
         layout+='#define TOOIE_PRE_SECTION %du\n'%(5+int(bool(demo))+int(bool(shadow)))
         overlay=(output/'recomp_overlays.inl').read_text();rows=re.findall(r'\{ \.rom_addr = (0x\w+), \.ram_addr = (0x\w+), \.size = (0x\w+), \.funcs = (\w+),.*?\.relocs = (\w+),.*?\.index = (\d+) \}',overlay)
-        assert len(rows)==5+int(bool(demo))+int(bool(shadow))+1+int(bool(cpu))+int(bool(host))+int(bool(npc))+int(bool(backpack))
+        assert len(rows)==5+int(bool(demo))+int(bool(shadow))+1+int(bool(cpu))+int(bool(host))+int(bool(npc))+int(bool(backpack))+int(talon_trot_toggle)
         tuples=[]
         for rom,ram,size,funcs,relocs,index in rows:
             f=re.search(r'static FuncEntry '+funcs+r'\[\] = \{(.*?)\n\};',overlay,re.S);q=re.search(r'static RelocEntry '+relocs+r'\[\] = \{(.*?)\n\};',overlay,re.S);assert f and q
             tuples.append((int(rom,16),int(ram,16),int(size,16),int(index),f[1].count('.func'),q[1].count('.offset')))
-        first=tuples[0];assert (first[0],first[1],first[3],first[4])==(0,0x80801000,1,(39 if actor_palette else 38)+int(bool(host))+int(bool(backpack))+int(quiet_talon_trot))
+        first=tuples[0];assert (first[0],first[1],first[3],first[4])==(0,0x80801000,1,(39 if actor_palette else 38)+int(bool(host))+int(bool(backpack))+int(quiet_talon_trot)+len(trot_owner.BODIES)*int(talon_trot_toggle))
         shift=first[2]-0x96C8
         fixed=[(0x96C8,0x8080A6C8,0x2E38,2,1,2),(0xC500,0x8080D500,0x15FC,3,6,3),(0xDAFC,0x8080EAFC,0xD10 if actor_palette else 0x68C,4,4 if actor_palette else 3,0),(0xE820 if actor_palette else 0xE19C,0x8080F820 if actor_palette else 0x8080F19C,0x3DB4 if actor_palette else 0x20F0,8,4 if actor_palette else 2,6 if actor_palette else 4)]
         if not npc and not backpack:assert all(actual==(old[0]+shift,old[1]+shift,*old[2:]) for actual,old in zip(tuples[1:5],fixed)), 'PRE fixed section identity and uniform shift'
         elif npc:
-            assert [x[3:5] for x in tuples[:5]]==[(1,39+int(bool(host))+int(bool(backpack))+int(quiet_talon_trot)),(2,1),(3,6),(4,4),(8,4)], 'NPC changed shared sections preserve original memberships'
-            row=tuples[-2] if backpack else tuples[-1]
+            assert [x[3:5] for x in tuples[:5]]==[(1,39+int(bool(host))+int(bool(backpack))+int(quiet_talon_trot)+len(trot_owner.BODIES)*int(talon_trot_toggle)),(2,1),(3,6),(4,4),(8,4)], 'NPC changed shared sections preserve original memberships'
+            owned=[row for row in tuples if row[3]==npc['index']]
+            assert len(owned)==1, 'Unique NPC helper section'
+            row=owned[0]
             assert row[:4]==(npc['rom'],npc['ram'],npc['size'],npc['index']) and row[4]==8
             npc['sections']=tuples[:5];npc['relocs']=row[5]
         if backpack:
-            assert [x[3:5] for x in tuples[:5]]==[(1,39+int(bool(host))+int(bool(backpack))+int(quiet_talon_trot)),(2,1),(3,6),(4,4),(8,4)]
-            assert tuples[-1][:4]==(backpack['rom'],backpack['ram'],backpack['size'],backpack['index']) and tuples[-1][4]==8
-            backpack['sections']=tuples[:5];backpack['relocs']=tuples[-1][5]
+            assert [x[3:5] for x in tuples[:5]]==[(1,39+int(bool(host))+int(bool(backpack))+int(quiet_talon_trot)+len(trot_owner.BODIES)*int(talon_trot_toggle)),(2,1),(3,6),(4,4),(8,4)]
+            owned=[row for row in tuples if row[3]==backpack['index']]
+            assert len(owned)==1, 'Unique backpack helper section'
+            row=owned[0]
+            assert row[:4]==(backpack['rom'],backpack['ram'],backpack['size'],backpack['index']) and row[4]==8
+            backpack['sections']=tuples[:5];backpack['relocs']=row[5]
+        if trot:
+            row=tuples[-1]
+            assert row[:4]==(trot['rom'],trot['ram'],trot['size'],trot['index'])
+            assert row[4]==len(trot_owner.HELPERS) and row[5]==trot['relocs'], 'Exact appended Trot helper section'
         layout+='#define TOOIE_PRE_TEXT_SIZE 0x%Xu\n#define TOOIE_PRE_TEXT_RELOCS %du\n#define TOOIE_PRE_SHIFT 0x%Xu\n'%(first[2],first[5],shift)
     write_if_changed(output/'pre_background_layout.h',layout)
     layout='#pragma once\n#define TOOIE_CPU625_SELECTED %du\n'%int(bool(cpu))
@@ -346,12 +360,18 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
         lines+=['    {'+','.join('0x%Xu'%v for v in row)+'},' for row in backpack['sections']]
         lines+=['};']
     write_if_changed(output/'backpack621_selection_layout.h',layout)
+    layout='#pragma once\n#define TOOIE_TROT_SELECTED %du\n'%int(talon_trot_toggle)
+    if trot:
+        for key in ('rom','ram','size','index','relocs','slot_address','slot_size'):
+            layout+='#define TOOIE_TROT_%s 0x%Xu\n'%(key.upper(),trot[key])
+        layout+='#define TOOIE_TROT_SECTION %du\n'%(5+int(bool(demo))+int(bool(shadow))+int(bool(pre))+int(bool(cpu))+int(bool(host))+int(bool(npc))+int(bool(backpack)))
+    write_if_changed(output/'trot_toggle_selection_layout.h',layout)
     write_if_changed(output/'camera_registry_data.hpp','\n'.join(lines)+'\n')
 
-def image_flags(root,pre_background,cpu625,npc665,backpack621):
+def image_flags(root,pre_background,cpu625,npc665,backpack621,talon_trot_toggle=False):
     """Exact guest compile flags shared by the image and its same-selection 621OFF carrier."""
     compiler=root/'deps/LLVM-19.1.3-Windows-X64/bin/clang.exe';flags=[compiler,'-target','mips','-EB','-mips2','-mabi=32','-O2','-G0','-mno-abicalls','-mno-odd-spreg','-nostdinc','-D_LANGUAGE_C','-DMIPS','-fno-builtin']+(['-DTOOIE_PRE_BACKGROUND=1'] if pre_background else [])+['-I'+win(p) for p in [root/SOURCE,root/'tools/baseline/guest',root/'deps/banjo-tooie/include',root/'deps/banjo-tooie/lib/ultralib/include',root/'deps/rt64/include']]
-    return compiler,flags+['-DTOOIE_CPU625='+str(int(cpu625)),'-DTOOIE_NPC665='+str(int(npc665)),'-DTOOIE_BACKPACK621='+str(int(backpack621))]
+    return compiler,flags+['-DTOOIE_CPU625='+str(int(cpu625)),'-DTOOIE_NPC665='+str(int(npc665)),'-DTOOIE_BACKPACK621='+str(int(backpack621)),'-DTOOIE_TROT_TOGGLE='+str(int(talon_trot_toggle))]
 
 def compile_backpack621_carrier(root,output,run,actor_palette,pre_background,cpu625,npc665):
     """Fresh same-selection 621OFF owner objects; prepare_image(backpack621=True) proves them unchanged."""
@@ -362,8 +382,12 @@ def compile_backpack621_carrier(root,output,run,actor_palette,pre_background,cpu
     cpu_owner.compile_owner(root,output,run,flags,win)
     if npc665:npc_owner.compile_owner(root,output,run,flags+['-DTOOIE_ACTOR_PALETTE=1'],win)
 
-def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_fix=False,pre_background=False,cpu625=False,minimum_host=False,npc665=False,backpack621=False,shadow_coefficients=False,quiet_talon_trot=False):
+def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_fix=False,pre_background=False,cpu625=False,minimum_host=False,npc665=False,backpack621=False,shadow_coefficients=False,quiet_talon_trot=False,talon_trot_toggle=False):
     raw_binding=json.loads((output/"RAW_BINDING.json").read_text())
+    assert type(talon_trot_toggle) is bool
+    raw_trot=raw_binding.get("talon_trot_toggle",False)
+    assert type(raw_trot) is bool and raw_trot==talon_trot_toggle, "Raw/image Trot toggle selection mismatch"
+    assert not talon_trot_toggle or (backpack621 and shadow_coefficients and minimum_host)
     assert type(quiet_talon_trot) is bool
     raw_quiet=raw_binding.get("quiet_talon_trot",False)
     assert type(raw_quiet) is bool and raw_quiet==quiet_talon_trot, "Raw/image quiet Trot selection mismatch"
@@ -394,7 +418,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     assert type(shadow_coefficients) is bool and (not shadow_coefficients or (shadow_fix and backpack621)), "Shadow coefficient policy is qualified only on the 621 composition"
     from elftools.elf.elffile import ELFFile
     r=root;out=output;source=root/SOURCE;h=sha
-    compiler,flags=image_flags(root,pre_background,cpu625,npc665,backpack621)
+    compiler,flags=image_flags(root,pre_background,cpu625,npc665,backpack621,talon_trot_toggle)
     objects={};defs=[]
     for name in ['camera_lifecycle','camera_ncpod','camera_pools','camera_emitters','camera_replay','camera_hook_leaves','camera_state']+(['demo_timing'] if demo_timing else [])+(['shadow_projection'] if shadow_fix else [])+(['camera_pre_background_state','camera_pre_background_slots'] if pre_background else []):
      command=flags+(['-DTOOIE_ACTOR_PALETTE='+str(int(actor_palette)),'-DTOOIE_PRE_BACKGROUND='+str(int(pre_background))] if name in ('camera_hook_leaves','shadow_projection') else [])+(['-DTOOIE_SHADOW_COEFFICIENTS='+str(int(shadow_coefficients))] if name=='shadow_projection' else [])+['-c',win(source/(name+'.c')),'-o',win(out/(name+'.o'))]
@@ -464,8 +488,8 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
          assert sum(w>>26==3 for w in words)==int(combined_owner) and not any(w>>26==0 and w&63==9 for w in words), 'Exact selected helper JAL/leaf bound'
          assert not any((w>>26 in [15,32,33,35,36,37,40,41,43]) and ((w>>16&31)==28 if w>>26==15 else (w>>21&31)==28) for w in words), 'Compiled demo helper GP dependency'
       defs+=defined;objects[name]={'sha256':h(out/(name+'.o')),'definitions':defined,'imports':sorted(imports),'allocated_sections':sections,'compile_argv':[str(x) for x in command],'frames':frames}
-    demo=None;shadow=None;pre=None;cpu=None;host=None;npc=None;backpack=None;graphics_rate=None
-    selected_shared=held.compile_objects(root,out,run,cpu_root=actor_palette,cpu625=cpu625,npc665=npc665,shared=True,backpack621=backpack621,hand862=backpack621 and shadow_coefficients)
+    demo=None;shadow=None;pre=None;cpu=None;host=None;npc=None;backpack=None;graphics_rate=None;trot=None
+    selected_shared=held.compile_objects(root,out,run,cpu_root=actor_palette,cpu625=cpu625,npc665=npc665,shared=True,backpack621=backpack621,hand862=backpack621 and shadow_coefficients,talon_trot_toggle=talon_trot_toggle)
     lifecycle=selected_shared['lifecycle']
     if not npc665:
         for name in ('player','silo')+(() if backpack621 else ('bone','leaf')):
@@ -485,6 +509,8 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
         calls=[x for x in fresh_lifecycle['relocations'] if x['target']=='tooie_cpu625_retire']
         assert len(calls)==2 and all(x['kind']==4 for x in calls), "Exactly two lifecycle retire call relocations"
         objects['cpu625']=cpu_owner.compile_owner(root,out,run,flags,win);defs+=cpu_owner.HELPERS
+    retire_calls=[row for row in fresh_lifecycle['relocations'] if row['target']=='tooie_trot_toggle_retire']
+    assert len(retire_calls)==2*int(talon_trot_toggle) and all(row['kind']==4 for row in retire_calls), 'Exact Trot lifecycle retire calls'
     b621_object=backpack_owner.compile_owner(root,out,run,flags,win,backpack621)
     if backpack621:
         objects['backpack621']=b621_object;defs+=backpack_owner.HELPERS
@@ -496,8 +522,11 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
         objects['graphics_rate']=rate_owner.compile_owner(root,out,run,flags,win);defs.append(rate_owner.BODY)
     if quiet_talon_trot:
         objects['quiet_talon_trot']=quiet_owner.compile_owner(root,out,run,flags,win);defs.append(quiet_owner.BODY)
+    if talon_trot_toggle:
+        objects['talon_trot_toggle']=trot_owner.compile_owner(root,out,run,flags,win)
+        defs+=trot_owner.BODIES+trot_owner.HELPERS
     heap=r/'build/windows-dev/baseline/heap-patch';prior=r/'build/windows-dev/baseline/render-bridge-silo-candidate'
-    honey=prepare_honey_containment(root,output,run,npc665,backpack621)
+    honey=prepare_honey_containment(root,output,run,npc665,backpack621,talon_trot_toggle)
     selected_actor=selected_shared if actor_palette else None
     base_functions=list(held.GENERATED_FUNCTIONS)
     if actor_palette:base_functions.insert(base_functions.index('tooie_actor_palette_end'),CPU_ROOT_HELPERS[0]);base_functions.insert(base_functions.index('tooie_actor_palette_end'),FEATHER_LEAF_HELPER)
@@ -548,6 +577,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
       prior_end=npc['state']+16 if npc else host['image_end'] if host else cpu['state']+464
       backpack=backpack_owner.linked(elf,prior_end)
       graphics_rate=rate_owner.linked(elf,backpack['image_end'])
+     if talon_trot_toggle:trot=trot_owner.linked(elf,graphics_rate['image_end'])
      expected=bytearray(1380)
      for offset,value in {1024:0x43414D32,1028:2,1064:0xA0000000,1068:1,1072:1,1076:1}.items():expected[offset:offset+4]=value.to_bytes(4,'big')
      assert state.data()==expected and state['sh_size']==1380
@@ -587,6 +617,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     cpu_table=accepted.authenticate_function_table(out/'boot.elf',out/'recomp_overlays.inl','.tooie_cpu625_helpers',cpu_owner.HELPERS) if cpu else None
     host_table=accepted.authenticate_function_table(out/'boot.elf',out/'recomp_overlays.inl','.baseline_host_helpers',[host_owner.HELPER]) if host else None
     npc_table=accepted.authenticate_function_table(out/'boot.elf',out/'recomp_overlays.inl','.tooie_npc665_helpers',npc_owner.HELPERS) if npc else None
+    trot_table=accepted.authenticate_function_table(out/'boot.elf',out/'recomp_overlays.inl','.tooie_trot_helpers',trot_owner.HELPERS) if trot else None
     backpack_table=accepted.authenticate_function_table(out/'boot.elf',out/'recomp_overlays.inl','.tooie_backpack621_helpers',backpack_owner.HELPERS) if backpack else None
     if demo:
      overlay=(out/'recomp_overlays.inl').read_text();match=re.search(r'static RelocEntry section_%d_tooie_demo_timing_helpers_relocs\[\] = \{(.*?)\n\};'%demo['index'],overlay,re.S);assert match
@@ -597,11 +628,14 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     if pre:
      overlay=(out/'recomp_overlays.inl').read_text();match=re.search(r'static RelocEntry section_%d_tooie_pre_background_helpers_relocs\[\] = \{(.*?)\n\};'%pre['index'],overlay,re.S);assert match
      pre['relocs']=match[1].count('.offset');assert pre['relocs']==0
-    binary=(out/'boot.bin').read_bytes();assert binary[:2760]==(heap/'boot.bin').read_bytes();assert binary[addresses['tooie_camera_state']-0x80801000:addresses['tooie_camera_state']-0x80801000+1380]==expected;assert len(binary)==(graphics_rate['image_end'] if graphics_rate else backpack['image_end'] if backpack else npc['state']+16 if npc else host['image_end'] if host else cpu['state']+464 if cpu else pre['state']+124 if pre else shadow['state']+56 if shadow else demo['state']+8 if demo else ranges[1][1])-0x80801000
+    binary=(out/'boot.bin').read_bytes();assert binary[:2760]==(heap/'boot.bin').read_bytes();assert binary[addresses['tooie_camera_state']-0x80801000:addresses['tooie_camera_state']-0x80801000+1380]==expected;assert len(binary)==(trot['image_end'] if trot else graphics_rate['image_end'] if graphics_rate else backpack['image_end'] if backpack else npc['state']+16 if npc else host['image_end'] if host else cpu['state']+464 if cpu else pre['state']+124 if pre else shadow['state']+56 if shadow else demo['state']+8 if demo else ranges[1][1])-0x80801000
     if demo:assert demo['ram']==ranges[1][1] and binary[demo['state']-0x80801000:demo['state']-0x80801000+8]==bytes(8)
+    if trot:
+     overlay=(out/'recomp_overlays.inl').read_text();match=re.search(r'static RelocEntry section_%d_tooie_trot_helpers_relocs\[\] = \{(.*?)\n\};'%trot['index'],overlay,re.S);assert match
+     trot['relocs']=match[1].count('.offset')
     if pre:
      assert demo_timing and shadow_fix
-     expected_image=(backpack_owner.SHADOW_COEFFICIENTS_IMAGE_SHA256 if shadow_coefficients else backpack_owner.PRE_IMAGE_SHA256) if backpack621 else npc_owner.PRE_IMAGE_SHA256 if npc665 else (host_owner.PRE_CPU_ON_SHA256 if cpu625 else host_owner.PRE_CPU_OFF_SHA256) if minimum_host else cpu_owner.PRE_IMAGE_SHA256 if cpu625 else '9b52d782634dbd33c91588acf3804ffd51180fd9f7a8b6f6946b7cdb462d9718' if actor_palette else '9f55304f37a88c83579c0c4e5ac02deab9baec9bf278d3a705c4d3a0fe49dae7'
+     expected_image=(backpack_owner.TROT_TOGGLE_IMAGE_SHA256 if talon_trot_toggle else backpack_owner.SHADOW_COEFFICIENTS_IMAGE_SHA256 if shadow_coefficients else backpack_owner.PRE_IMAGE_SHA256) if backpack621 else npc_owner.PRE_IMAGE_SHA256 if npc665 else (host_owner.PRE_CPU_ON_SHA256 if cpu625 else host_owner.PRE_CPU_OFF_SHA256) if minimum_host else cpu_owner.PRE_IMAGE_SHA256 if cpu625 else '9b52d782634dbd33c91588acf3804ffd51180fd9f7a8b6f6946b7cdb462d9718' if actor_palette else '9f55304f37a88c83579c0c4e5ac02deab9baec9bf278d3a705c4d3a0fe49dae7'
     if shadow and not pre:
      import hashlib
      assert hashlib.sha256(binary[:233884]).hexdigest()=='033f7b3ae4c987ef03398ad874eb92cf3a9982a81f00c1bcb6ea030eeb0b9122', 'Exact requalified playable665 demo prefix'
@@ -614,12 +648,12 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
         expected_order.insert(expected_order.index('func_80092898')+1,'tooie_cpu625_retire')
     actual_order=re.findall(r'^RECOMP_FUNC void (\w+)\(',text,re.M)
     if npc665 or backpack621:
-        new_helpers=(npc_owner.HELPERS if npc665 else [])+((backpack_owner.HELPERS+[rate_owner.BODY]) if backpack621 else [])+([quiet_owner.BODY] if quiet_talon_trot else [])
+        new_helpers=(npc_owner.HELPERS if npc665 else [])+((backpack_owner.HELPERS+[rate_owner.BODY]) if backpack621 else [])+([quiet_owner.BODY] if quiet_talon_trot else [])+(trot_owner.BODIES+trot_owner.HELPERS if talon_trot_toggle else [])
         original_order=[n for n in actual_order if n not in new_helpers]
         assert len(actual_order)==len(set(actual_order)) and set(actual_order)==set(expected_order)
         assert original_order==[n for n in expected_order if n not in new_helpers], 'Existing provider order preserved'
     else:assert len(actual_order)==len(set(actual_order)) and actual_order==expected_order, 'Exact ordered generated providers'
-    assert set(base_functions+defs)==set(base_functions)|set(json.loads((source/'camera_hook_contract.json').read_text())['branches']['hook']['providers'])|set(DEMO_HELPERS if demo_timing else [])|set(SHADOW_HELPERS if shadow_fix else [])|set(PRE_HELPERS if pre_background else [])|set(cpu_owner.HELPERS if cpu625 else [])|set(npc_owner.HELPERS if npc665 else [])|set(backpack_owner.HELPERS if backpack621 else [])|set([host_owner.PROJECTION,host_owner.HELPER] if minimum_host else [])|set([rate_owner.BODY] if backpack621 else [])|set([quiet_owner.BODY] if quiet_talon_trot else [])|set([CPU_ROOT_HELPERS[1],FEATHER_LEAF_PATCH] if actor_palette else [])
+    assert set(base_functions+defs)==set(base_functions)|set(json.loads((source/'camera_hook_contract.json').read_text())['branches']['hook']['providers'])|set(DEMO_HELPERS if demo_timing else [])|set(SHADOW_HELPERS if shadow_fix else [])|set(PRE_HELPERS if pre_background else [])|set(cpu_owner.HELPERS if cpu625 else [])|set(npc_owner.HELPERS if npc665 else [])|set(backpack_owner.HELPERS if backpack621 else [])|set([host_owner.PROJECTION,host_owner.HELPER] if minimum_host else [])|set([rate_owner.BODY] if backpack621 else [])|set([quiet_owner.BODY] if quiet_talon_trot else [])|set(trot_owner.BODIES+trot_owner.HELPERS if talon_trot_toggle else [])|set([CPU_ROOT_HELPERS[1],FEATHER_LEAF_PATCH] if actor_palette else [])
     npc_end=None
     if npc665:
         npc_end=npc_owner.checked_end(out,out/'pair.o')
@@ -638,7 +672,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
         overlay=(out/'recomp_overlays.inl').read_text();match=re.search(r'static RelocEntry section_%d_baseline_host_helpers_relocs\[\] = \{(.*?)\n\};'%host['index'],overlay,re.S);assert match
         host['relocs']=match[1].count('.offset')
     assert text.count('\n    tooie_backpack621_retire(rdram, ctx);')==2*int(backpack621), 'Exact621 lifecycle call selection'
-    write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu,host,npc,backpack,quiet_talon_trot)
+    write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu,host,npc,backpack,quiet_talon_trot,talon_trot_toggle,trot)
     if pre:
         if minimum_host:
             names=['boot.c','boot.bin','boot.elf','recomp_overlays.inl','funcs.h','camera_identity_layout.h','render_bridge_layout.h','camera_registry_data.hpp','pre_background_layout.h','cpu625_selection_layout.h','minimum_host_selection_layout.h']
@@ -668,6 +702,11 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     if npc:receipt['inputs'].update(objects['npc665']['inputs']);receipt['helper_definitions']+=npc_owner.HELPERS
     receipt['cpu625']=cpu;receipt['lifecycle_object']=fresh_lifecycle
     receipt['cpu625_table']=cpu_table
+    receipt['talon_trot_toggle']=talon_trot_toggle
+    receipt['trot_toggle']=trot;receipt['trot_toggle_table']=trot_table
+    if talon_trot_toggle:
+        receipt['inputs'].update(objects['talon_trot_toggle']['inputs'])
+        receipt['helper_definitions']+=trot_owner.HELPERS
     receipt['quiet_talon_trot']=quiet_talon_trot
     if quiet_talon_trot:receipt['inputs'].update(objects['quiet_talon_trot']['inputs'])
     receipt['graphics_rate']=graphics_rate
@@ -699,7 +738,8 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
 def prepare(root,output,run,raw=False,image=False,actor_palette=False,shadow_observer=False,demo_timing=False,shadow_fix=False,pre_background=False,cpu625=False,minimum_host=False,npc665=False,backpack621=False,shadow_coefficients=False):
     output.mkdir(exist_ok=True)
     quiet_talon_trot=bool(backpack621 and shadow_coefficients and minimum_host)
+    talon_trot_toggle=quiet_talon_trot
     if raw:
-        receipt=prepare_raw(root,output,run,shadow_observer,demo_timing,shadow_fix,pre_background,actor_palette,cpu625,minimum_host,npc665,backpack621,quiet_talon_trot);(output/'RAW_BINDING.json').write_text(json.dumps(receipt,indent=2)+'\n');print('camera raw',sha(output/'RAW_BINDING.json'))
+        receipt=prepare_raw(root,output,run,shadow_observer,demo_timing,shadow_fix,pre_background,actor_palette,cpu625,minimum_host,npc665,backpack621,quiet_talon_trot,talon_trot_toggle);(output/'RAW_BINDING.json').write_text(json.dumps(receipt,indent=2)+'\n');print('camera raw',sha(output/'RAW_BINDING.json'))
     if image:
-        receipt=prepare_image(root,output,run,actor_palette,demo_timing,shadow_fix,pre_background,cpu625,minimum_host,npc665,backpack621,shadow_coefficients,quiet_talon_trot);print('camera image',sha(output/'receipt.json'))
+        receipt=prepare_image(root,output,run,actor_palette,demo_timing,shadow_fix,pre_background,cpu625,minimum_host,npc665,backpack621,shadow_coefficients,quiet_talon_trot,talon_trot_toggle);print('camera image',sha(output/'receipt.json'))

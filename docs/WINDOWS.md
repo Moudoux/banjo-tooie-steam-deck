@@ -2,7 +2,8 @@
 
 This is the maintained way to build the Scurvy Dog Port player (`BanjoTooieScurvyDogPort.exe`)
 from source and, for maintainers, to package it. Players don't need any of it;
-see the [player guide](PLAYER_GUIDE.md).
+see the [player guide](PLAYER_GUIDE.md). This source describes the local,
+unreleased Alpha 4.4-dev candidate.
 
 Status: these commands follow the current scripts, CMake presets and checks in
 this repository. The step 5 evidence collector was run against the existing
@@ -18,7 +19,7 @@ re-run end to end on a fresh machine. Report gaps in the issue tracker.
    then build the gated player executable.
 4. **Maintainers:** create a build receipt, package and verify.
 
-The raw archive holds the 417 C translation units containing the recompiled game functions. Qualification records
+The raw archive holds the 416 C translation units containing the recompiled game functions. Qualification records
 exactly which compile commands, sources, headers and objects produced it.
 Every later build and the packager refuse to continue if any of them change. On
 a fresh tree, `cmake --build --preset windows-player` therefore fails until
@@ -137,7 +138,7 @@ presets in one checkout.
 ## 5. Compile and qualify the raw archive
 
 Compile only the raw archive, keeping its log. The log must come from the
-build that actually compiled all 417 sources:
+build that actually compiled all 416 sources:
 
 ```powershell
 New-Item -ItemType Directory build\windows-dev\raw-qualification-input | Out-Null
@@ -145,7 +146,7 @@ cmd /c "cmake --build build\windows-dev --target BaselineRecompiledFuncs > build
 if ($LASTEXITCODE) { throw "Raw archive build failed; see compile.log" }
 ```
 
-Next, collect the qualification evidence. This script takes the 417 raw compile
+Next, collect the qualification evidence. This script takes the 416 raw compile
 commands from `compile_commands.json`, checks the archive's members separately
 with `llvm-ar`, and reads every header each object used from Ninja's
 dependency records. It writes `evidence.json` and prints the archive's
@@ -164,10 +165,10 @@ sha = lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 rows = [row for row in json.loads((build / "compile_commands.json").read_text())
         if Path(row["file"]).resolve().parent == raw]
-assert len(rows) == 417, f"{len(rows)} raw compile commands"
+assert len(rows) == 416, f"{len(rows)} raw compile commands"
 objects = {row["output"].replace("\\", "/") for row in rows}
 members = subprocess.check_output([str(llvm_ar), "t", str(archive)], text=True).splitlines()
-assert len(members) == 417 and {m.replace("\\", "/") for m in members} == objects, "archive membership"
+assert len(members) == 416 and {m.replace("\\", "/") for m in members} == objects, "archive membership"
 
 ninja = re.search(r"^CMAKE_MAKE_PROGRAM:\w+=(.*)$", (build / "CMakeCache.txt").read_text(), re.M)[1]
 files = {Path(row["file"]).resolve() for row in rows} | {raw.parent / "RAW_BINDING.json"}
@@ -181,7 +182,7 @@ for line in subprocess.check_output([ninja, "-C", str(build), "-t", "deps"], tex
     elif current and line.strip():
         path = Path(line.strip())
         files.add((path if path.is_absolute() else build / path).resolve())
-assert valid == 417, f"{valid} valid dependency records"
+assert valid == 416, f"{valid} valid dependency records"
 
 record = {"commands": rows, "files": [{"path": str(p), "sha256": sha(p)} for p in sorted(files)]}
 with open(build / "raw-qualification-input/evidence.json", "x") as out:
@@ -200,7 +201,7 @@ python .\tools\baseline\verify_baseline_binding.py qualify `
   --archive build\windows-dev\BaselineRecompiledFuncs.lib `
   --tools deps\LLVM-19.1.3-Windows-X64\bin `
   --snapshot build\windows-dev\baseline\raw-qualification\qualified.json `
-  --expected-count 417 `
+  --expected-count 416 `
   --evidence build\windows-dev\raw-qualification-input\evidence.json `
   --compile-log build\windows-dev\raw-qualification-input\compile.log `
   --accepted-archive-sha $archiveSha
@@ -236,6 +237,19 @@ The player and its `SDL2.dll`, `dxcompiler.dll` and `dxil.dll` are in
 `build\windows-dev\baseline\player-bin\`. Running the game requires the
 Microsoft Visual C++ x64 runtime.
 
+### Optional Talon Trot fixture dependency
+
+The optional `BaselineTrotToggleTest` and `BaselineTrotToggleNegativeTest`
+extractors use the same pinned `pyelftools==0.33` as code generation. Install
+just that package into the Windows Python used by CMake:
+
+```powershell
+python -m pip install pyelftools==0.33
+```
+
+The native build does not need all of `requirements-codegen.txt` installed in
+Windows Python. This test dependency adds no player runtime DLL.
+
 ## 7. Run a local test
 
 Started without arguments, the player uses your real player profile (see the
@@ -257,7 +271,7 @@ shown with `--profile-dir`.
   windows-player` again. The gates re-check the qualified archive on every
   build. If the raw sources, their headers or the archive change, the gate
   fails, and you need a fresh build folder.
-- **Guest C edits:** changes under `tools/baseline/guest/` need steps 3–6
+- **Guest C edits:** changes under `tools/baseline/guest/` need steps 3â€“6
   in a fresh build folder. The selected image is pinned in
   `prepare_player_guest.py` (`IMAGE_SHA256`, `LAYOUT_SHA256`),
   `prepare_backpack621.py` (`SHADOW_COEFFICIENTS_IMAGE_SHA256`, checked by
@@ -337,6 +351,6 @@ line-ending difference does not excuse any other difference.
 | --- | --- |
 | Configure says the IPL3, core1 or core2 reference is missing | Step 3 did not finish; check `prepare_player_guest.py` output. |
 | `fresh build tree required` from guest preparation | Earlier outputs exist; reuse them or move the build folder aside. |
-| `Missing/duplicate successful compile evidence` | The compile log is not from the build that compiled the 417 sources. Start from a fresh build folder. |
+| `Missing/duplicate successful compile evidence` | The compile log is not from the build that compiled the 416 sources. Start from a fresh build folder. |
 | `Archive member identity/size/hash mismatch` during the build | The raw archive or its inputs changed after qualification. |
 | Packager says the source checkout is not clean | Commit or remove the changes; build outputs must stay in ignored folders. |

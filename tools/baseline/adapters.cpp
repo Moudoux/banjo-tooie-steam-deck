@@ -650,7 +650,7 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
     if (
         baseline_boot_patch_registry::section_table[0].ram_addr != 0x80801000 ||
 #if BASELINE_CAMERA_IDENTITY && TOOIE_ACTOR_PALETTE_SELECTED
-        baseline_boot_patch_registry::section_table[0].num_funcs != 39+TOOIE_MINIMUM_HOST_SELECTED+TOOIE_BACKPACK621_SELECTED+BASELINE_QUIET_TROT ||
+        baseline_boot_patch_registry::section_table[0].num_funcs != 39+TOOIE_MINIMUM_HOST_SELECTED+TOOIE_BACKPACK621_SELECTED+BASELINE_QUIET_TROT+(3+1)*BASELINE_TROT_TOGGLE ||
 #else
         baseline_boot_patch_registry::section_table[0].num_funcs != (BASELINE_CAMERA_IDENTITY ? 38 : BASELINE_RENDER_BRIDGE ? (BASELINE_RENDER_SILO ? 13 : 8) : (BASELINE_HONEY_PATCH ? 4 : (BASELINE_HEAP_PATCH ? 3 : 2))) ||
 #endif
@@ -693,6 +693,20 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
     if (quiet_entry->offset < 2760 || !quiet_entry->rom_size ||
         uint64_t(quiet_entry->offset) + quiet_entry->rom_size > TOOIE_BRIDGE_STATE_IMAGE_OFFSET)
         rejected_body("selected quiet Trot provider/extent changed");
+#endif
+#if BASELINE_TROT_TOGGLE
+    // Four providers in .recomp_patch; two helpers are checked by camera registry.
+    for (auto* provider : {bs_setState, bainput_update, func_80800710_bsbtrot, func_800F86D8}) {
+        const auto& selected = baseline_boot_patch_registry::section_table[0];
+        if (std::count_if(selected.funcs, selected.funcs + selected.num_funcs,
+                [provider](const auto& entry) { return entry.func == provider; }) != 1)
+            rejected_body("selected Trot provider missing/duplicate");
+        const auto* entry = std::find_if(selected.funcs, selected.funcs + selected.num_funcs,
+            [provider](const auto& entry) { return entry.func == provider; });
+        if (entry->offset < 2760 || !entry->rom_size ||
+            uint64_t(entry->offset) + entry->rom_size > TOOIE_BRIDGE_STATE_IMAGE_OFFSET)
+            rejected_body("selected Trot provider extent changed");
+    }
 #endif
 #if BASELINE_RENDER_BRIDGE
     validate_bridge_image(baseline_boot_patch_bin, baseline_boot_patch_bin_size);
@@ -771,6 +785,17 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
     core2_entries.push_back({.func = func_80092898, .offset = 0x112D8, .rom_size = 0x184});
     core2_entries.push_back({.func = func_800F3880, .offset = 0x722C0, .rom_size = 0x28});
 #endif
+#endif
+#if BASELINE_TROT_TOGGLE
+    // Original core2 base is 0x800815C0; original declared extents are unchanged.
+    if (std::any_of(core2_entries.begin(), core2_entries.end(), [](const auto& entry) {
+            return entry.offset == 0x8009E5C8u-0x800815C0u ||
+                   entry.offset == 0x8009819Cu-0x800815C0u ||
+                   entry.offset == 0x800F86D8u-0x800815C0u; }))
+        rejected_body("original Trot core providers were not omitted");
+    core2_entries.push_back({.func=bs_setState, .offset=0x8009E5C8u-0x800815C0u, .rom_size=0xAC});
+    core2_entries.push_back({.func=bainput_update, .offset=0x8009819Cu-0x800815C0u, .rom_size=0x6C});
+    core2_entries.push_back({.func=func_800F86D8, .offset=0x800F86D8u-0x800815C0u, .rom_size=0x58});
 #endif
     std::sort(core2_entries.begin(), core2_entries.end(), [](const auto& a, const auto& b) { return a.offset < b.offset; });
     if (std::adjacent_find(core2_entries.begin(), core2_entries.end(),
@@ -1532,12 +1557,16 @@ void register_overlay_metadata(std::span<SectionTableEntry> sections, std::span<
         rejected_body("bsbtrot overlay module/section mapping changed");
     auto& trot = sections[30];
     if (trot.rom_addr != 0x01F14F50 || trot.ram_addr != 0x80800000 ||
-        trot.size != 0x2F30 || trot.index != 30 || trot.num_funcs != 82 || !trot.funcs ||
+        trot.size != 0x2F30 || trot.index != 30 || trot.num_funcs != (BASELINE_TROT_TOGGLE ? 81 : 82) || !trot.funcs ||
         std::any_of(trot.funcs, trot.funcs + trot.num_funcs,
-            [](const auto& entry) { return entry.offset == 0xDC; }))
+            [](const auto& entry) { return entry.offset == 0xDC || (BASELINE_TROT_TOGGLE && entry.offset == 0x710); }))
         rejected_body("bsbtrot original overlay identity/omitted sound leaf changed");
     static std::vector<FuncEntry> trot_entries(trot.funcs, trot.funcs + trot.num_funcs);
     trot_entries.push_back({.func = func_808000DC_bsbtrot, .offset = 0xDC, .rom_size = 0x44});
+#if BASELINE_TROT_TOGGLE
+    // Original 0x710..0x75C: nineteen MIPS instruction slots, 0x4C bytes.
+    trot_entries.push_back({.func=func_80800710_bsbtrot, .offset=0x710, .rom_size=0x4C});
+#endif
     std::sort(trot_entries.begin(), trot_entries.end(),
         [](const auto& a, const auto& b) { return a.offset < b.offset; });
     if (trot_entries.size() != 83 ||

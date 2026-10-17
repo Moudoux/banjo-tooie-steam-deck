@@ -21,9 +21,10 @@ OUTPUTS = [BASELINE + '/raw', BASELINE + '/heap-patch', BASELINE + '/render-brid
 # Accepted player selection; shadow_observer stays OFF.
 SELECTION = ['--actor-palette', '--demo-timing', '--shadow-fix', '--pre-background', '--cpu625',
              '--minimum-host', '--npc665', '--backpack621', '--shadow-coefficients']
-IMAGE_SHA256 = '3ab2614823ac33e1d6f271aeb0ba6a34f8457efcbf5b75da6d2c4b952f7c7e7e'
-IMAGE_BYTES = 297712
-LAYOUT_SHA256 = 'bae74ed8e2f89a54180a7ae707c5b509532300ef7ea4386b8f4586c2d944ba30'
+# Historical quiet-only image: 3ab2614823ac33e1d6f271aeb0ba6a34f8457efcbf5b75da6d2c4b952f7c7e7e
+IMAGE_SHA256 = '4ce140e2df99f283663b65cec09e6463fdac8f7c21e7fed7c57f6c8f7965053c'
+IMAGE_BYTES = 299328
+LAYOUT_SHA256 = '19fd6ff86da50efab5616fbfbbcd7836e1313d84bbb11fceed9bee0bfed0581f'
 ROM_SHA256 = '9ec37fba6890362eba86fb855697a9cff1519275531b172083a1a6a045483583'
 DECOMPRESSED_SHA256 = '8c9d316b2edca686ec8393ddf95d480a7dfd9879ef434dbcfc4ea3000f2ffe89'
 # Native publication references that Baseline.cmake authenticates at configure.
@@ -87,7 +88,7 @@ def main():
     step('prepare_render_bridge.py', '--camera', '--raw', '--image', *SELECTION)
     image, receipt = camera / 'boot.bin', json.loads((camera / 'receipt.json').read_text())
     if (sha(image) != IMAGE_SHA256 or image.stat().st_size != IMAGE_BYTES or
-            sha(camera / 'render_bridge_layout.h') != LAYOUT_SHA256 or receipt.get('shadow_coefficients') is not True):
+            sha(camera / 'render_bridge_layout.h') != LAYOUT_SHA256 or receipt.get('shadow_coefficients') is not True or receipt.get('talon_trot_toggle') is not True):
         raise ValueError('selected player guest image/layout/policy differs')
     record = dict(selection=SELECTION, image_sha256=IMAGE_SHA256, image_bytes=IMAGE_BYTES,
                   layout_sha256=LAYOUT_SHA256, raw_binding_sha256=sha(camera / 'RAW_BINDING.json'),

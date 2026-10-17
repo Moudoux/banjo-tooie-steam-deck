@@ -1,9 +1,11 @@
 #include "minimum_host.hpp"
 #include "frontend_input_host.hpp"
 #include "frontend_config.hpp"
+#include "widescreen.hpp"
 #include <SDL.h>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -242,6 +244,16 @@ int main() {
     try {
         Fixture fixture;
         fixture.setup();
+        tooie::widescreen::configure_profile(true);
+        tooie::widescreen::configure_native_aspect(tooie::widescreen::NativeAspect::Ratio16x9);
+        tooie::widescreen::latch_for_game_start();
+        host::Request before_start{};
+        before_start.kind=host::RequestKind::Preference;
+        before_start.preference=host::Preference::NativeAspect;before_start.value=1;
+        require(host::enqueue(before_start), "pre-start aspect queue rejected");
+        host::tick(false);
+        require(tooie::widescreen::latched_native_aspect()==tooie::widescreen::NativeAspect::Ratio16x9,
+            "pre-start preference changed published gameplay aspect");
         require(tooie::input::get_binding(Action::Z, Device::AxisPositive, 0).code == SDL_CONTROLLER_AXIS_TRIGGERLEFT &&
             tooie::input::get_binding(Action::Start, Device::Button, 0).code == SDL_CONTROLLER_BUTTON_START,
             "fresh disposable profile lacks baseline Z/Start defaults");
@@ -296,6 +308,9 @@ int main() {
         host::note_game_started();
         require(!host::tick(true).physical.nonneutral() && !host::menu_open(),
             "neutral gameplay handoff failed");
+        require(tooie::widescreen::latched_native_aspect()==tooie::widescreen::NativeAspect::Ratio21x9 &&
+            host::latched_preferences().native_aspect==0,
+            "first started tick missed pending aspect or mutated startup preferences");
         fixture.button(0, SDL_CONTROLLER_BUTTON_X, true);
         require((host::tick(true).physical.buttons & 0x2000) != 0, "new X binding did not publish Z gameplay bit");
         fixture.button(0, SDL_CONTROLLER_BUTTON_X, false);
@@ -475,6 +490,27 @@ int main() {
             require(host::enqueue(request), "preference queue rejected");
             host::tick(true);
         };
+        preference(host::Preference::NativeAspect,2);
+        require(tooie::widescreen::latched_native_aspect()==tooie::widescreen::NativeAspect::Ratio32x9 &&
+            host::latched_preferences().native_aspect==startup.native_aspect,
+            "fixed ratio did not apply live or mutated startup preferences");
+        SDL_SetWindowSize(fixture.window,210,90);
+        preference(host::Preference::NativeAspect,host::fit_aspect);
+        require(std::abs(tooie::widescreen::latched_aspect_ratio()-21.0/9.0)<1e-5,
+            "window-fit choice did not use actual drawable");
+        SDL_SetWindowSize(fixture.window,256,108);
+        host::tick(true);
+        require(std::abs(tooie::widescreen::latched_aspect_ratio()-64.0/27.0)<1e-5,
+            "window resize did not update true fit ratio");
+        const auto fitted=tooie::widescreen::latched_settings_word();
+        preference(host::Preference::NativeAspect,5);
+        require(tooie::widescreen::latched_settings_word()==fitted,
+            "invalid aspect preference changed live ratio");
+        SDL_SetWindowSize(fixture.window,64,64);
+        host::tick(true);
+        require(tooie::widescreen::latched_aspect_ratio()==16.0/9.0,
+            "narrow fit did not preserve approved minimum aspect");
+        preference(host::Preference::NativeAspect,0);
         preference(host::Preference::QuietTalonTrot,1);
         preference(host::Preference::Resolution,4);
         require(host::requested_quiet_talon_trot() && host::requested_resolution()==4,
@@ -499,6 +535,28 @@ int main() {
         host::initialize(fixture.window,fixture.profile);
         require(host::requested_quiet_talon_trot() && host::requested_resolution()==8,
             "persisted preferences missing on restart");
+
+        // Toggle uses the same live SDL publication, with independent persistence.
+        require(!host::requested_talon_trot_toggle(), "toggle default is not hold-Z");
+        preference(host::Preference::TalonTrotToggle,1);
+        require(host::requested_talon_trot_toggle(), "toggle not published live");
+        preference(host::Preference::TalonTrotToggle,-1);
+        preference(host::Preference::TalonTrotToggle,2);
+        require(host::requested_talon_trot_toggle(), "invalid toggle request changed mode");
+        require(host::latched_preferences().talon_trot_toggle==0, "live toggle mutated startup snapshot");
+        require(tooie::frontend::settings::flush(), "toggle preference did not persist");
+        host::shutdown();
+        require(!host::requested_talon_trot_toggle(), "shutdown retained live toggle");
+        host::initialize(fixture.window,fixture.profile);
+        require(host::requested_talon_trot_toggle(), "persisted toggle missing on restart");
+        preference(host::Preference::TalonTrotToggle,0);
+        require(!host::requested_talon_trot_toggle(), "toggle could not return to hold-Z live");
+        for(int invalid:{-1,2}) {
+            tooie::frontend::settings::set_int("tooie_talon_trot_toggle",invalid);
+            require(tooie::frontend::settings::flush(), "invalid stored toggle setup failed");
+            host::shutdown();host::initialize(fixture.window,fixture.profile);
+            require(!host::requested_talon_trot_toggle(), "invalid stored toggle did not fall back to hold-Z");
+        }
 
         // G: Default/script policy stays focus-bound, even with fixture transport
         // forced on to distinguish SDL delivery from mapper rejection.

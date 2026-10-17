@@ -65,6 +65,9 @@ void func_800DE448(uint8_t*, recomp_context*);
 void tooie_npc665_end_body(uint8_t*, recomp_context*);
 void tooie_cpu625_retire(uint8_t*, recomp_context*);
 void tooie_backpack621_retire(uint8_t*, recomp_context*);
+// Trot is outside this drawing fixture's state. Its dedicated production-MIPS
+// fixture checks retirement behavior; the lifecycle fixture checks call order.
+void tooie_trot_toggle_retire(uint8_t*, recomp_context*) {}
 #ifdef TOOIE_NPC665_FIXTURE
 // Preserve the native checked-end contract using the exact selected guest body.
 void baseline_npc665_end_checked(uint8_t* rdram, recomp_context* ctx) {

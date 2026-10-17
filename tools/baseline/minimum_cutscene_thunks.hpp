@@ -14,3 +14,6 @@ extern "C" void tooie_baseline_presentation_publish(uint8_t*,recomp_context* ctx
 extern "C" void tooie_baseline_quiet_talon_trot(uint8_t*,recomp_context* ctx) {
     ctx->r2=baseline::host::requested_quiet_talon_trot();
 }
+extern "C" void tooie_baseline_trot_toggle(uint8_t*,recomp_context* ctx) {
+    ctx->r2=baseline::host::requested_talon_trot_toggle();
+}

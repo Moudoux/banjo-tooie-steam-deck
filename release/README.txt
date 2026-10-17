@@ -1,7 +1,8 @@
-Banjo-Tooie: Scurvy Dog Port 0.1.0-alpha.4.3 - Windows x64
+Banjo-Tooie: Scurvy Dog Port 0.1.0-alpha.4.4-dev - Windows x64
 ================================================
 
-Unofficial alpha. The game is not included; you need your own copy.
+Local, unreleased development candidate. Unofficial alpha.
+The game is not included; you need your own copy.
 There is no installer.
 
 START
@@ -35,10 +36,19 @@ Keyboard:   WASD move, J = A, K = B, Space = Z, Enter = Start,
 Controller: left stick moves, A = A, B = B, Start = Start,
             left trigger = Z, left/right shoulder = L/R,
             right stick = C buttons.
+The selected controller works for gameplay while another window has focus.
+Keyboard input, menu navigation and binding capture require game-window focus.
+Controls has an optional "Talon Trot: press Z again to stop" checkbox, off by
+default. Enter Trot, release Z, then press Z again to stop. Enabling during Trot
+applies on the next fresh entry; disabling restores hold-Z at the next game
+input/state check. No restart is needed.
 
 VIDEO
-Output rate defaults to Original. Output rate, resolution scale, VSync and
-fullscreen changes apply during play. Widescreen/aspect changes need a restart.
+Output rate defaults to Original. Output rate, resolution scale, gameplay aspect,
+VSync and fullscreen changes apply during play. Gameplay aspect has fixed ratios
+and Fit window (16:9–32:9), which follows the drawable window size on resize.
+Gameplay aspect is used with Widescreen On. Widescreen and Cutscene aspect
+changes need a restart.
 Default (Original) is the former Current choice.
 
 TEXTURE PACKS (EXPERIMENTAL)
@@ -50,11 +60,10 @@ AUDIO
 Mute Talon Trot movement sound is optional and applies to the next movement sound.
 
 KNOWN ISSUES
-- Widescreen can show incorrect geometry at the edges; aspect sizing is manual.
+- Widescreen can show incorrect geometry at the edges.
 - Mayahem Temple can render black in the distance.
 - Mumbo title-demo shadows can distort at Display or Manual output.
 - The save-select arm animation remains low-rate.
-- Controller input stops when the game window loses focus.
 - F6 fast-forward is not available in this player.
 - The full game has not been verified start to finish.
 

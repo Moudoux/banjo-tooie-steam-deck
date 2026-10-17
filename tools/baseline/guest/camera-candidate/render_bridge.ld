@@ -4,6 +4,7 @@ tooie_get_latched_widescreen_settings = 0x8F000020;
 tooie_baseline_presentation_settings = 0x8F000024;
 tooie_baseline_presentation_publish = 0x8F000028;
 tooie_baseline_quiet_talon_trot = 0x8F00002C;
+tooie_baseline_trot_toggle = 0x8F000030;
 SECTIONS {
     .recomp_patch : { *(.recomp_patch) } >patch
     .silo_helper ALIGN(4) : { *(.text.silo_preflight) } >patch
@@ -49,6 +50,9 @@ SECTIONS {
     ASSERT(SIZEOF(.tooie_backpack621_state)==0 || SIZEOF(.tooie_backpack621_state)==612, "621 state extent")
     .tooie_graphics_rate_state ALIGN(8) : { *graphics_rate.o(.tooie_graphics_rate_state) } >patch
     ASSERT(SIZEOF(.tooie_graphics_rate_state)==0 || SIZEOF(.tooie_graphics_rate_state)==48, "two graphics-rate tails extent")
+    .tooie_trot_helpers ALIGN(4) : { *talon_trot_toggle.o(.tooie_trot_helpers) } >patch
+    .tooie_trot_state ALIGN(4) : { *talon_trot_toggle.o(.tooie_trot_state) } >patch
+    ASSERT(SIZEOF(.tooie_trot_state)==0 || SIZEOF(.tooie_trot_state)==12, "Trot slot extent")
     .forbidden : {
         *(.text*) *(.rodata*) *(.srodata*) *(.data*) *(.sdata*)
         *(.bss*) *(.sbss*) *(COMMON) *(.tdata*) *(.tbss*) *(.lit*)

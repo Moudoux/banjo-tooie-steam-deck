@@ -46,8 +46,8 @@ def relocations(elf):
             and sec.name in {'.rel.recomp_patch', '.rel.text.silo_preflight', '.rel.silo_helper', '.rel.text.player_boundary', '.rel.player_helper', '.rel.text.actor_palette', '.rel.actor_helper'} for r in sec.iter_relocations()]
 
 
-def compile_objects(root, output, run, cpu_root=False, cpu625=False, lifecycle_only=False, npc665=False, shared=False, backpack621=False, hand862=False, honey_reference=HONEY_REFERENCE):
-    assert all(type(x) is bool for x in (cpu_root,cpu625,lifecycle_only,npc665,shared,backpack621,hand862))
+def compile_objects(root, output, run, cpu_root=False, cpu625=False, lifecycle_only=False, npc665=False, shared=False, backpack621=False, hand862=False, talon_trot_toggle=False, honey_reference=HONEY_REFERENCE):
+    assert all(type(x) is bool for x in (cpu_root,cpu625,lifecycle_only,npc665,shared,backpack621,hand862,talon_trot_toggle))
     assert not hand862 or (cpu_root and backpack621), 'Hand862 is compiled only into the selected actor-palette 621 composition'
     assert honey_reference is None or type(honey_reference) is str
     source = root/'tools/baseline/guest/silo-candidate'
@@ -57,7 +57,7 @@ def compile_objects(root, output, run, cpu_root=False, cpu625=False, lifecycle_o
     includes = [source, root/'deps/banjo-tooie/include', root/'deps/banjo-tooie/lib/ultralib/include', root/'deps/rt64/include']
     flags = [compiler, '-target', 'mips', '-EB', '-mips2', '-mabi=32', '-O2', '-G0',
              '-mno-abicalls', '-mno-odd-spreg', '-nostdinc', '-D_LANGUAGE_C', '-DMIPS', '-fno-builtin']
-    flags += ['-I'+win(p) for p in includes]+['-DTOOIE_CPU625='+str(int(cpu625)),'-DTOOIE_NPC665='+str(int(npc665)),'-DTOOIE_BACKPACK621='+str(int(backpack621))]
+    flags += ['-I'+win(p) for p in includes]+['-DTOOIE_CPU625='+str(int(cpu625)),'-DTOOIE_NPC665='+str(int(npc665)),'-DTOOIE_BACKPACK621='+str(int(backpack621)),'-DTOOIE_TROT_TOGGLE='+str(int(talon_trot_toggle))]
     owners = {'bridge': ('render_bridge.c', accepted.BRIDGE_FUNCTIONS),
               'bone': ('bone_handler.c', ['func_800DCF48', HELPER]),
               'pair': ('draw_boundaries.c', PAIR), 'silo': ('silo_nodes.c', SETTERS),
@@ -95,6 +95,7 @@ def compile_objects(root, output, run, cpu_root=False, cpu625=False, lifecycle_o
         expected_imports['bone']|={'tooie_backpack621_state','tooie_backpack621_bone_push','tooie_backpack621_bone_pop'}
         expected_imports['leaf']|={'tooie_backpack621_state','tooie_backpack621_leaf_begin','tooie_backpack621_leaf_end'}
         expected_imports['lifecycle'].add('tooie_backpack621_retire')
+    if talon_trot_toggle:expected_imports['lifecycle'].add('tooie_trot_toggle_retire')
     for name, (filename, definitions) in owners.items():
         obj = output/(name+'.o')
         command=flags+(['-DTOOIE_ACTOR_PALETTE='+str(int(cpu_root))] if name in ('actor','pair') else [])+(['-fno-jump-tables'] if name=='actor' else [])+(['-DTOOIE_HAND862=1'] if name=='actor' and hand862 else [])+['-c',win(source/filename),'-o',win(obj)]

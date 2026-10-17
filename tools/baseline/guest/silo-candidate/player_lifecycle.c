@@ -12,6 +12,12 @@
 #if TOOIE_CPU625
 #include "../cpu625-candidate/cpu625_layout.h"
 #endif
+#if !defined(TOOIE_TROT_TOGGLE) || (TOOIE_TROT_TOGGLE != 0 && TOOIE_TROT_TOGGLE != 1)
+#error Explicit boolean TOOIE_TROT_TOGGLE selection required
+#endif
+#if TOOIE_TROT_TOGGLE
+void tooie_trot_toggle_retire(u32);
+#endif
 #define PATCH __attribute__((section(".recomp_patch"), noinline))
 #define PC SS.player
 
@@ -57,6 +63,9 @@ PATCH void func_80092898(u8* self) {
 #endif
 #if TOOIE_BACKPACK621
     tooie_backpack621_retire((u32)self,0u,3u);
+#endif
+#if TOOIE_TROT_TOGGLE
+    tooie_trot_toggle_retire((u32)self);
 #endif
     void* pose;
     u8* body;
@@ -110,6 +119,9 @@ PATCH void func_800F3880(u8* self) {
 #endif
 #if TOOIE_BACKPACK621
     tooie_backpack621_retire((u32)self,0u,4u);
+#endif
+#if TOOIE_TROT_TOGGLE
+    tooie_trot_toggle_retire((u32)self);
 #endif
     player_lifecycle(self,0);
     func_80098E64(self);

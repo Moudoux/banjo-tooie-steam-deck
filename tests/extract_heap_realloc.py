@@ -8,7 +8,8 @@ from pathlib import Path
 
 
 def extract(source: str, function: str = "heap_realloc") -> str:
-    if function not in ("func_808000DC_bsbtrot", "func_8009DE38", "func_800E7EF4", "heap_realloc", "func_80800380_chhoneycarrier",
+    if function not in ("bs_setState", "bainput_update", "func_80800710_bsbtrot", "func_800F86D8",
+                        "tooie_trot_toggle_retire", "tooie_trot_toggle_move", "bs_getCurrentState", "bs_getPreviousState", "bs_getNextState", "func_808000DC_bsbtrot", "func_8009DE38", "func_800E7EF4", "heap_realloc", "func_80800380_chhoneycarrier",
                         "boot_osInitialize", "tooie_core1_osInitialize", "boot___osSetFpcCsr",
                         "func_800EBED4", "func_8010A79C", "func_800A7840", "func_800E42F0", "func_800DCF48", "func_800DD998",
                         "func_80101808", "func_800DE448", "func_800DE498", "func_80092234", "func_80092898", "func_800F3880",

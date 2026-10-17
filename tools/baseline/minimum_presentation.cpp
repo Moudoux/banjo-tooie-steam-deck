@@ -58,7 +58,7 @@ void latch_startup(bool pillarbox_capable) {
     uint32_t word=1u<<BASELINE_PRESENT_GENERATION_SHIFT;
     if(pillarbox_capable)word|=BASELINE_PRESENT_PILLARBOX_CAPABLE;
     if(prefs.cutscene_aspect==0)word|=BASELINE_PRESENT_ORIGINAL_CUTSCENE;
-    word|=uint32_t(prefs.native_aspect)<<BASELINE_PRESENT_ASPECT_SHIFT;
+    word|=uint32_t(prefs.native_aspect<fit_aspect?prefs.native_aspect:0)<<BASELINE_PRESENT_ASPECT_SHIFT;
     if(prefs.wide>=0) {
         tooie::widescreen::configure_profile(prefs.wide!=0);
         tooie::widescreen::configure_native_aspect(tooie::widescreen::NativeAspect(prefs.native_aspect));
@@ -82,8 +82,9 @@ Status reconcile_aspect(RT64::SharedQueueResources& shared,uint32_t word,uint32_
     const bool bars=wide && (word&BASELINE_PRESENT_PILLARBOX_CAPABLE) &&
         (word>>BASELINE_PRESENT_GENERATION_SHIFT)==(guest>>1) && (guest&1u);
     const Aspect wanted=wide?Aspect::Manual:Aspect::Original;
-    constexpr double aspects[]={16.0/9.0,21.0/9.0,32.0/9.0,43.0/18.0};
-    const double target=bars?4.0/3.0:aspects[(word>>BASELINE_PRESENT_ASPECT_SHIFT)&3u];
+    // One atomic ratio load, shared with guest projection. The two owners may
+    // apply a change in adjacent frames; this is not a frame-coherent commit.
+    const double target=bars?4.0/3.0:tooie::widescreen::latched_aspect_ratio();
     std::unique_lock lock(shared.configurationMutex,std::try_to_lock);
     if(!lock.owns_lock())return Status::Pending;
     auto& config=shared.userConfig;

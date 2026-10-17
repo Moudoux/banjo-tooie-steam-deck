@@ -7,6 +7,7 @@ void tooie_get_latched_widescreen_settings(uint8_t*,recomp_context*);
 void tooie_baseline_presentation_settings(uint8_t*,recomp_context*);
 void tooie_baseline_presentation_publish(uint8_t*,recomp_context*);
 void tooie_baseline_quiet_talon_trot(uint8_t*,recomp_context*);
+void tooie_baseline_trot_toggle(uint8_t*,recomp_context*);
 #ifdef __cplusplus
 }
 #endif

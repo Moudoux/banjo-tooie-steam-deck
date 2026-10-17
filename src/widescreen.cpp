@@ -3,6 +3,8 @@
 #include "boot_hooks.h"
 
 #include <atomic>
+#include <algorithm>
+#include <cstring>
 
 namespace {
 std::atomic_bool widescreen_profile_override_latched{false};
@@ -10,8 +12,7 @@ std::atomic_bool configured_widescreen_enabled{false};
 std::atomic_bool latched_widescreen_enabled{false};
 std::atomic<tooie::widescreen::NativeAspect> configured_native_aspect_value{
     tooie::widescreen::NativeAspect::Ratio16x9};
-std::atomic<tooie::widescreen::NativeAspect> latched_native_aspect_value{
-    tooie::widescreen::NativeAspect::Ratio16x9};
+std::atomic<std::uint32_t> latched_aspect_bits{0};
 
 constexpr tooie::widescreen::NativeAspect normalize_aspect(
     tooie::widescreen::NativeAspect aspect) noexcept {
@@ -50,8 +51,9 @@ void latch_for_game_start() noexcept {
     latched_widescreen_enabled.store(
         configured_widescreen_enabled.load(std::memory_order_acquire),
         std::memory_order_release);
-    latched_native_aspect_value.store(
-        configured_native_aspect_value.load(std::memory_order_acquire),
+    latched_aspect_bits.store(
+        static_cast<uint32_t>(configured_native_aspect_value.load(std::memory_order_acquire)) <<
+            TOOIE_WIDESCREEN_SETTINGS_ASPECT_SHIFT,
         std::memory_order_release);
     widescreen_profile_override_latched.store(true, std::memory_order_release);
 }
@@ -61,11 +63,36 @@ NativeAspect configured_native_aspect() noexcept {
 }
 
 NativeAspect latched_native_aspect() noexcept {
-    return latched_native_aspect_value.load(std::memory_order_acquire);
+    const auto bits = latched_aspect_bits.load(std::memory_order_acquire);
+    if (bits & TOOIE_WIDESCREEN_SETTINGS_FIT) return NativeAspect::Ratio16x9;
+    return NativeAspect((bits >> TOOIE_WIDESCREEN_SETTINGS_ASPECT_SHIFT) &
+        TOOIE_WIDESCREEN_SETTINGS_ASPECT_MASK);
 }
 
 double latched_aspect_ratio() noexcept {
-    return aspect_ratio(latched_native_aspect());
+    const auto bits = latched_aspect_bits.load(std::memory_order_acquire);
+    if (bits & TOOIE_WIDESCREEN_SETTINGS_FIT) {
+        float scale;
+        const uint32_t encoded = bits & TOOIE_WIDESCREEN_SETTINGS_FIT_SCALE_MASK;
+        std::memcpy(&scale, &encoded, sizeof scale);
+        return double(scale) * (16.0 / 9.0);
+    }
+    return aspect_ratio(NativeAspect((bits >> TOOIE_WIDESCREEN_SETTINGS_ASPECT_SHIFT) &
+        TOOIE_WIDESCREEN_SETTINGS_ASPECT_MASK));
+}
+
+void set_live_aspect_bits(std::uint32_t bits) noexcept {
+    latched_aspect_bits.store(bits & ~(TOOIE_WIDESCREEN_SETTINGS_ACTIVE |
+        TOOIE_WIDESCREEN_SETTINGS_ENABLED), std::memory_order_release);
+}
+
+uint32_t fit_aspect_bits(int width, int height) noexcept {
+    if (width <= 0 || height <= 0) return 0;
+    const float scale = std::clamp(float(double(width) / height * (9.0 / 16.0)), 1.0f, 2.0f);
+    uint32_t bits;
+    static_assert(sizeof bits == sizeof scale);
+    std::memcpy(&bits, &scale, sizeof bits);
+    return (bits & TOOIE_WIDESCREEN_SETTINGS_FIT_SCALE_MASK) | TOOIE_WIDESCREEN_SETTINGS_FIT;
 }
 
 bool latched_enabled() noexcept {
@@ -78,8 +105,9 @@ bool profile_override_active() noexcept {
 
 uint32_t latched_settings_word() noexcept {
     if (!profile_override_active()) return 0;
-    return 1U | (latched_enabled() ? 2U : 0U) |
-           (static_cast<uint32_t>(normalize_aspect(latched_native_aspect())) << 2);
+    return TOOIE_WIDESCREEN_SETTINGS_ACTIVE |
+           (latched_enabled() ? TOOIE_WIDESCREEN_SETTINGS_ENABLED : 0U) |
+           latched_aspect_bits.load(std::memory_order_acquire);
 }
 
 } // namespace tooie::widescreen

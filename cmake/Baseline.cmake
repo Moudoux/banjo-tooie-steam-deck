@@ -869,6 +869,7 @@ target_compile_definitions(TooieBaseline PRIVATE "BASELINE_PLAYER_BOUNDARY=$<BOO
 target_compile_definitions(BaselineRecompiledFuncs PRIVATE "BASELINE_CAMERA_IDENTITY=$<BOOL:${TOOIE_BASELINE_CAMERA_IDENTITY}>")
 target_compile_definitions(BaselineRecompiledFuncs PRIVATE "BASELINE_RENDER_BRIDGE=$<BOOL:${TOOIE_BASELINE_RENDER_BRIDGE}>")
 set(_baseline_quiet_trot OFF)
+set(_baseline_trot_toggle OFF)
 if(TOOIE_BASELINE_RENDER_BRIDGE)
     # Raw funcs.h must precede the image's eight-body funcs.h.
     target_include_directories(TooieBaseline PRIVATE "${TOOIE_BASELINE_GENERATED_DIR}" "${_baseline_bridge_dir}")
@@ -999,6 +1000,31 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                     "${CMAKE_SOURCE_DIR}/tools/baseline/prepare_quiet_talon_trot.py"
                     "${CMAKE_SOURCE_DIR}/tools/baseline/guest/minimum-host/quiet_talon_trot.c")
             endif()
+            # Trot uses exactly the same selected-image predicate as Quiet Trot.
+            string(JSON _baseline_trot_type ERROR_VARIABLE _baseline_trot_error TYPE "${_baseline_selected_receipt}" talon_trot_toggle)
+            string(JSON _baseline_raw_trot_type ERROR_VARIABLE _baseline_raw_trot_error TYPE "${_baseline_raw_binding}" talon_trot_toggle)
+            if(_baseline_trot_error AND _baseline_raw_trot_error AND NOT _baseline_quiet_native)
+                set(_baseline_trot_toggle OFF)
+            elseif(NOT _baseline_trot_error AND NOT _baseline_raw_trot_error AND
+                   _baseline_trot_type STREQUAL "BOOLEAN" AND _baseline_raw_trot_type STREQUAL "BOOLEAN")
+                string(JSON _baseline_trot_toggle GET "${_baseline_selected_receipt}" talon_trot_toggle)
+                string(JSON _baseline_raw_trot GET "${_baseline_raw_binding}" talon_trot_toggle)
+                if(NOT _baseline_trot_toggle STREQUAL _baseline_quiet_native OR
+                   NOT _baseline_raw_trot STREQUAL _baseline_trot_toggle)
+                    message(FATAL_ERROR "Trot raw/image/native selection mismatch")
+                endif()
+            else()
+                message(FATAL_ERROR "Trot fields missing/partial/malformed; selected HOST/621 coefficient image requires explicit ON")
+            endif()
+            if(_baseline_trot_toggle)
+                # This gate counts ALL translated functions: 4 providers + 2 helpers.
+                math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+4+2")
+                math(EXPR _baseline_helper_expected "${_baseline_helper_expected}+2")
+                set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                    "${CMAKE_SOURCE_DIR}/tools/baseline/prepare_talon_trot_toggle.py"
+                    "${CMAKE_SOURCE_DIR}/tools/baseline/guest/minimum-host/talon_trot_toggle.c"
+                    "${_baseline_bridge_dir}/trot_toggle_selection_layout.h")
+            endif()
             if(_baseline_shadow_coefficients STREQUAL "ON" AND NOT TOOIE_BASELINE_BACKPACK621)
                 message(FATAL_ERROR "Shadow coefficient guest image requires the 621 composition")
             endif()
@@ -1010,6 +1036,9 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                     set(_baseline_expected_image "d4edc0fc90a7121906a969a87e0b0b239523a803b46a76ab60a78ec92c844525")
                     if(_baseline_quiet_trot)
                         set(_baseline_expected_image "3ab2614823ac33e1d6f271aeb0ba6a34f8457efcbf5b75da6d2c4b952f7c7e7e")
+                        if(_baseline_trot_toggle)
+                            set(_baseline_expected_image "4ce140e2df99f283663b65cec09e6463fdac8f7c21e7fed7c57f6c8f7965053c")
+                        endif()
                     endif()
                 endif()
                 string(JSON _baseline_raw_b621_type TYPE "${_baseline_raw_binding}" backpack621)
@@ -1204,6 +1233,7 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
             "${_lifecycle_init}" "${_lifecycle_free}" "${_lifecycle_candidate}")
         target_include_directories(BaselinePlayerLifecycleTest PRIVATE "${_baseline_bridge_dir}" "${RUNTIME_RECOMP_INCLUDE}")
         target_compile_definitions(BaselinePlayerLifecycleTest PRIVATE NOMINMAX "TOOIE_PLAYER_STATE_ADDRESS=${_player_state}"
+            "TOOIE_TROT_SELECTED=$<BOOL:${_baseline_trot_toggle}>"
             "TOOIE_PLAYER_INIT_FRAME_BYTES=${_init_frame}" "TOOIE_PLAYER_FREE_FRAME_BYTES=${_free_frame}")
         set_target_properties(BaselinePlayerLifecycleTest PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
         string(JSON _player_begin_frame GET "${_baseline_bridge_receipt}" player_frames tooie_player_begin)
@@ -1291,6 +1321,33 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
             RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
         add_test(NAME baseline_graphics_rate COMMAND BaselineGraphicsRateTest)
     endif()
+    if(_baseline_trot_toggle)
+        set(_baseline_trot_fixture_dir "${_baseline_bridge_dir}/talon-trot-toggle-fixture")
+        set(_baseline_trot_fixtures
+            "${_baseline_trot_fixture_dir}/candidate_fixture.inc"
+            "${_baseline_trot_fixture_dir}/candidate_guard_mutant.inc"
+            "${_baseline_trot_fixture_dir}/original_fixture.inc"
+            "${_baseline_trot_fixture_dir}/fixture_functions.h"
+            "${_baseline_trot_fixture_dir}/fixture_facts.h")
+        file(GLOB _baseline_trot_originals CONFIGURE_DEPENDS "${CMAKE_BINARY_DIR}/baseline/raw/funcs_*.c")
+        add_custom_command(OUTPUT ${_baseline_trot_fixtures}
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/prepare_trot_toggle_fixture.py"
+                --candidate "${_baseline_bridge_dir}/boot.c" --elf "${_baseline_bridge_dir}/boot.elf"
+                --originals "${CMAKE_BINARY_DIR}/baseline/raw" --output "${_baseline_trot_fixture_dir}"
+            DEPENDS tests/prepare_trot_toggle_fixture.py tests/extract_heap_realloc.py "${_baseline_bridge_dir}/boot.c"
+                "${_baseline_bridge_dir}/boot.elf" ${_baseline_trot_originals} VERBATIM)
+        foreach(_trot_target IN ITEMS BaselineTrotToggleTest BaselineTrotToggleNegativeTest)
+            add_executable(${_trot_target} EXCLUDE_FROM_ALL tests/baseline_trot_toggle_test.cpp ${_baseline_trot_fixtures})
+            target_include_directories(${_trot_target} PRIVATE "${_baseline_trot_fixture_dir}" "${RUNTIME_RECOMP_INCLUDE}")
+            target_compile_definitions(${_trot_target} PRIVATE NOMINMAX)
+            target_compile_features(${_trot_target} PRIVATE cxx_std_20)
+            set_target_properties(${_trot_target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
+        endforeach()
+        target_compile_definitions(BaselineTrotToggleNegativeTest PRIVATE FB04_NEGATIVE_GUARD)
+        add_test(NAME baseline_trot_toggle COMMAND BaselineTrotToggleTest)
+        add_test(NAME baseline_trot_toggle_negative_guard COMMAND BaselineTrotToggleNegativeTest)
+        set_tests_properties(baseline_trot_toggle_negative_guard PROPERTIES WILL_FAIL TRUE)
+    endif()
     # Quiet leaf candidate comes from the selected image; originals remain in baseline/raw.
     if(_baseline_quiet_trot)
         set(_baseline_quiet_fixture_dir "${_baseline_bridge_dir}/quiet-talon-trot-fixture")
@@ -1340,7 +1397,8 @@ target_include_directories(TooieBaseline PRIVATE
     "${_baseline_rt64}/src/contrib/mupen64plus-core/src/api"
     "${_baseline_rt64}/src/contrib/imgui" "${_baseline_rt64}/src/contrib/dxc/inc")
 target_compile_definitions(TooieBaseline PRIVATE SDL_MAIN_HANDLED HLSL_CPU NOMINMAX __PRFCHWINTRIN_H)
-target_compile_definitions(TooieBaseline PRIVATE "BASELINE_QUIET_TROT=$<BOOL:${_baseline_quiet_trot}>")
+target_compile_definitions(TooieBaseline PRIVATE "BASELINE_QUIET_TROT=$<BOOL:${_baseline_quiet_trot}>"
+    "BASELINE_TROT_TOGGLE=$<BOOL:${_baseline_trot_toggle}>")
 target_link_libraries(TooieBaseline PRIVATE BaselineRecompiledFuncs librecomp ultramodern rt64
     Threads::Threads "${SDL2_LIBRARIES}" bcrypt winmm)
 # Qualification is a manual reviewed step; build targets never create/refresh it.
@@ -1380,13 +1438,14 @@ if(TOOIE_BASELINE_PLAYER)
     set_tests_properties(baseline_player_startup PROPERTIES TIMEOUT 30)
     add_executable(baseline_input_host_test EXCLUDE_FROM_ALL
         tests/baseline_input_host_test.cpp tools/baseline/minimum_host.cpp
-        src/frontend_input_preference.cpp src/frontend_config.cpp)
+        src/frontend_input_preference.cpp src/frontend_config.cpp src/widescreen.cpp)
     target_compile_definitions(baseline_input_host_test PRIVATE BASELINE_PLAYER=1 SDL_MAIN_HANDLED NOMINMAX)
     target_compile_options(baseline_input_host_test PRIVATE -UNDEBUG)
     target_compile_options(baseline_input_host_test PRIVATE "/FI${CMAKE_SOURCE_DIR}/tests/baseline_input_focus.h")
     target_include_directories(baseline_input_host_test PRIVATE
         "${CMAKE_SOURCE_DIR}/tools/baseline" "${CMAKE_SOURCE_DIR}/src"
-        "${_baseline_rt64}/src/contrib" "${_player_generated}" "${SDL2_INCLUDE_DIRS}")
+        "${_baseline_rt64}/src/contrib" "${_player_generated}" "${SDL2_INCLUDE_DIRS}"
+        "${RUNTIME_RECOMP_INCLUDE}")
     target_link_libraries(baseline_input_host_test PRIVATE
         "${SDL2_LIBRARIES}" user32 shell32 ole32 comdlg32 bcrypt winmm)
     set_target_properties(baseline_input_host_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")

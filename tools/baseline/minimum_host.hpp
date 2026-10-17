@@ -11,16 +11,18 @@
 #include <vector>
 
 namespace baseline::host {
-// Aspect is latched before the guest starts. Other player preferences apply
+// Widescreen and cutscene policy are latched before the guest starts. Other preferences apply
 // at their owner's next safe boundary and persist for the next process.
+inline constexpr int fit_aspect = 4;
 struct Preferences {
     int resolution = 1, output_rate = 0, manual_hz = 60;
     int wide = -1, native_aspect = 0, cutscene_aspect = 0;
     int vsync = -1; // Missing preserves the backend's current value.
     int fullscreen = 0;
     int quiet_talon_trot = 0;
+    int talon_trot_toggle = 0;
 };
-enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot };
+enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle };
 struct OutputRate { int option = 0, manual_hz = 60; };
 inline uint32_t pack_output_rate(OutputRate rate) noexcept {
     return (uint32_t(rate.option) << 16) | uint32_t(rate.manual_hz);
@@ -81,6 +83,7 @@ RenderInput take_render_input();
 int requested_vsync() noexcept;
 int requested_resolution() noexcept; // Graphics owner; range 1..8.
 bool requested_quiet_talon_trot() noexcept; // Guest sound-call boundary.
+bool requested_talon_trot_toggle() noexcept; // Guest input/state boundary.
 // Graphics owner only: consume the SDL owner's atomic requested pair.
 OutputRate requested_output_rate() noexcept;
 }

@@ -43,6 +43,14 @@ TOOIE_RECOMP_PATCH f32 func_80015D14(const TooieAspectInputs* input) {
         return original;
     }
 
+#if defined(TOOIE_BASELINE_HOST) && TOOIE_BASELINE_HOST
+    if (settings & TOOIE_WIDESCREEN_SETTINGS_FIT) {
+        union { u32 bits; f32 value; } fit;
+        fit.bits = settings & TOOIE_WIDESCREEN_SETTINGS_FIT_SCALE_MASK;
+        return (f32)((f64)original * (f64)fit.value);
+    }
+#endif
+
     /* Exact binary64 values of the accepted host expression
        (double(n) / d) / (16.0 / 9.0); 21:9 must not become 21/16. */
     aspect = (settings >> TOOIE_WIDESCREEN_SETTINGS_ASPECT_SHIFT) &

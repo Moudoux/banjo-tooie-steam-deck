@@ -17,6 +17,12 @@ const char* status(render::Status value) {
     }
 }
 void controls(const Snapshot& snapshot) {
+#if BASELINE_PLAYER && BASELINE_TROT_TOGGLE
+    bool toggle = snapshot.preferences.talon_trot_toggle != 0;
+    if (ImGui::Checkbox("Talon Trot: press Z again to stop", &toggle))
+        preference(Preference::TalonTrotToggle, int(toggle));
+    ImGui::TextWrapped("Turning off restores hold-Z now. Turning on applies when you next enter Talon Trot.");
+#endif
     const char* selected="Automatic";
     for(const auto& pad:snapshot.controllers)if(pad.selected)selected=pad.friendly_name.empty()?pad.name.c_str():pad.friendly_name.c_str();
     if(ImGui::BeginCombo("Controller",selected)) {
@@ -77,7 +83,7 @@ void controls(const Snapshot& snapshot) {
 void video(const Snapshot& snapshot) {
     const auto& prefs=snapshot.preferences;
 #if BASELINE_PLAYER
-    ImGui::TextWrapped("Resolution, output rate, VSync and fullscreen apply now; aspect takes effect next launch.");
+    ImGui::TextWrapped("Resolution, output rate, gameplay aspect, VSync and fullscreen apply now; Widescreen and Cutscene aspect take effect next launch.");
     bool fullscreen=prefs.fullscreen!=0;
     if(ImGui::Checkbox("Fullscreen",&fullscreen))preference(Preference::Fullscreen,int(fullscreen));
 #else
@@ -93,7 +99,8 @@ void video(const Snapshot& snapshot) {
     int wide=prefs.wide+1;
     if(ImGui::Combo("Widescreen",&wide,"Use game setting\0Off\0On\0"))preference(Preference::Wide,wide-1);
     int aspect=prefs.native_aspect;
-    if(ImGui::Combo("Gameplay aspect",&aspect,"16:9\0 21:9\0 32:9\0 43:18\0"))preference(Preference::NativeAspect,aspect);
+    if(ImGui::Combo("Gameplay aspect",&aspect,"16:9\0" "21:9\0" "32:9\0" "43:18\0" "Fit window (16:9\xe2\x80\x93" "32:9)\0"))preference(Preference::NativeAspect,aspect);
+    ImGui::TextDisabled("Gameplay aspect is used when Widescreen was On at game start.");
     int cutscene=prefs.cutscene_aspect;
     if(ImGui::Combo("Cutscene aspect",&cutscene,"Original (4:3)\0Match gameplay\0"))preference(Preference::CutsceneAspect,cutscene);
     bool sync=prefs.vsync<0?render::effective_vsync():prefs.vsync!=0;

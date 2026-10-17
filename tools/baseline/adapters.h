@@ -88,6 +88,14 @@ void tooie_core1_osInitialize(uint8_t*, recomp_context*);
 void heap_realloc(uint8_t*, recomp_context*);
 void func_80800380_chhoneycarrier(uint8_t*, recomp_context*);
 void func_808000DC_bsbtrot(uint8_t*, recomp_context*);
+#if BASELINE_TROT_TOGGLE
+void bs_setState(uint8_t*, recomp_context*);
+void bainput_update(uint8_t*, recomp_context*);
+void func_80800710_bsbtrot(uint8_t*, recomp_context*);
+void func_800F86D8(uint8_t*, recomp_context*);
+void tooie_trot_toggle_retire(uint8_t*, recomp_context*);
+void tooie_trot_toggle_move(uint8_t*, recomp_context*);
+#endif
 void boot___osPiRawStartDma(uint8_t*, recomp_context*);
 void boot_osPiGetStatus(uint8_t*, recomp_context*);
 void baseline_observe_and_publish_core1(uint8_t*, recomp_context*);

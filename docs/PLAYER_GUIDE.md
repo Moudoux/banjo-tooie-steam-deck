@@ -1,7 +1,7 @@
 # Banjo-Tooie: Scurvy Dog Port player guide
 
-For the Windows x64 alpha. Scurvy Dog Port is unofficial and the game is not
-included.
+For the local, unreleased Windows x64 Alpha 4.4-dev candidate. Scurvy Dog Port
+is unofficial and the game is not included.
 
 ## Install and first launch
 
@@ -88,15 +88,25 @@ settings**. **Resume** returns to the game and **Quit** exits.
   **Reset bindings** restores the defaults.
 - Controller bindings can be changed only while a controller is selected;
   otherwise the menu says **Connect or select a controller to change its bindings.**
+- The selected controller can control gameplay while another window has focus.
+  Keyboard input, settings-menu navigation and binding capture require focus
+  on the game window.
+- **Talon Trot: press Z again to stop** is off by default. When enabled, enter
+  Talon Trot, release Z, then press Z again to stop. Enabling it during Talon
+  Trot applies on the next fresh entry; disabling restores hold-Z behavior at
+  the next game input/state check. No restart is needed.
 
 **Video**
 
 - **Fullscreen** checkbox (borderless desktop), **Resolution scale** (1x–8x),
   **Output rate** (Default (Original), Original, Display or Manual, 20–360 Hz),
   **Widescreen**, **Gameplay aspect**, **Cutscene aspect** and **VSync**.
-- Resolution, output rate, VSync and fullscreen apply during play. Aspect
-  changes take effect the next time you start the game. If fullscreen cannot
-  change, the menu shows an error and keeps the actual window state.
+- Resolution, output rate, gameplay aspect, VSync and fullscreen apply during
+  play. **Gameplay aspect** offers fixed ratios and **Fit window (16:9–32:9)**,
+  which follows the drawable window size as it resizes within that range.
+  Gameplay aspect is used with Widescreen On. **Widescreen** and **Cutscene
+  aspect** changes take effect the next time you start the game. If fullscreen
+  cannot change, the menu shows an error and keeps the actual window state.
 - Default (Original) uses the game's original output rate. This label replaces
   Current; it does not change an existing output-rate choice.
 
@@ -129,10 +139,9 @@ settings**. **Resume** returns to the game and **Quit** exits.
 ## Known issues
 
 - Mayahem Temple can render black in the distance.
-- Widescreen can render incorrect geometry at the edges; aspect sizing is manual.
+- Widescreen can render incorrect geometry at the edges.
 - Mumbo title-demo shadows can distort at Display or Manual output.
 - The save-select arm animation remains low-rate.
-- Controller input stops when the game window loses focus.
 - F6 fast-forward is not available in this player.
 - The full game has not been verified start to finish.
 

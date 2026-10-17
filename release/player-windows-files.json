@@ -1,16 +1,16 @@
 {
   "schema": 1,
   "product": "Banjo-Tooie: Scurvy Dog Port",
-  "version": "0.1.0-alpha.4.3",
-  "tag": "v0.1.0-alpha.4.3",
-  "archive": "BanjoTooieScurvyDogPort-Alpha4.3-Windows-x64.zip",
+  "version": "0.1.0-alpha.4.4-dev",
+  "tag": "v0.1.0-alpha.4.4-dev",
+  "archive": "BanjoTooieScurvyDogPort-Alpha4.4-dev-Windows-x64.zip",
   "executable": "BanjoTooieScurvyDogPort.exe",
   "reviewRule": "Package exactly these paths plus package-manifest.json. Build rows come from the gated build directory; source rows must be tracked files of the clean release commit. Keep every existing third-party notice; never prune attribution.",
   "guest": {
-    "sha256": "3ab2614823ac33e1d6f271aeb0ba6a34f8457efcbf5b75da6d2c4b952f7c7e7e",
-    "bytes": 297712
+    "sha256": "4ce140e2df99f283663b65cec09e6463fdac8f7c21e7fed7c57f6c8f7965053c",
+    "bytes": 299328
   },
-  "rawFunctionCount": 417,
+  "rawFunctionCount": 416,
   "build": {
     "target": "TooieBaseline",
     "executable": "baseline/player-bin/BanjoTooieScurvyDogPort.exe",
@@ -72,49 +72,189 @@
     }
   },
   "files": [
-    {"path": "BanjoTooieScurvyDogPort.exe", "from": "build", "source": "baseline/player-bin/BanjoTooieScurvyDogPort.exe"},
-    {"path": "SDL2.dll", "from": "build", "source": "baseline/player-bin/SDL2.dll", "sameAsDependency": "rt64/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3/lib/x64/SDL2.dll"},
-    {"path": "dxcompiler.dll", "from": "build", "source": "baseline/player-bin/dxcompiler.dll", "sameAsDependency": "rt64/src/contrib/dxc/bin/x64/dxcompiler.dll"},
-    {"path": "dxil.dll", "from": "build", "source": "baseline/player-bin/dxil.dll", "sameAsDependency": "rt64/src/contrib/dxc/bin/x64/dxil.dll"},
-    {"path": "README.txt", "from": "source", "source": "release/README.txt"},
-    {"path": "LICENSE", "from": "source"},
-    {"path": "THIRD_PARTY_NOTICES.md", "from": "source"},
-    {"path": "third_party/notices/concurrentqueue-BSD-header-notice.txt", "from": "source"},
-    {"path": "third_party/notices/concurrentqueue-Preshing-zlib-header-notice.txt", "from": "source"},
-    {"path": "third_party/notices/DXC-v1.8.2502-LICENSE-LLVM.txt", "from": "source"},
-    {"path": "third_party/notices/DXC-v1.8.2502-ReleaseNotes.md", "from": "source"},
-    {"path": "third_party/notices/fmt-MIT.txt", "from": "source"},
-    {"path": "third_party/notices/FONT_COPYRIGHTS.txt", "from": "source"},
-    {"path": "third_party/notices/miniz.txt", "from": "source"},
-    {"path": "third_party/notices/N64ModernRuntime-GPL-3.0.txt", "from": "source"},
-    {"path": "third_party/notices/N64Recomp-MIT.txt", "from": "source"},
-    {"path": "third_party/notices/nlohmann-json-v3.12.0-MIT.txt", "from": "source"},
-    {"path": "third_party/notices/nlohmann-json-v3.9.1-MIT.txt", "from": "source"},
-    {"path": "third_party/notices/o1heap-MIT.txt", "from": "source"},
-    {"path": "third_party/notices/rabbitizer-MIT.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-ddspp-MIT.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-hlslpp.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-im3d.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-imgui.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-implot.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-MIT.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-nfd-zlib.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-plume-D3D12MA.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-plume-MIT.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-plume-VMA.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-plume-volk.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-plume-Vulkan-Headers.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-re-spirv-MIT.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-spirv-cross-Apache-2.0.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-spirv-headers.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-stb.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-utf8conv-MIT.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-xxHash-BSD.txt", "from": "source"},
-    {"path": "third_party/notices/RT64-zstd-BSD.txt", "from": "source"},
-    {"path": "third_party/notices/SDL-GameControllerDB.txt", "from": "source"},
-    {"path": "third_party/notices/SDL2-zlib.txt", "from": "source"},
-    {"path": "third_party/notices/SIL-OFL-1.1.txt", "from": "source"},
-    {"path": "third_party/notices/sljit-BSD.txt", "from": "source"},
-    {"path": "third_party/notices/X-Scale-CIC-BSD.txt", "from": "source"}
+    {
+      "path": "BanjoTooieScurvyDogPort.exe",
+      "from": "build",
+      "source": "baseline/player-bin/BanjoTooieScurvyDogPort.exe"
+    },
+    {
+      "path": "SDL2.dll",
+      "from": "build",
+      "source": "baseline/player-bin/SDL2.dll",
+      "sameAsDependency": "rt64/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3/lib/x64/SDL2.dll"
+    },
+    {
+      "path": "dxcompiler.dll",
+      "from": "build",
+      "source": "baseline/player-bin/dxcompiler.dll",
+      "sameAsDependency": "rt64/src/contrib/dxc/bin/x64/dxcompiler.dll"
+    },
+    {
+      "path": "dxil.dll",
+      "from": "build",
+      "source": "baseline/player-bin/dxil.dll",
+      "sameAsDependency": "rt64/src/contrib/dxc/bin/x64/dxil.dll"
+    },
+    {
+      "path": "README.txt",
+      "from": "source",
+      "source": "release/README.txt"
+    },
+    {
+      "path": "LICENSE",
+      "from": "source"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/concurrentqueue-BSD-header-notice.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/concurrentqueue-Preshing-zlib-header-notice.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/DXC-v1.8.2502-LICENSE-LLVM.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/DXC-v1.8.2502-ReleaseNotes.md",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/fmt-MIT.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/FONT_COPYRIGHTS.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/miniz.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/N64ModernRuntime-GPL-3.0.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/N64Recomp-MIT.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/nlohmann-json-v3.12.0-MIT.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/nlohmann-json-v3.9.1-MIT.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/o1heap-MIT.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/rabbitizer-MIT.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-ddspp-MIT.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-hlslpp.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-im3d.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-imgui.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-implot.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-MIT.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-nfd-zlib.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-plume-D3D12MA.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-plume-MIT.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-plume-VMA.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-plume-volk.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-plume-Vulkan-Headers.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-re-spirv-MIT.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-spirv-cross-Apache-2.0.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-spirv-headers.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-stb.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-utf8conv-MIT.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-xxHash-BSD.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/RT64-zstd-BSD.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/SDL-GameControllerDB.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/SDL2-zlib.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/SIL-OFL-1.1.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/sljit-BSD.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/X-Scale-CIC-BSD.txt",
+      "from": "source"
+    }
   ]
 }
