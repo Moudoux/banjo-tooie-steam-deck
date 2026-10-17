@@ -57,3 +57,20 @@ observation before assigning its cause.
 The CPU-only regression exercises the real projection processor with observed
 numeric matrices, including aspect changes and the unaffected paths. This proves
 matrix/depth preservation, not visual acceptance of the Jinjo Village artifact.
+
+## Player projection residual preservation
+
+`projection_residual.delta.json` revision 1 selects only operations 4 and 5 of
+`projection_preservation.delta.json` revision 5 for the baseline player renderer.
+It retains the same immutable RT64 pin and MIT-licensed input, with no auxiliary
+camera fallback or IGNORE-group matching policy. Its 210-line output is SHA256
+`c268ed716403eed67a24d5d6d0c5c28227ad78df938658cd679a07a224fda988`.
+
+The unmapped path preserves the source combined matrix, scaling only its X
+column for aspect adjustment. The mapped path preserves the decomposition
+residual at processed endpoints within floating-point rounding while retaining
+RT64's interpolation flags and weights. Intermediate residuals use the existing
+product recipe's linear correction; this is not a visual acceptance claim.
+The CPU matrix regression can prove source-matrix and clip-depth preservation,
+not that Greg's Jinjo Village scene or other reported artifacts are resolved.
+The full product recipe remains unchanged.

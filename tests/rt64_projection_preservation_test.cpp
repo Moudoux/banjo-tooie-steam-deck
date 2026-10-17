@@ -1,11 +1,13 @@
 #include "common/rt64_math.h"
 #include "hle/rt64_workload_queue.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
+#include <string_view>
 
 namespace {
 
@@ -105,7 +107,12 @@ void check_case(const hlslpp::float4x4 &source, uint8_t aspect_mode,
 
 }
 
-void check_existing_modified_path(bool debugger_camera) {
+enum class MappedCase { NonInterpolated, InterpolatedEndpoints, StationaryInterior, MovingInterior };
+
+void check_existing_modified_path(bool debugger_camera, MappedCase mode = MappedCase::NonInterpolated) {
+    const bool interpolated = mode != MappedCase::NonInterpolated;
+    const bool stationary = mode == MappedCase::StationaryInterior;
+    const bool moving = mode == MappedCase::MovingInterior;
     RT64::WorkloadQueue queue;
     RT64::Workload &workload = queue.workloads[0];
     workload.debuggerCamera.enabled = debugger_camera;
@@ -146,16 +153,30 @@ void check_existing_modified_path(bool debugger_camera) {
         previous_draw.viewTransforms.resize(2);
         previous_draw.projTransforms.resize(2);
         previous_draw.viewProjTransforms.resize(2);
-        previous_draw.viewTransforms[1] = view;
-        previous_draw.projTransforms[1] = projection_matrix;
-        previous_draw.viewProjTransforms[1] = bad_view_projection;
+        hlslpp::float4x4 previous_view = view, previous_projection = projection_matrix;
+        const auto &previous_source = stationary ? bad_view_projection : good_view_projection;
+        if (interpolated)
+            RT64::matrixDecomposeViewProj(previous_source, previous_view, previous_projection);
+        previous_draw.viewTransforms[1] = previous_view;
+        previous_draw.projTransforms[1] = previous_projection;
+        previous_draw.viewProjTransforms[1] = interpolated ? previous_source : bad_view_projection;
         auto &mapping = frame.frameMap.workloads[0];
         mapping.mapped = true;
         mapping.prevWorkloadIndex = 1;
         mapping.viewProjections.resize(2);
         mapping.viewProjections[1].mapped = true;
         mapping.viewProjections[1].prevTransformIndex = 1;
-        mapping.viewProjections[1].rigidBody.lerpDecompose = false;
+        auto &rigid_body = mapping.viewProjections[1].rigidBody;
+        rigid_body.lerpDecompose = false;
+        if (interpolated) {
+            // updateDecomposition(..., true) enables lerpDecompose and fills both slots.
+            rigid_body.updateDecomposition(previous_view, true);
+            rigid_body.updateDecomposition(view, true);
+            if (!rigid_body.transforms[0].valid || !rigid_body.transforms[1].valid)
+                throw std::runtime_error("mapped interpolation decomposition invalid");
+            rigid_body.lerpTranslation = rigid_body.lerpRotation = true;
+            rigid_body.lerpScale = rigid_body.lerpSkew = true;
+        }
     }
 
     RT64::ProjectionProcessor processor;
@@ -163,21 +184,63 @@ void check_existing_modified_path(bool debugger_camera) {
     params.workloadQueue = &queue;
     params.curFrame = &frame;
     params.prevFrame = debugger_camera ? nullptr : &previous_frame;
+    if (interpolated) {
+        params.curFrameWeight = stationary || moving ? 0.5f : 1.0f;
+        params.prevFrameWeight = stationary || moving ? 0.25f : 0.0f;
+    }
     processor.process(params);
     const hlslpp::float4x4 expected = debugger_camera
         ? hlslpp::float4x4::identity() : bad_view_projection;
+    const hlslpp::float4x4 expected_previous = interpolated && !stationary ? good_view_projection : expected;
+    const float tolerance = interpolated ? 1.0e-4f : 1.0e-5f;
     const auto &modified = draw.modViewProjTransforms[1];
     const auto &previous = draw.prevViewProjTransforms[1];
+    float max_from_current = 0.0f, max_from_previous = 0.0f;
     for (int row = 0; row < 4; ++row) {
         for (int col = 0; col < 4; ++col) {
-            if (std::abs(modified[row][col] - expected[row][col]) > 1.0e-5f ||
-                std::abs(previous[row][col] - expected[row][col]) > 1.0e-5f) {
-                throw std::runtime_error("debugger or matched projection endpoint changed");
+            if (!std::isfinite(modified[row][col]) || !std::isfinite(previous[row][col]))
+                throw std::runtime_error("nonfinite mapped projection output");
+            if (!moving && (std::abs(modified[row][col] - expected[row][col]) > tolerance ||
+                std::abs(previous[row][col] - expected_previous[row][col]) > tolerance)) {
+                std::fprintf(stderr, "endpoint [%d][%d]: current %.9g expected %.9g, previous %.9g expected %.9g\n",
+                    row, col, modified[row][col], expected[row][col], previous[row][col], expected_previous[row][col]);
+                throw std::runtime_error(interpolated ? "interpolated source projection endpoint changed"
+                    : "debugger or matched projection endpoint changed");
             }
+            if (moving) {
+                max_from_current = std::max(max_from_current, std::abs(modified[row][col] - bad_view_projection[row][col]));
+                max_from_previous = std::max(max_from_previous, std::abs(modified[row][col] - good_view_projection[row][col]));
+            }
+        }
+    }
+    if (moving) {
+        // A freeze at either source must fail; no moving-camera residual formula is an oracle.
+        std::fprintf(stderr, "moving matrix distances: current %.9g, previous %.9g\n",
+            max_from_current, max_from_previous);
+        if (max_from_current <= 1.0f || max_from_previous <= 1.0f)
+            throw std::runtime_error("moving projection froze at a source matrix");
+        return;
+    }
+    if (interpolated) {
+        const std::array<float, 3> sky_vertex = { 5297.0f, 4844.0f, 8374.0f };
+        // The source is about -2.46 inside; bad recomposition is about +0.28 outside.
+        const float source_margin = clip_z_minus_w(bad_view_projection, sky_vertex);
+        const float rendered_margin = clip_z_minus_w(modified, sky_vertex);
+        std::fprintf(stderr, "interpolated clip z-W: source %.9g, rendered %.9g\n",
+            source_margin, rendered_margin);
+        if (!std::isfinite(source_margin) || !std::isfinite(rendered_margin) ||
+            source_margin >= -2.0f || rendered_margin >= -2.0f)
+            throw std::runtime_error("interpolated sky vertex crossed the far clip plane");
+        if (stationary) {
+            const float previous_margin = clip_z_minus_w(previous, sky_vertex);
+            std::fprintf(stderr, "stationary previous clip z-W: %.9g\n", previous_margin);
+            if (!std::isfinite(previous_margin) || previous_margin >= -2.0f)
+                throw std::runtime_error("stationary previous sky vertex crossed the far clip plane");
         }
     }
 }
 
+#ifndef TOOIE_RT64_PROJECTION_RESIDUAL_ONLY
 void check_auxiliary_camera_fallback(float weight, bool ignore, bool mapped,
     bool different_lens, bool original_main, bool changing_lens = false,
     bool different_aspect = false, bool auto_narrow_auxiliary = false) {
@@ -313,33 +376,52 @@ void check_auxiliary_camera_fallback(float weight, bool ignore, bool mapped,
         }
     }
 }
+#endif
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
 #ifdef _WIN32
     _set_error_mode(_OUT_TO_STDERR);
 #endif
     try {
-        check_case(bad_view_projection, G_EX_ASPECT_STRETCH, 1.0f, true);
-        check_case(bad_view_projection, G_EX_ASPECT_STRETCH, 4.0f / 3.0f, true);
-        check_case(bad_view_projection, G_EX_ASPECT_ADJUST, 4.0f / 3.0f, true);
-        check_case(good_view_projection, G_EX_ASPECT_STRETCH, 1.0f, false);
-        check_case(good_view_projection, G_EX_ASPECT_STRETCH, 4.0f / 3.0f, false);
-        check_case(good_view_projection, G_EX_ASPECT_ADJUST, 4.0f / 3.0f, false);
-        check_existing_modified_path(true);
-        check_existing_modified_path(false);
-        for (float weight : {0.0f, 0.5f, 1.0f})
-            check_auxiliary_camera_fallback(weight, false, false, false, false);
-        // A current auxiliary lens matches the current main lens even while
-        // the mapped main projection interpolates from the previous lens.
-        check_auxiliary_camera_fallback(0.25f, false, false, false, false, true);
-        check_auxiliary_camera_fallback(0.5f, true, false, false, false);
-        check_auxiliary_camera_fallback(0.5f, false, false, true, false);
-        check_auxiliary_camera_fallback(0.5f, false, false, false, true);
-        check_auxiliary_camera_fallback(0.5f, false, true, false, false);
-        check_auxiliary_camera_fallback(0.5f, false, false, false, false, false, true);
-        check_auxiliary_camera_fallback(0.5f, false, false, false, false, false, false, true);
+        const std::string_view family = argc == 2 ? argv[1] : "all";
+        if (argc > 2 || (family != "all" && family != "unmapped" && family != "mapped" &&
+            family != "interpolated" && family != "stationary" && family != "moving"))
+            throw std::runtime_error("usage: projection test [unmapped|mapped|interpolated|stationary|moving]");
+        if (family == "all" || family == "unmapped") {
+            check_case(bad_view_projection, G_EX_ASPECT_STRETCH, 1.0f, true);
+            check_case(bad_view_projection, G_EX_ASPECT_STRETCH, 4.0f / 3.0f, true);
+            check_case(bad_view_projection, G_EX_ASPECT_ADJUST, 4.0f / 3.0f, true);
+            check_case(good_view_projection, G_EX_ASPECT_STRETCH, 1.0f, false);
+            check_case(good_view_projection, G_EX_ASPECT_STRETCH, 4.0f / 3.0f, false);
+            check_case(good_view_projection, G_EX_ASPECT_ADJUST, 4.0f / 3.0f, false);
+        }
+        if (family == "all" || family == "mapped") {
+            check_existing_modified_path(true);
+            check_existing_modified_path(false);
+        }
+        if (family == "all" || family == "interpolated")
+            check_existing_modified_path(false, MappedCase::InterpolatedEndpoints);
+        if (family == "all" || family == "stationary")
+            check_existing_modified_path(false, MappedCase::StationaryInterior);
+        if (family == "all" || family == "moving")
+            check_existing_modified_path(false, MappedCase::MovingInterior);
+#ifndef TOOIE_RT64_PROJECTION_RESIDUAL_ONLY
+        if (family == "all") {
+            for (float weight : {0.0f, 0.5f, 1.0f})
+                check_auxiliary_camera_fallback(weight, false, false, false, false);
+            // A current auxiliary lens matches the current main lens even while
+            // the mapped main projection interpolates from the previous lens.
+            check_auxiliary_camera_fallback(0.25f, false, false, false, false, true);
+            check_auxiliary_camera_fallback(0.5f, true, false, false, false);
+            check_auxiliary_camera_fallback(0.5f, false, false, true, false);
+            check_auxiliary_camera_fallback(0.5f, false, false, false, true);
+            check_auxiliary_camera_fallback(0.5f, false, true, false, false);
+            check_auxiliary_camera_fallback(0.5f, false, false, false, false, false, true);
+            check_auxiliary_camera_fallback(0.5f, false, false, false, false, false, false, true);
+        }
+#endif
         return 0;
     }
     catch (const std::exception &error) {

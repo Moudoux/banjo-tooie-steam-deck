@@ -96,13 +96,13 @@ set(RT64_SDL_WINDOW_VULKAN OFF CACHE BOOL "Stock Windows backend" FORCE)
 add_subdirectory("${_baseline_rt64}" "${CMAKE_BINARY_DIR}/rt64")
 
 # Only source-demonstrated generic repairs; never select the product matcher bundle.
-option(TOOIE_BASELINE_RT64_GENERIC_FIXES "Select pinned ownership/upload/SLERP repairs" OFF)
+option(TOOIE_BASELINE_RT64_GENERIC_FIXES "Select pinned generic RT64 repairs" OFF)
 if(TOOIE_BASELINE_RT64_GENERIC_FIXES)
     target_include_directories(rt64 PRIVATE "${_baseline_rt64}/src/hle"
         "${_baseline_rt64}/src/render" "${_baseline_rt64}/src/common" "${_baseline_rt64}/src/gbi")
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(_baseline_generic_tool "${CMAKE_SOURCE_DIR}/tools/prepare_rt64_matching.py")
-    foreach(_repair IN ITEMS owner_index_guard transform_upload_guard rotation_interpolation pop_matrix_group_projection)
+    foreach(_repair IN ITEMS owner_index_guard transform_upload_guard rotation_interpolation pop_matrix_group_projection projection_residual)
         set(_recipe "${CMAKE_SOURCE_DIR}/patches/rt64/${_repair}.delta.json")
         if(_repair STREQUAL "owner_index_guard")
             set(_relative "src/hle/rt64_game_frame.cpp")
@@ -110,6 +110,8 @@ if(TOOIE_BASELINE_RT64_GENERIC_FIXES)
             set(_relative "src/render/rt64_transform_processor.cpp")
         elseif(_repair STREQUAL "pop_matrix_group_projection")
             set(_relative "src/gbi/rt64_gbi_extended.cpp")
+        elseif(_repair STREQUAL "projection_residual")
+            set(_relative "src/render/rt64_projection_processor.cpp")
         else()
             set(_relative "src/common/rt64_math.cpp")
         endif()
@@ -1443,6 +1445,23 @@ if(TOOIE_BASELINE_RT64_GENERIC_FIXES)
     add_test(NAME baseline_rt64_projection_match COMMAND baseline_rt64_projection_match_test)
     add_test(NAME baseline_rt64_projection_match_map COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_SOURCE_DIR}/tools/baseline/verify_rt64_generic_map.py" --map "${_baseline_projection_map}")
+
+    # Preserve the combined projection supplied by the guest at frame endpoints.
+    add_executable(baseline_rt64_projection_preservation_test tests/rt64_projection_preservation_test.cpp)
+    target_link_libraries(baseline_rt64_projection_preservation_test PRIVATE rt64)
+    target_link_directories(baseline_rt64_projection_preservation_test PRIVATE "${_baseline_sdl}/lib/x64")
+    target_compile_definitions(baseline_rt64_projection_preservation_test PRIVATE
+        TOOIE_V10_ARM=0 HLSL_CPU TOOIE_RT64_PROJECTION_RESIDUAL_ONLY=1)
+    target_compile_options(baseline_rt64_projection_preservation_test PRIVATE -UNDEBUG)
+    target_include_directories(baseline_rt64_projection_preservation_test PRIVATE src
+        "${_baseline_rt64}/src" "${_baseline_rt64}/src/contrib"
+        "${_baseline_rt64}/src/contrib/hlslpp/include" "${_baseline_rt64}/src/contrib/plume")
+    add_test(NAME baseline_rt64_projection_preservation COMMAND baseline_rt64_projection_preservation_test)
+    add_custom_command(TARGET baseline_rt64_projection_preservation_test POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_baseline_sdl}/lib/x64/SDL2.dll" "$<TARGET_FILE_DIR:baseline_rt64_projection_preservation_test>"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_baseline_rt64}/src/contrib/dxc/bin/x64/dxcompiler.dll" "$<TARGET_FILE_DIR:baseline_rt64_projection_preservation_test>"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_baseline_rt64}/src/contrib/dxc/bin/x64/dxil.dll" "$<TARGET_FILE_DIR:baseline_rt64_projection_preservation_test>"
+        VERBATIM)
 endif()
 if(TOOIE_BASELINE_LIFECYCLE_FIXTURE)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)

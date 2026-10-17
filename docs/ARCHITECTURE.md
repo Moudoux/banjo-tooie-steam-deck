@@ -92,7 +92,7 @@ Looking back, much of that code was AI slop. It was produced quickly and in volu
 |---|---|---|
 | Text edits to generated C | Declared N64Recomp configuration (`ignored`, `hook`, `instruction`) plus guest patches | [baseline_raw_condition.toml](../tools/baseline/baseline_raw_condition.toml), `prepare_raw` in [prepare_camera_bridge.py](../tools/baseline/prepare_camera_bridge.py) |
 | Game policy in native code | Selected game and render owners moved to guest C; native exceptions remain below | [tools/baseline/guest](../tools/baseline/guest/) |
-| Private renderer policy | Guest code emits extended GBI commands. Four named generic RT64 recipes remain | [actor_palette.c](../tools/baseline/guest/silo-candidate/actor_palette.c), [Baseline.cmake](../cmake/Baseline.cmake) |
+| Private renderer policy | Guest code emits extended GBI commands. Five named generic RT64 recipes remain | [actor_palette.c](../tools/baseline/guest/silo-candidate/actor_palette.c), [Baseline.cmake](../cmake/Baseline.cmake) |
 | Custom engine start-up | `recomp::register_game`, `recomp::overlays::register_overlays`, `recomp::start` | [main.cpp](../tools/baseline/main.cpp) |
 | Per-rate logic | RT64 `UserConfiguration` refresh-rate settings | [minimum_presentation.cpp](../tools/baseline/minimum_presentation.cpp) |
 | Large custom frontend | A small ImGui menu. It is still custom and Windows-only | [minimum_menu.cpp](../tools/baseline/minimum_menu.cpp) |
@@ -447,7 +447,7 @@ The project maintains these source changes against pinned upstream versions.
 **RT64**
 
 - RT64 is pinned at `6f1c2d99…`.
-- `TOOIE_BASELINE_RT64_GENERIC_FIXES` applies four recipes from `patches/rt64/`: `owner_index_guard`, `transform_upload_guard`, `rotation_interpolation` and `pop_matrix_group_projection`.
+- `TOOIE_BASELINE_RT64_GENERIC_FIXES` applies five recipes from `patches/rt64/`: `owner_index_guard`, `transform_upload_guard`, `rotation_interpolation`, `pop_matrix_group_projection` and `projection_residual`. The last selects only projection-preservation operations 4/5: source combined-matrix preservation and mapped decomposition residuals, without product camera heuristics. CPU matrix/depth qualification does not establish visual acceptance.
 - The minimum host replaces RT64's SDL backend and Inspector sources from `minimum_host_*` recipes.
 
 A new upstream pin requires a fresh check of each recipe.
