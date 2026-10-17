@@ -6,9 +6,9 @@ HELPERS = ['tooie_backpack621_begin','tooie_backpack621_admit',
            'tooie_backpack621_bone_push','tooie_backpack621_bone_pop',
            'tooie_backpack621_leaf_begin','tooie_backpack621_leaf_end',
            'tooie_backpack621_end','tooie_backpack621_retire']
-PRE_IMAGE_SHA256 = "ec6d5739e438a87421ff751253d007ecfe2697ff65e4e9fddee87b799412c93c"  # Accepted exact original621/NPC/HOST/CPU composition.
+PRE_IMAGE_SHA256 = "e34920d5b259d17cfcf67e86b3f4f130462c3c11a5aaddf24afdd982e8977eb8"  # Accepted exact original621/NPC/HOST/CPU composition.
 # Selected composition: shadow_projection.o built with TOOIE_SHADOW_COEFFICIENTS=1 and actor.o with TOOIE_HAND862=1.
-SHADOW_COEFFICIENTS_IMAGE_SHA256 = "c78e92102a8e20e67db4ea5e3faf8eb09c2261f2da120a63470d3ce2846fa6b9"
+SHADOW_COEFFICIENTS_IMAGE_SHA256 = "d4edc0fc90a7121906a969a87e0b0b239523a803b46a76ab60a78ec92c844525"
 INITIAL = bytes.fromhex('3632313100000001') + bytes(604)
 IMPORTS = set('''D_8007BCD0 D_8007BCD8 D_8007BCE8 D_8007BCF0 D_8007BEDA
  D_80127674 D_8012C838 D_8012C948 D_8012C968 D_8012CE58 D_8012CEC4

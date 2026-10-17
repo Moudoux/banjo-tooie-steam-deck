@@ -14,6 +14,8 @@ extern volatile u32 D_8007BCD0[2],D_80127658,D_8012D500,D_8012D558;
 _Static_assert(sizeof(struct TooieCameraState)==1380,"layout2 required");
 __attribute__((section(".tooie_camera_helpers"),noinline)) void tooie_camera_construction_begin(u32 owner_frame,u32 saved_root){
     struct TooieCameraControl* c=&CAM_STATE.control;u32 epoch,index,base;
+    epoch=tooie_render_bridge_state.epoch;   /* frame-construction epoch; same PC/order as former native write */
+    if(epoch!=0xFFFFFFFFu)tooie_render_bridge_state.epoch=epoch+1u;
     if(!owner_frame){CAM_STATE.diagnostics.refusals++;return;}
     if(CAM_STATE.owner_frame){c->latch=1;CAM_STATE.diagnostics.reentry++;return;}
     CAM_STATE.owner_frame=owner_frame;epoch=tooie_render_bridge_state.epoch;

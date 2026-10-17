@@ -380,8 +380,12 @@ extern "C" void baseline_render_construction_begin(uint8_t* rdram, recomp_contex
     if (bridge_word(rdram, 18824)) rejected_body("player boundary tripwire");
 #endif
 #endif
+#if !BASELINE_CAMERA_IDENTITY
+    // Bridge-only conditions have no guest construction leaf; camera compositions
+    // advance the epoch in tooie_camera_construction_begin at the same PC.
     const uint32_t epoch = bridge_word(rdram, 8);
     if (epoch != UINT32_MAX) MEM_W(8, gpr(int32_t(TOOIE_BRIDGE_STATE_VRAM))) = epoch + 1u;
+#endif
 #if BASELINE_RENDER_OBSERVER || BASELINE_SILO_ACQUISITION_OBSERVER
     ++receipt.begin_calls;
     uint32_t reasons = 0, hash = 2166136261u;

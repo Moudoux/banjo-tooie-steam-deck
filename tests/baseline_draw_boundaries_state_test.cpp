@@ -5,6 +5,10 @@
 #include <iostream>
 #include <stdexcept>
 #include <vector>
+#ifdef TOOIE_ACTOR_PALETTE_FIXTURE
+#include "camera_identity_layout.h"
+#include "../tools/baseline/guest/camera-candidate/camera_identity.h"
+#endif
 #ifdef TOOIE_PLAYER_STATE_ADDRESS
 #include "../tools/baseline/guest/silo-candidate/render_bridge.h"
 #include <cstddef>
@@ -74,6 +78,8 @@ void tooie_player_bone_pop(uint8_t*, recomp_context*);
 void tooie_player_end(uint8_t*, recomp_context*);
 void tooie_actor_palette_end(uint8_t*, recomp_context*);
 #ifdef TOOIE_ACTOR_PALETTE_FIXTURE
+void tooie_camera_construction_begin(uint8_t*, recomp_context*);
+void tooie_camera_construction_end(uint8_t*, recomp_context*);
 void tooie_actor_palette_begin(uint8_t*, recomp_context*);
 void func_8008B10C(uint8_t*, recomp_context*);
 void anctrl_setSmoothTransition(uint8_t*, recomp_context*);
@@ -405,6 +411,56 @@ void player_fixture(int which,uint32_t dragon_asset=0,uint32_t dragon_count=0){
 }
 #endif
 #ifdef TOOIE_ACTOR_PALETTE_FIXTURE
+// Real generated camera begin/end bodies; bridge epoch is the only bridge write.
+void camera_epoch_fixtures() {
+    constexpr uint32_t cs=TOOIE_CAMERA_STATE_VRAM;
+    constexpr uint32_t cc=cs+offsetof(TooieCameraState,control);
+    constexpr uint32_t cd=cs+offsetof(TooieCameraState,diagnostics);
+    static_assert(state==TOOIE_BRIDGE_STATE_VRAM,"camera and player share bridge state");
+    for(unsigned which=0;which<8;++which){
+        std::vector<uint8_t> ram(16*1024*1024);auto* rdram=ram.data();
+        for(uint32_t i=0;i<sizeof(TooieRenderBridgeState);++i)put_byte(rdram,state+i,uint8_t(i*37u+11u));
+        const uint32_t initial=which==0?0u:which==2?UINT32_MAX-1u:which==3?UINT32_MAX:41u;
+        const uint32_t next=initial==UINT32_MAX?initial:initial+1u;
+        put(rdram,state+8,initial);put(rdram,cc+offsetof(TooieCameraControl,epoch),77);
+        put(rdram,cd+offsetof(TooieCameraDiagnostics,refusals),11);
+        put(rdram,cd+offsetof(TooieCameraDiagnostics,reentry),13);
+        if(which==4)put(rdram,cs+offsetof(TooieCameraState,owner_frame),stack);
+        if(which==6){put(rdram,cc+offsetof(TooieCameraControl,backup_depth),1);
+            put(rdram,cs+offsetof(TooieCameraState,backup)+offsetof(TooieCameraBackup,valid),1);}
+        MEM_H(0,guest(0x8007BEDA))=0;
+        put(rdram,0x8007BCD0,TOOIE_CAMERA_MAIN_VRAM);put(rdram,player_buffers,TOOIE_CAMERA_MAIN_VRAM);
+        auto invoke=[&](recomp_func_t* fn,uint32_t owner){
+            std::array<uint8_t,sizeof(TooieRenderBridgeState)> before{};
+            for(uint32_t i=0;i<before.size();++i)before[i]=byte(rdram,state+i);
+            auto c=context();c.r4=guest(owner);c.r5=guest(TOOIE_CAMERA_MAIN_VRAM);
+            const auto registers=c;fn(rdram,&c);saved(c,registers);
+            for(uint32_t i=0;i<before.size();++i)if(i<8||i>=12)
+                require(byte(rdram,state+i)==before[i],"camera helper changes no bridge byte outside epoch8..11");
+        };
+        invoke(candidate::tooie_camera_construction_begin,which==5?0u:stack);
+        require(word(rdram,state+8)==next,"camera begin saturating epoch on every path");
+        require(word(rdram,cc+offsetof(TooieCameraControl,epoch))==(which==4||which==5?77u:next),
+            "camera epoch uses increment except unchanged reentry/no-owner paths");
+        require(word(rdram,cd+offsetof(TooieCameraDiagnostics,refusals))==11u+(which==2||which==3||which==5),
+            "saturation and no-owner refusal count advances once");
+        require(word(rdram,cd+offsetof(TooieCameraDiagnostics,reentry))==13u+(which==4),"reentry count advances once");
+        require(word(rdram,cc+offsetof(TooieCameraControl,latch))==unsigned(which==2||which==3||which==4||which==6),
+            "saturation, reentry and backup depth latch");
+        require(word(rdram,cc+offsetof(TooieCameraControl,active))==unsigned(which==0||which==1||which==7),
+            "full main-pool admission activates camera at new epoch");
+        if(which==6)require(word(rdram,cs+offsetof(TooieCameraState,backup)+offsetof(TooieCameraBackup,valid))==0,
+            "backup depth invalidates backup after epoch increment");
+        if(which==7){
+            invoke(candidate::tooie_camera_construction_end,stack);
+            require(word(rdram,state+8)==next&&word(rdram,cs+offsetof(TooieCameraState,owner_frame))==0,
+                "camera end clears owner without increment");
+            invoke(candidate::tooie_camera_construction_begin,stack);
+            require(word(rdram,state+8)==43&&word(rdram,cc+offsetof(TooieCameraControl,epoch))==43&&
+                word(rdram,cc+offsetof(TooieCameraControl,active))==1,"begin end begin advances twice and admits");
+        }
+    }
+}
 // Real translated actor helpers and reset setters; the original getter boundaries
 // below are explicit doubles. This synthetic immutable asset is not a ROM dump.
 struct PaletteFixture {
@@ -812,6 +868,7 @@ int main(){
         }
 #endif
 #ifdef TOOIE_ACTOR_PALETTE_FIXTURE
+        camera_epoch_fixtures();
         palette_groups=palette_fixtures();
 #endif
         std::cout<<"Draw boundary actual differential fixture passed: "<<comparisons

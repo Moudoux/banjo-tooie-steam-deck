@@ -157,8 +157,7 @@ These are open cleanup items, not finished architecture.
 - **Render hooks.** The selected render hooks include `func_800A7840` at `0x800A7888` and `0x800A7900`, and `func_800DE498` at `0x800DEFA0` and `0x800DEFB0`. Shadow, background, demo-timing, CPU625, NPC665 and minimum-host hooks are added by flag.
 - **Register writes from hooks.** Three hooks in `func_80082088` assign guest registers from `baseline_overlay_hardware_word`.
 - **Instruction edits.** `baseline_raw_condition.toml` declares nine instruction replacements. Some write `0x03E00008` (`jr $ra`) and some write `0`.
-- **Native writes to patch state.** `baseline_render_construction_begin` in [adapters.cpp](../tools/baseline/adapters.cpp) advances the epoch in `tooie_render_bridge_state`.
-- **Native player checks.** The same function enables the player boundary and stops the game on a player tripwire.
+- **Native player checks.** `baseline_render_construction_begin` in [adapters.cpp](../tools/baseline/adapters.cpp) publishes the player-boundary build flag once and reads the player tripwire. The selected camera composition advances its frame counter in guest `tooie_camera_construction_begin`. Bridge-only engineering compositions keep the native increment.
 - **Native reads of guest memory.** `adapters.cpp` also holds start-up observers, thread admission checks, rejected-function providers, an SI adapter and core1/core2 publication.
 - **Raw offsets.** Guest patches still use offsets such as `player_body(self)+0x11` and fixed addresses such as `0x80122DC8`.
 - **Carried upstream patches.** See [Pinned upstream and carried patches](#pinned-upstream-and-carried-patches).
@@ -230,7 +229,7 @@ Keep three outputs apart:
 - **Recompiled patch code** (`boot.c`): PC-executable code built from guest C. Calls into patch functions run this code.
 - **Patch data image** (`boot.bin`): bytes mapped into guest memory from `0x80801000`, outside the original 8 MiB RDRAM.
 
-The selected image is 294,132 bytes, SHA-256 `7ec531fa…`. It contains:
+The selected image is 297,552 bytes, SHA-256 `d4edc0fc…`. It contains:
 
 - the 2,760-byte boot and heap image at its start;
 - `tooie_render_bridge_state` (18,844 bytes);
@@ -247,7 +246,7 @@ tools/baseline/prepare_player_guest.py --rom … (WSL)
   ├─ prepare_silo_bridge.py       silo-candidate/*.c → Silo raw + image
   └─ prepare_render_bridge.py --camera --raw --image <SELECTION>
                                   → composition-v2/{raw/, boot.c, boot.bin, recomp_overlays.inl, *_layout.h}
-cmake --preset windows-player     checks guest image SHA-256 7ec531fa…; composes the runtime sources
+cmake --preset windows-player     checks guest image SHA-256 d4edc0fc…; composes the runtime sources
   BaselineRecompiledFuncs  ← composition-v2/raw/funcs_*.c   (raw recompiled game code)
   BaselineBootPatch        ← composition-v2/boot.c          (recompiled guest patches)
   TooieBaseline            ← boot.bin via file_to_c → register_boot_patch → recomp::overlays::register_patches

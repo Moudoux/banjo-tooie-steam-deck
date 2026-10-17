@@ -975,10 +975,10 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
             endif()
             if(TOOIE_BASELINE_BACKPACK621)
                 # Installed only after actual fullgraph/control/source/ELF acceptance.
-                set(_baseline_expected_image "ec6d5739e438a87421ff751253d007ecfe2697ff65e4e9fddee87b799412c93c")
+                set(_baseline_expected_image "e34920d5b259d17cfcf67e86b3f4f130462c3c11a5aaddf24afdd982e8977eb8")
                 if(_baseline_shadow_coefficients STREQUAL "ON")
                     # Same composition; shadow_projection.o (TOOIE_SHADOW_COEFFICIENTS=1) and actor.o (TOOIE_HAND862=1) differ.
-                    set(_baseline_expected_image "c78e92102a8e20e67db4ea5e3faf8eb09c2261f2da120a63470d3ce2846fa6b9")
+                    set(_baseline_expected_image "d4edc0fc90a7121906a969a87e0b0b239523a803b46a76ab60a78ec92c844525")
                 endif()
                 string(JSON _baseline_raw_b621_type TYPE "${_baseline_raw_binding}" backpack621)
                 string(JSON _baseline_raw_b621 GET "${_baseline_raw_binding}" backpack621)
@@ -1123,7 +1123,7 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
         list(APPEND _baseline_draw_fixture_functions tooie_backpack621_retire)
     endif()
     if(TOOIE_BASELINE_CAMERA_IDENTITY)
-        list(APPEND _baseline_draw_fixture_functions tooie_actor_palette_begin tooie_actor_palette_end func_8008B10C anctrl_setSmoothTransition)
+        list(APPEND _baseline_draw_fixture_functions tooie_camera_construction_begin tooie_camera_construction_end tooie_actor_palette_begin tooie_actor_palette_end func_8008B10C anctrl_setSmoothTransition)
     endif()
     add_custom_command(OUTPUT "${_baseline_draw_fixture}" "${_baseline_original_owner_fixture}" "${_baseline_original_draw_fixture}"
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/extract_heap_realloc.py"
