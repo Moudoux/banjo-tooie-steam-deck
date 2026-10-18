@@ -1,7 +1,8 @@
-/* Guest initialization subset from retained
-   deps/banjo-tooie/lib/ultralib/src/os/initialize.c semantics.
-   This disposable native-runtime condition omits console MMIO/cache/TLB.
-   Original bootproc, decompression, helper bodies and guest data remain owners. */
+/* Adapted from deps/banjo-tooie/lib/ultralib/src/os/initialize.c (J, FINALROM)
+   using original boot guest storage. Finalrom, exception vectors, clock scaling,
+   NMI buffer clear, VI clock and PI type sentinels keep their original data effects.
+   Omitted natively: CU1 enable, PIF/AI MMIO, cache/TLB maintenance, the Cause-IP5
+   hang and PI timing-register reads. No full console or FCSR equivalence is claimed. */
 #include <ultra64.h>
 #include <PR/R4300.h>
 
@@ -23,7 +24,8 @@ _Static_assert(UT_VEC == 0x80000000 && XUT_VEC == 0x80000080 &&
 __attribute__((section(".recomp_patch"))) void boot_osInitialize(void) {
     u32 vector, offset;
     boot___osFinalrom = TRUE;
-    /* Native FP executes without CU1 gating; stock runtime rejects that bit. */
+    /* @recomp Native FP needs no CU1 enable. Keep the original FCSR value via the boot
+       helper; native FCSR modelling covers its rounding mode only. */
     boot___osSetFpcCsr(FPCSR_FS | FPCSR_EV);
     for (vector = UT_VEC; vector <= E_VEC; vector += 0x80) {
         for (offset = 0; offset < 16; ++offset)
@@ -36,6 +38,9 @@ __attribute__((section(".recomp_patch"))) void boot_osInitialize(void) {
     }
     boot_osViClock = osTvType == OS_TV_PAL ? VI_PAL_CLOCK :
                     osTvType == OS_TV_MPAL ? VI_MPAL_CLOCK : VI_NTSC_CLOCK;
+    /* @recomp Keep the original type sentinels. The four timing fields per domain are
+       not sampled; native ROM transport does not read them, and retained guest EPI
+       readers are not proven unreachable. */
     boot___Dom1SpeedParam.type = DEVICE_TYPE_INIT;
     boot___Dom2SpeedParam.type = DEVICE_TYPE_INIT;
 }
