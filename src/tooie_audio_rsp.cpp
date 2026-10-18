@@ -152,6 +152,7 @@ Recognition recognize_task(const uint8_t* rdram, const OSTask* task) {
     return {true, "Tooie NTSC-U n_aspMain with both known overlays"};
 }
 int overlay_index(uint32_t imem, uint32_t offset, uint32_t length) noexcept {
+    // Matches prepare_audio_rsp.py overlay slots: IMEM 0x1238, offsets 0x1B8/0xF80, with inclusive DMA lengths equal to configured sizes minus one.
     if (imem != 0x1238) return -1;
     if (offset == 0x1B8 && length == 0xDC7) return 0;
     if (offset == 0xF80 && length == 0x847) return 1;

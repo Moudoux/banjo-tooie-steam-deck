@@ -1,0 +1,20 @@
+--- a/events.cpp
++++ b/events.cpp
+@@ -1,2 +1,4 @@
+ #include "dp-freeze.hpp"
++#include "runtime_lifecycle.hpp"
++#include <exception>
+ #include <thread>
+@@ -290,3 +292,11 @@
+-        if (!ultramodern::rsp::run_task(PASS_RDRAM task)) {
++        bool ran;
++        try {
++            ran = ultramodern::rsp::run_task(PASS_RDRAM task);
++        } catch (...) {
++            // A failed task publishes terminal stop without an SP completion.
++            tooie::lifecycle::fail(std::current_exception());
++            return;
++        }
++        if (!ran) {
+             fprintf(stderr, "Failed to execute task type: %" PRIu32 "\n", task->t.type);
+             ULTRAMODERN_QUICK_EXIT();

@@ -61,6 +61,7 @@ The launcher and menus use Dear ImGui through RT64. The CIC algorithm in
   [LLVM license](third_party/notices/DXC-v1.8.2502-LICENSE-LLVM.txt) and
   [release notes](third_party/notices/DXC-v1.8.2502-ReleaseNotes.md) describe the
   separately locked v1.8.2502 development archive.
+  The bundled `dxil.dll` was recorded by an earlier project review as matching the file in Microsoft's v1.7.2212 release archive (`dxc_2022_12_16.zip`). That archive's [README](third_party/notices/DXC-v1.7.2212-README.md) assigns its [Microsoft license terms](third_party/notices/DXC-v1.7.2212-LICENSE-MS.txt) to `dxil.dll`; both are reproduced unchanged. The exact build origin of the bundled `dxcompiler.dll`, and therefore its complete notice set, has not been established.
 - [SDL_GameControllerDB](https://github.com/gabomdq/SDL_GameControllerDB):
   [zlib-style notice](third_party/notices/SDL-GameControllerDB.txt).
   `recompcontrollerdb.txt` is a modified N64/GameCube-oriented subset.

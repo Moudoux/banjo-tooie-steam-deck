@@ -62,9 +62,10 @@ void establish_pacing_defaults() {
         values.contains("tooie_output_rate_mode") ||
         values.contains("tooie_custom_output_rate") ||
         values.contains("tooie_presentation_mode");
-    // An older profile with individual pacing values becomes Custom so those
-    // choices keep their meaning. A new profile gets the recommended custom
-    // Display + Present Early setup without imposing a new custom Hz.
+    // Retained frontend pacing defaults remain for shared-profile compatibility.
+    // Older explicit choices become Custom; new retained profiles use Display +
+    // Present Early without imposing a custom Hz. Selected baseline player pacing
+    // uses separate baseline_output_rate, baseline_manual_hz and baseline_vsync keys.
     values["tooie_pacing_preset"] = 0;
     if (!has_explicit_pacing) {
         values["tooie_vsync"] = false;

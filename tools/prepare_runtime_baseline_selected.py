@@ -21,6 +21,7 @@ INPUTS = {
 }
 # Only these named maintained patches are accepted; this is not a patch CLI.
 PATCHES = {
+    'events-sp-exception': ('12999e7eee75ee2b4509e3765ac797152ba46286709b1f31cca87b0b44e2467b', 'events.cpp', 2),
     'events-next-framebuffer': ('6e17ed72a30d942af19ed4242c9e8a3f8f947bad9d709cc264498b1084b5ab27', 'events.cpp', 1),
     'events-dp-freeze': ('7f287aec255a5dcb9eaa2ae53082403ff9a4eaa67c22b0f56d65e4f5d5864cdf', 'events.cpp', 3),
     'threads-suspended-stop': ('9438dd3c67452b673f4e5bfe494b2c54fa88574e6a11c73f0758a7df64401322', 'ultramodern/src/threads.cpp', 2),
@@ -30,6 +31,7 @@ PATCHES = {
     'recomp-terminal-fence': ('47b1b0c337b84fc5dc5eb702513f73b3f8a517f0e65c5629910733d347698ed8', 'recomp.cpp', 4),
 }
 EXPECTED = {
+    'baseline/lifecycle/events.cpp': '585ba081a6cdc99b2fcf90cb74f94ea33c01b2f2a92ede5324efa506a6a7089e',
     'baseline/scheduler-event/events.cpp': '7ad9ad3def0f061125db69ed608078558141aecfa1ed715588b807fdcdf5dee2',
     'baseline/first-frame-sync/events.cpp': 'aed57c028028a756d507a4c4adfb915171fac167cf543d40447c935e47d3bf88',
     'baseline/dp-freeze/events.cpp': '96f362c7a774c4629a2e9523ecea748a1865bc9cb54de177207c486a6e7ccf4c',
@@ -141,7 +143,9 @@ def materialize(root, runtime, build):
     emit('baseline/scheduler-event/events.cpp', events)
     events = patch(events, 'events-next-framebuffer')
     emit('baseline/first-frame-sync/events.cpp', events)
-    emit('baseline/dp-freeze/events.cpp', patch(events, 'events-dp-freeze'))
+    events = patch(events, 'events-dp-freeze')
+    emit('baseline/dp-freeze/events.cpp', events)
+    emit('baseline/lifecycle/events.cpp', patch(events, 'events-sp-exception'))
     threads = patch(originals['ultramodern/src/threads.cpp'], 'threads-suspended-stop')
     emit('baseline/thread-refusals/threads.cpp', threads)
     threads = patch(threads, 'producer-quiescent-cleanup')

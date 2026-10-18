@@ -1,5 +1,6 @@
 #pragma once
 // Private baseline input values and bounded callback script; no SDL or guest access.
+#include "../../src/frontend_input_policy.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -19,8 +20,7 @@ struct State {
     bool nonneutral() const { return buttons || x || y; }
 };
 inline float axis(int value) {
-    const float v = float(value) / (value < 0 ? 32768.0f : 32767.0f);
-    return std::abs(v) <= .20f ? 0.0f : std::copysign((std::abs(v) - .20f) / .80f, v);
+    return tooie::input::baseline_axis(value);
 }
 struct Step { std::string kind, name; uint64_t ms; State state; };
 struct Plan { std::vector<Step> steps; };

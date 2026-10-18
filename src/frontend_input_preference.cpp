@@ -58,6 +58,7 @@ std::string hid_product_name(const char* path) {
     return name;
 }
 #endif
+constexpr int baseline_digital_axis_threshold = 16384;
 constexpr size_t count = static_cast<size_t>(Action::Count);
 constexpr std::array<std::pair<Action, std::uint16_t>, 14> n64_buttons{{
     {Action::A,0x8000},{Action::B,0x4000},{Action::Z,0x2000},{Action::Start,0x1000},
@@ -580,7 +581,7 @@ bool physical_binding_down(Binding binding, SDL_GameController* controller, bool
         const int press = trigger_press_percent * 32767 / 100;
         const int release = trigger_release_percent * 32767 / 100;
         const int magnitude = binding.device == Device::AxisPositive ? value : -value;
-        latched = host().baseline ? magnitude > 16384 : (latched ? magnitude > release : magnitude >= press);
+        latched = host().baseline ? magnitude > baseline_digital_axis_threshold : (latched ? magnitude > release : magnitude >= press);
         return latched;
     }
     return false;
@@ -614,7 +615,7 @@ bool down(const BindingTable& table, Action action, const Uint8* keys, SDL_GameC
                 const int magnitude = binding.device == Device::AxisPositive ? value : -value;
                 const int press = trigger_press_percent * 32767 / 100;
                 const int release = trigger_release_percent * 32767 / 100;
-                latched = host().baseline ? magnitude > 16384 : (latched ? magnitude > release : magnitude >= press);
+                latched = host().baseline ? magnitude > baseline_digital_axis_threshold : (latched ? magnitude > release : magnitude >= press);
                 if (latched) return true;
             }
             break;
@@ -1369,7 +1370,7 @@ void handle_event(const SDL_Event& event) {
     }
     if (axis_motion && event.caxis.which == chosen.load()) {
         const int value = event.caxis.value;
-        const int release = host().baseline ? 16384 : trigger_release_percent * 32767 / 100;
+        const int release = host().baseline ? baseline_digital_axis_threshold : trigger_release_percent * 32767 / 100;
         std::erase_if(chord_suppressed_base, [&](Binding binding) {
             if (binding.code != event.caxis.axis ||
                 (binding.device != Device::AxisPositive && binding.device != Device::AxisNegative)) return false;
@@ -1425,7 +1426,7 @@ void handle_event(const SDL_Event& event) {
         if (!selected_event) return false;
         if (key) return binding.device == Device::Keyboard && binding.code == event_binding.code;
         return same_binding(binding, event_binding) && (!host().baseline || !axis_event ||
-            std::abs(int(event.caxis.value)) > 16384);
+            std::abs(int(event.caxis.value)) > baseline_digital_axis_threshold);
     };
     const bool modifier_event = event_hits(active_modifier);
     const bool modifier_button_down = active_modifier.device == Device::Button && active_modifier.code >= 0 &&
@@ -1438,7 +1439,7 @@ void handle_event(const SDL_Event& event) {
         const int magnitude = binding.device == Device::AxisPositive ? value : -value;
         const int press = trigger_press_percent * 32767 / 100;
         const int release = trigger_release_percent * 32767 / 100;
-        latched = host().baseline ? magnitude > 16384 : (latched ? magnitude > release : magnitude >= press);
+        latched = host().baseline ? magnitude > baseline_digital_axis_threshold : (latched ? magnitude > release : magnitude >= press);
         return latched;
     };
     const bool modifier_axis_down = event_axis_down(active_modifier, event_modifier_axis_latch);

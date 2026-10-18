@@ -117,6 +117,14 @@
       "from": "source"
     },
     {
+      "path": "third_party/notices/DXC-v1.7.2212-README.md",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/DXC-v1.7.2212-LICENSE-MS.txt",
+      "from": "source"
+    },
+    {
       "path": "third_party/notices/DXC-v1.8.2502-LICENSE-LLVM.txt",
       "from": "source"
     },

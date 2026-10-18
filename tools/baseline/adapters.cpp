@@ -258,6 +258,7 @@ extern "C" void baseline_render_construction_begin(uint8_t* rdram, recomp_contex
             rejected_body("bridge resident magic/layout");
 #if BASELINE_PLAYER_BOUNDARY
         static_assert(__builtin_offsetof(TooieRenderBridgeState, player) == 18740 &&
+            __builtin_offsetof(TooieRenderBridgeState, player) + __builtin_offsetof(TooiePlayerBoundary, tripwires) == 18824 &&
             sizeof(TooiePlayerBoundary) == 104 && TOOIE_BRIDGE_STATE_BYTES == 18844);
         MEM_W(18740, gpr(int32_t(TOOIE_BRIDGE_STATE_VRAM))) = 1;
 #endif

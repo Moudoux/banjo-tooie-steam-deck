@@ -254,8 +254,9 @@ uint32_t key_mask(SDL_Scancode key) {
 #endif
 
 // Callback failures terminate the disposable process, never report successful service.
-[[noreturn]] void fail(const char* message) {
-    std::fprintf(stderr, "baseline device failure: %s (SDL: %s)\n", message, SDL_GetError());
+[[noreturn]] void fail(const char* message, bool sdl = true) {
+    if (sdl) std::fprintf(stderr, "baseline device failure: %s (SDL: %s)\n", message, SDL_GetError());
+    else std::fprintf(stderr, "baseline device failure: %s\n", message);
     std::fflush(stderr);
     std::quick_exit(EXIT_FAILURE);
 }
@@ -480,13 +481,21 @@ public:
 // Maintain a real S16 stereo queue; no gain or pacing policy. The player reports
 // one VI fewer queued frames, as BK does; engineering builds report the raw count.
 void set_frequency(uint32_t frequency) {
-    if (frequency < 1000 || frequency > 192000) fail("Unsupported audio frequency");
+    if (frequency < 1000 || frequency > 192000) {
+        std::fprintf(stderr, "baseline audio context: requested_rate=%u\n", static_cast<unsigned>(frequency));
+        fail("Unsupported audio frequency", false);
+    }
     std::lock_guard guard(audio_mutex);
     if (audio && audio_frequency == frequency) return;
     if (audio) {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
         while (SDL_GetQueuedAudioSize(audio)) {
-            if (std::chrono::steady_clock::now() >= deadline) fail("Old-rate audio did not drain");
+            if (std::chrono::steady_clock::now() >= deadline) {
+                std::fprintf(stderr, "baseline audio context: old_rate=%u requested_rate=%u device=%u (SDL: %s)\n",
+                    static_cast<unsigned>(audio_frequency), static_cast<unsigned>(frequency), static_cast<unsigned>(audio), SDL_GetError());
+                std::fprintf(stderr, "baseline audio context: queued_bytes=%u\n", static_cast<unsigned>(SDL_GetQueuedAudioSize(audio)));
+                fail("Old-rate audio did not drain", false);
+            }
             SDL_Delay(1);
         }
         SDL_CloseAudioDevice(audio); audio = 0;
@@ -495,8 +504,12 @@ void set_frequency(uint32_t frequency) {
     desired.freq = int(frequency); desired.format = AUDIO_S16SYS;
     desired.channels = 2; desired.samples = 512;
     audio = SDL_OpenAudioDevice(nullptr, 0, &desired, &obtained, 0);
-    if (!audio || obtained.freq != int(frequency) || obtained.channels != 2 || obtained.format != AUDIO_S16SYS)
+    if (!audio || obtained.freq != int(frequency) || obtained.channels != 2 || obtained.format != AUDIO_S16SYS) {
+        std::fprintf(stderr, "baseline audio context: requested_freq=%d requested_format=%u requested_channels=%u obtained_freq=%d obtained_format=%u obtained_channels=%u device=%u\n",
+            desired.freq, static_cast<unsigned>(desired.format), static_cast<unsigned>(desired.channels),
+            obtained.freq, static_cast<unsigned>(obtained.format), static_cast<unsigned>(obtained.channels), static_cast<unsigned>(audio));
         fail("SDL audio format admission failed");
+    }
     audio_frequency = frequency;
     if (audio_summary.limit) {
         auto& s=audio_summary; ++s.opened;
