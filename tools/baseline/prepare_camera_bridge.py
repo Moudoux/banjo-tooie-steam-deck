@@ -1,5 +1,6 @@
 """Explicit default-OFF camera image preparation; accepted OFF outputs stay separate."""
 import json
+import importlib.util
 import re
 from pathlib import Path
 import toml
@@ -661,8 +662,10 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
         defs=[npc_owner.BODY if n==npc_owner.END else n for n in defs]
         expected_order=[npc_owner.BODY if n==npc_owner.END else n for n in actual_order]
     if backpack621 and not npc665:expected_order=actual_order
-    shared=r/'tests/extract_heap_realloc.py';s=shared.read_text();old='"tooie_player_begin", "tooie_player_end", "tooie_player_bone_push", "tooie_player_bone_pop", "tooie_player_leaf_begin", "tooie_player_leaf_end"):';scope={'__name__':'local_extractor'};exec(compile(s.replace(old,'"tooie_player_begin", "tooie_player_end", '+','.join(repr(n) for n in defs)+'):'),str(shared),'exec'),scope)
-    (out/'candidate_camera_lifecycle_ncpod_slice.inc').write_text(''.join(scope['extract'](text,n) for n in defs));write_if_changed(out/'camera_identity_layout.h','#pragma once\n#define TOOIE_CAMERA_STATE_VRAM 0x%08Xu\n#define TOOIE_CAMERA_MAIN_VRAM 0x%08Xu\n#define TOOIE_CAMERA_REDIRECTED_VRAM 0x%08Xu\n#define TOOIE_BRIDGE_STATE_VRAM 0x%08Xu\n'%(addresses['tooie_camera_state'],addresses['tooie_camera_main'],addresses['tooie_camera_redirected'],addresses['tooie_render_bridge_state']))
+    shared=r/'tests/extract_heap_realloc.py'
+    spec=importlib.util.spec_from_file_location('extract_camera_body',shared)
+    extractor=importlib.util.module_from_spec(spec);spec.loader.exec_module(extractor)
+    (out/'candidate_camera_lifecycle_ncpod_slice.inc').write_text(''.join(extractor.extract(text,n,allowed=defs) for n in defs));write_if_changed(out/'camera_identity_layout.h','#pragma once\n#define TOOIE_CAMERA_STATE_VRAM 0x%08Xu\n#define TOOIE_CAMERA_MAIN_VRAM 0x%08Xu\n#define TOOIE_CAMERA_REDIRECTED_VRAM 0x%08Xu\n#define TOOIE_BRIDGE_STATE_VRAM 0x%08Xu\n'%(addresses['tooie_camera_state'],addresses['tooie_camera_main'],addresses['tooie_camera_redirected'],addresses['tooie_render_bridge_state']))
     write_if_changed(out/'render_bridge_layout.h','#pragma once\n#define TOOIE_BRIDGE_STATE_VRAM 0x%08Xu\n#define TOOIE_BRIDGE_IMAGE_BYTES %du\n#define TOOIE_BRIDGE_STATE_IMAGE_OFFSET %du\n'%(addresses['tooie_render_bridge_state'],len(binary),addresses['tooie_render_bridge_state']-0x80801000))
     assert text.count("\n    tooie_cpu625_retire(rdram, ctx);")==2*int(cpu625), "Exact generated lifecycle call selection"
     if cpu:

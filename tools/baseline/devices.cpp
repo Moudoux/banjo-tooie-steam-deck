@@ -3,6 +3,13 @@
 // RecompFrontend translation units stay unlinked; HOST selects authored baseline hooks.
 #include "devices.hpp"
 #include "input.hpp"
+#ifdef BASELINE_TERMINAL_FENCE
+#include "runtime_lifecycle.hpp"
+#include "ultramodern/error_handling.hpp"
+#ifdef BASELINE_SAVE_COMPOSITION
+#include "save_persistence.hpp"
+#endif
+#endif
 #if TOOIE_BASELINE_HOST
 #include "minimum_host.hpp"
 #include "minimum_render.hpp"
@@ -75,6 +82,23 @@ RenderMode selected_render_mode = RenderMode::Original;
 std::chrono::steady_clock::time_point quit_at;
 bool start_requested = false;
 bool quit_requested = false;
+#ifdef BASELINE_TERMINAL_FENCE
+bool lifecycle_stop_seen = false; // SDL owner; lifecycle is single-use per process.
+void report_lifecycle_failure() noexcept {
+    try {
+        const auto failure = tooie::lifecycle::failure();
+        if (!failure) {
+            ultramodern::error_handling::message_box("Runtime stopped without a recorded failure.");
+        } else {
+            try { std::rethrow_exception(failure); }
+            catch (const std::exception& error) { ultramodern::error_handling::message_box(error.what()); }
+            catch (...) { ultramodern::error_handling::message_box("Unknown runtime failure."); }
+        }
+    } catch (...) {
+        ultramodern::error_handling::message_box("Runtime failure details could not be retrieved.");
+    }
+}
+#endif
 #ifdef BASELINE_PLAYER
 bool start_refused = false;
 struct TexturePack { size_t order; std::filesystem::path path; };
@@ -490,7 +514,8 @@ void queue_samples(int16_t* samples, size_t count) {
     if (!count) return;
     std::lock_guard guard(audio_mutex);
     if (!audio) fail("Audio submitted before frequency admission");
-    std::vector<int16_t> corrected(count);
+    static std::vector<int16_t> corrected; // Reused only under audio_mutex; SDL_QueueAudio copies.
+    corrected.resize(count);
     for (size_t i = 0; i < count; i += 2) { corrected[i] = samples[i + 1]; corrected[i + 1] = samples[i]; }
     auto& s=audio_summary;
     const bool observe=count!=0 && s.limit && s.armed && s.chunks<s.limit && !s.stopped && !quit_published.load(std::memory_order_acquire);
@@ -857,12 +882,12 @@ ultramodern::renderer::callbacks_t renderer_callbacks() { return {create_rendere
 ultramodern::audio_callbacks_t audio_callbacks() { return {queue_samples, frames_remaining, set_frequency}; }
 ultramodern::input::callbacks_t input_callbacks() { return {poll_input, keyboard_input, nullptr, keyboard_device}; }
 
-// Standard start owns admission and joining; this pumps the window and requests bounded quit.
 void vi_complete() {
     // The stock VI callback runs after its initial mode and both states are seeded.
     initial_vi_ready.store(true, std::memory_order_release);
 }
 
+// Pumps SDL events, starts the guest after initial VI, and requests runtime quit.
 void update_gfx(void*) {
 #if TOOIE_BASELINE_HOST
     SDL_Event event;
@@ -876,7 +901,21 @@ void update_gfx(void*) {
 #else
     constexpr bool start_failed=false, start_refused=false;
 #endif
-    const bool stopping=close || quit_requested || deadline_reached || start_failed || start_refused;
+#ifdef BASELINE_TERMINAL_FENCE
+    if(!quit_requested && !lifecycle_stop_seen && tooie::lifecycle::stopping()) {
+        lifecycle_stop_seen=true;
+        report_lifecycle_failure();
+    }
+    const bool lifecycle_stopping=lifecycle_stop_seen;
+    bool lifecycle_quit=lifecycle_stop_seen && !quit_requested && !runtime_error_report_pending();
+#ifdef BASELINE_SAVE_COMPOSITION
+    // A recorded saver failure retains its existing player-owned quit.
+    lifecycle_quit=lifecycle_quit && tooie::save_persistence::failed.load(std::memory_order_acquire)==0;
+#endif
+#else
+    constexpr bool lifecycle_stopping=false, lifecycle_quit=false;
+#endif
+    const bool stopping=close || quit_requested || deadline_reached || start_failed || start_refused || lifecycle_stopping;
     // Menu ownership uses the existing tape abort/latch, not a hardware witness.
     const bool activity=publication.activity || host::menu_open();
     const auto physical=stopping ? input::State{} : publication.physical;
@@ -888,17 +927,17 @@ void update_gfx(void*) {
             (publication.focused || publication.physical_admitted) && !stopping,&events);
     }
     print_input_events(events);
-    if(!quit_requested && (close || deadline_reached || start_failed || start_refused)) {
+    if(!quit_requested && (close || deadline_reached || start_failed || start_refused || lifecycle_quit)) {
         quit_requested=true;
         quit_published.store(true,std::memory_order_release);
-        const char* reason=start_refused ? "unsupported-mod" : start_failed ? "mod-load" : close ? "host/window" : "deadline";
+        const char* reason=start_refused ? "unsupported-mod" : start_failed ? "mod-load" : lifecycle_quit ? "lifecycle-failure" : close ? "host/window" : "deadline";
         std::fprintf(stderr,"baseline standard quit requested (%s)\n",reason);
         ultramodern::quit();
 #if defined(BASELINE_VI_CONTROLLER_CYCLE)
         ultramodern::detail::dp_freeze::notify_stop();
 #endif
     }
-    if(!start_requested && !quit_requested && !start_refused && initial_vi_ready.load(std::memory_order_acquire)) {
+    if(!start_requested && !quit_requested && !start_refused && !lifecycle_stopping && initial_vi_ready.load(std::memory_order_acquire)) {
 #ifdef BASELINE_PLAYER
         if (!texture_only_selection()) { start_refused=true; return; }
 #endif

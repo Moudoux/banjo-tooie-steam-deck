@@ -19,7 +19,8 @@ SDL_Window* window = nullptr; // SDL owner, never dereferenced by Draw.
 Uint32 window_id = 0;
 bool focused = false, previously_ready = false, quarantine = false;
 bool reported_unready = false, initialized = false;
-uint32_t applied_live_aspect = UINT32_MAX; // SDL owner only; startup prefs remain immutable.
+// SDL-computed request bits; UINT32_MAX means no publication yet. The callee masks flags.
+uint32_t published_live_aspect = UINT32_MAX;
 std::atomic<bool> menu{false}, ready{false}, started{false};
 std::atomic<bool> sticky_close{false}, sticky_quit{false}, overflow{false};
 std::atomic<int> vsync{-1}, resolution{1};
@@ -72,14 +73,17 @@ void mark_issue() {
     int pixel_width = 0, pixel_height = 0;
     SDL_GetWindowSizeInPixels(window, &pixel_width, &pixel_height);
     ++marker_seq;
+    // Guest publication is sampled independently; these fields do not attest displayed pixels.
     const bool saved = std::fprintf(stderr, "baseline issue-marker seq=%u local=%s utc=%s version=%s game_started=%d menu=%d "
-        "resolution=%d wide=%d native_aspect=%d cutscene_aspect=%d output_rate=%d manual_hz=%d vsync=%d fullscreen=%d controller=\"%s\" live_aspect=0x%08x selected_aspect=%d drawable=%dx%d wide_request=%d wide_publication=0x%08x\n",
+        "requested_resolution=%d startup_wide=%d startup_aspect=%d startup_cutscene_aspect=%d requested_output_rate=%d requested_manual_hz=%d requested_vsync=%d sdl_fullscreen=%d controller=\"%s\" published_aspect_bits=0x%08x requested_aspect=%d drawable=%dx%d requested_wide=%d requested_quiet_trot=%d requested_trot_toggle=%d guest_publication=0x%08x\n",
         marker_seq, local_stamp, utc_stamp, baseline::player::build::version,
         int(started.load(std::memory_order_acquire)), int(menu.load(std::memory_order_acquire)),
         selected.resolution, latched.wide, latched.native_aspect, latched.cutscene_aspect,
-        selected.output_rate, selected.manual_hz, selected.vsync, selected.fullscreen, controller.c_str(),
-        applied_live_aspect, selected.native_aspect, pixel_width, pixel_height,
-        tooie::widescreen::live_widescreen_request(),render::publication_word()) > 0 && std::fflush(stderr) == 0;
+        selected.output_rate, selected.manual_hz, selected.vsync,
+        int((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0), controller.c_str(),
+        published_live_aspect, selected.native_aspect, pixel_width, pixel_height,
+        selected.wide, selected.quiet_talon_trot, selected.talon_trot_toggle,
+        render::publication_word()) > 0 && std::fflush(stderr) == 0;
     marker_toast = "Issue marker #" + std::to_string(marker_seq) + (saved
         ? std::string(" saved at ") + clock_stamp + ". Send player.log."
         : std::string(" at ") + clock_stamp + " could not be written to player.log.");
@@ -249,11 +253,17 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     initialized = true;
 }
 void shutdown() noexcept {
-    if (initialized) { tooie::frontend::settings::flush(); tooie::input::shutdown(); }
+    if (initialized) {
+        if (!tooie::frontend::settings::flush()) {
+            std::fputs("baseline settings could not be saved during shutdown\n", stderr);
+            std::fflush(stderr);
+        }
+        tooie::input::shutdown();
+    }
     initialized = false; window = nullptr; window_id = 0;
     ready = menu = started = sticky_close = sticky_quit = overflow = false;
     previously_ready = quarantine = reported_unready = false; vsync = -1;
-    applied_live_aspect = UINT32_MAX;
+    published_live_aspect = UINT32_MAX;
     tooie::widescreen::set_live_widescreen_request(-1);
     resolution.store(1, std::memory_order_release);
     quiet_talon_trot.store(false, std::memory_order_release);
@@ -323,8 +333,8 @@ InputPublication tick(bool gameplay) {
         const uint32_t live = selected.native_aspect == fit_aspect ?
             tooie::widescreen::fit_aspect_bits(snapshot->pixel_width, snapshot->pixel_height) :
             uint32_t(selected.native_aspect) << TOOIE_WIDESCREEN_SETTINGS_ASPECT_SHIFT;
-        if (live != applied_live_aspect) {
-            applied_live_aspect = live;
+        if (live != published_live_aspect) {
+            published_live_aspect = live;
             tooie::widescreen::set_live_aspect_bits(live);
         }
     }
@@ -350,7 +360,7 @@ InputPublication tick(bool gameplay) {
         }
     }
     { std::lock_guard lock(render_mutex); render_input.snapshot = std::move(snapshot); }
-    tooie::frontend::settings::flush();
+    tooie::frontend::settings::flush(true);
     return {physical, activity, focused, quit, mapped.game_enabled};
 }
 const Preferences& latched_preferences() noexcept { return latched; }

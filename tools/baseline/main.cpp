@@ -13,6 +13,7 @@
 #endif
 #ifdef BASELINE_PLAYER
 #include "player_startup.hpp"
+#include "player_version.hpp"
 #endif
 #include <atomic>
 #ifdef BASELINE_VI_CONTROLLER_CYCLE
@@ -32,6 +33,9 @@
 
 namespace {
 std::atomic<bool> runtime_error_reported = false;
+#ifdef BASELINE_PLAYER
+std::atomic<bool> runtime_error_report_done = false; // First reporter's handler returned.
+#endif
 constexpr char profile_marker[] = "TooieBaseline isolated profile v1\n";
 class ProfileLock {
     HANDLE handle = INVALID_HANDLE_VALUE;
@@ -125,7 +129,14 @@ void console_error(const char* message) {
     std::fprintf(stderr, "baseline runtime error: %s\n", message);
     std::fflush(stderr);
 #ifdef BASELINE_PLAYER
-    if (first) baseline::player::show_error(std::string("The game hit a problem and may close.\n\n") + message);
+    if (first) {
+        try { baseline::player::show_error(std::string("The game hit a problem and may close.\n\n") + message); }
+        catch (...) {
+            std::fputs("baseline runtime error dialog text unavailable\n", stderr);
+            std::fflush(stderr);
+        }
+        runtime_error_report_done.store(true, std::memory_order_release);
+    }
 #endif
 }
 #ifdef BASELINE_PLAYER
@@ -186,6 +197,17 @@ bool select_player_rom(const baseline::player::Arguments& arguments, std::u8stri
 }
 #endif
 }
+
+#ifdef BASELINE_TERMINAL_FENCE
+bool baseline::runtime_error_report_pending() noexcept {
+#ifdef BASELINE_PLAYER
+    return runtime_error_reported.load(std::memory_order_acquire) &&
+        !runtime_error_report_done.load(std::memory_order_acquire);
+#else
+    return false; // Engineering errors go to stderr only.
+#endif
+}
+#endif
 
 int main(int argc, char** argv) {
     // Retain stock fatal diagnostics when stdout is redirected to a run receipt.
@@ -297,6 +319,14 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "baseline admission complete; no runtime started\n");
             return 0;
         }
+#ifdef BASELINE_PLAYER
+        recomp::Version project_version;
+        if (!recomp::Version::from_string(baseline::player::build::version, project_version) ||
+            project_version.to_string() != baseline::player::build::version)
+            throw std::runtime_error(std::string("Invalid player version ") + baseline::player::build::version);
+#else
+        const recomp::Version project_version(0, 1, 0, "-baseline");
+#endif
         const auto handle = baseline::open_devices(options.profile, options.api, options.manual ? 0 : options.seconds, options.render_mode);
         // A stuck guest/join ends as process failure; this is not a graceful-quit claim.
         std::mutex deadline_mutex;
@@ -324,7 +354,7 @@ int main(int argc, char** argv) {
             }, [](const std::string& reason) { console_error(reason.c_str()); }, false);
             tooie::si::reset();
 #endif
-            recomp::start(recomp::Version(0, 1, 0, "-baseline"), handle,
+            recomp::start(project_version, handle,
                 rsp_callbacks, baseline::renderer_callbacks(), baseline::audio_callbacks(),
                 baseline::input_callbacks(), {nullptr, nullptr, baseline::update_gfx},
                 {baseline::vi_complete, nullptr}, {console_error}, {});

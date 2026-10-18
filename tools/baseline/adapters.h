@@ -12,7 +12,6 @@ void baseline_render_construction_begin(uint8_t*, recomp_context*);
 #include "pre_background_layout.h"
 #include "cpu625_selection_layout.h"
 #if TOOIE_BASELINE_HOST
-uint32_t tooie_widescreen_latched_settings_word(void);
 void baseline_cutscene_command(uint8_t*,recomp_context*);
 void tooie_baseline_widescreen_frame(uint8_t*,recomp_context*);
 #endif

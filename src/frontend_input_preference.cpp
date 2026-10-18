@@ -59,6 +59,11 @@ std::string hid_product_name(const char* path) {
 }
 #endif
 constexpr size_t count = static_cast<size_t>(Action::Count);
+constexpr std::array<std::pair<Action, std::uint16_t>, 14> n64_buttons{{
+    {Action::A,0x8000},{Action::B,0x4000},{Action::Z,0x2000},{Action::Start,0x1000},
+    {Action::DUp,0x0800},{Action::DDown,0x0400},{Action::DLeft,0x0200},{Action::DRight,0x0100},
+    {Action::L,0x0020},{Action::R,0x0010},{Action::CUp,0x0008},{Action::CDown,0x0004},
+    {Action::CLeft,0x0002},{Action::CRight,0x0001}}};
 constexpr std::array<const char*, count> names{{
     "a","b","z","start","l","r","c_up","c_down","c_left","c_right",
     "d_up","d_down","d_left","d_right","move_up","move_down","move_left","move_right",
@@ -642,6 +647,13 @@ float direction(const BindingTable& table, Action action, const Uint8* keys,
         }
     }
     return amount;
+}
+bool movement_held(const BindingTable& table, const Uint8* keys, SDL_GameController* controller,
+    float deadzone, const std::vector<Binding>* suppressed = nullptr) {
+    return direction(table, Action::MoveRight, keys, controller, deadzone, suppressed) > 0 ||
+        direction(table, Action::MoveLeft, keys, controller, deadzone, suppressed) > 0 ||
+        direction(table, Action::MoveUp, keys, controller, deadzone, suppressed) > 0 ||
+        direction(table, Action::MoveDown, keys, controller, deadzone, suppressed) > 0;
 }
 void import_legacy(const std::filesystem::path& root, const std::string& preferred, BindingTable& table) {
     std::ifstream source(root / "controls.json");
@@ -1485,11 +1497,6 @@ void handle_event(const SDL_Event& event) {
         host().set_menu_open(!host().menu_open()); return;
     }
     if (!host().game_started() || host().menu_open()) return;
-    constexpr std::array<std::pair<Action, std::uint16_t>, 14> n64_buttons{{
-        {Action::A,0x8000},{Action::B,0x4000},{Action::Z,0x2000},{Action::Start,0x1000},
-        {Action::DUp,0x0800},{Action::DDown,0x0400},{Action::DLeft,0x0200},{Action::DRight,0x0100},
-        {Action::L,0x0020},{Action::R,0x0010},{Action::CUp,0x0008},{Action::CDown,0x0004},
-        {Action::CLeft,0x0002},{Action::CRight,0x0001}}};
     for (const auto [action, mask] : n64_buttons) if (matches(action))
         transient_buttons.fetch_or(mask, std::memory_order_release);
     if (modifier_event) for (const auto [action, mask] : n64_buttons) {
@@ -1638,34 +1645,17 @@ void tick(SDL_Window* window, bool gameplay, bool menu_open) {
     const bool current_menu_open = host().menu_open();
     const bool menu_closed = was_menu_open && !current_menu_open;
     if (menu_closed || (focus_regained && !background_controller)) {
-        constexpr std::array<std::pair<Action, std::uint16_t>, 14> game_buttons{{
-            {Action::A,0x8000},{Action::B,0x4000},{Action::Z,0x2000},{Action::Start,0x1000},
-            {Action::DUp,0x0800},{Action::DDown,0x0400},{Action::DLeft,0x0200},{Action::DRight,0x0100},
-            {Action::L,0x0020},{Action::R,0x0010},{Action::CUp,0x0008},{Action::CDown,0x0004},
-            {Action::CLeft,0x0002},{Action::CRight,0x0001}}};
-        for (const auto [action, mask] : game_buttons)
+        for (const auto [action, mask] : n64_buttons)
             if (is_down(action)) suppressed_buttons |= mask;
-        suppress_move = direction(table, Action::MoveRight, keys, controller, deadzone) > 0 ||
-            direction(table, Action::MoveLeft, keys, controller, deadzone) > 0 ||
-            direction(table, Action::MoveUp, keys, controller, deadzone) > 0 ||
-            direction(table, Action::MoveDown, keys, controller, deadzone) > 0;
+        suppress_move = movement_held(table, keys, controller, deadzone);
         suppress_camera = std::abs(axis(controller, SDL_CONTROLLER_AXIS_RIGHTX, deadzone)) > 0 ||
             std::abs(axis(controller, SDL_CONTROLLER_AXIS_RIGHTY, deadzone)) > 0;
     } else if (focus_regained) {
         // Suppress keys held while typing in another app, but do not suppress
         // the simultaneously held physical controller source for that action.
-        constexpr std::array<std::pair<Action, std::uint16_t>, 14> game_buttons{{
-            {Action::A,0x8000},{Action::B,0x4000},{Action::Z,0x2000},{Action::Start,0x1000},
-            {Action::DUp,0x0800},{Action::DDown,0x0400},{Action::DLeft,0x0200},{Action::DRight,0x0100},
-            {Action::L,0x0020},{Action::R,0x0010},{Action::CUp,0x0008},{Action::CDown,0x0004},
-            {Action::CLeft,0x0002},{Action::CRight,0x0001}}};
-        for (const auto [action, mask] : game_buttons)
+        for (const auto [action, mask] : n64_buttons)
             if (down(table, action, keys, nullptr)) suppressed_keyboard_buttons |= mask;
-        suppress_keyboard_move =
-            direction(table, Action::MoveRight, keys, nullptr, deadzone) > 0 ||
-            direction(table, Action::MoveLeft, keys, nullptr, deadzone) > 0 ||
-            direction(table, Action::MoveUp, keys, nullptr, deadzone) > 0 ||
-            direction(table, Action::MoveDown, keys, nullptr, deadzone) > 0;
+        suppress_keyboard_move = movement_held(table, keys, nullptr, deadzone);
     }
     if (focus_regained) {
         suppress_fast_forward = is_down(Action::FastForward);
@@ -1675,14 +1665,8 @@ void tick(SDL_Window* window, bool gameplay, bool menu_open) {
     std::uint16_t bits = 0;
     float x = 0, y = 0, rx = 0, ry = 0;
     if (enabled) {
-        constexpr std::array<std::pair<Action, std::uint16_t>, 14> buttons{{
-            {Action::A,0x8000},{Action::B,0x4000},{Action::Z,0x2000},{Action::Start,0x1000},
-            {Action::DUp,0x0800},{Action::DDown,0x0400},{Action::DLeft,0x0200},{Action::DRight,0x0100},
-            {Action::L,0x0020},{Action::R,0x0010},{Action::CUp,0x0008},{Action::CDown,0x0004},
-            {Action::CLeft,0x0002},{Action::CRight,0x0001}
-        }};
         std::uint16_t keyboard_bits = 0, controller_bits = 0;
-        for (const auto [action, mask] : buttons) {
+        for (const auto [action, mask] : n64_buttons) {
             if (down(table, action, keys, nullptr, BindingLayer::Base)) keyboard_bits |= mask;
             if (down(table, action, nullptr, controller, BindingLayer::Base, &blocked_base, analog_camera_enabled) ||
                 (modifier_down && down(modified_table, action, nullptr, controller, BindingLayer::Modified))) controller_bits |= mask;
@@ -1692,10 +1676,7 @@ void tick(SDL_Window* window, bool gameplay, bool menu_open) {
         suppressed_buttons &= bits;
         bits &= ~suppressed_buttons;
         const bool keyboard_move_held =
-            direction(table, Action::MoveRight, keys, nullptr, deadzone) > 0 ||
-            direction(table, Action::MoveLeft, keys, nullptr, deadzone) > 0 ||
-            direction(table, Action::MoveUp, keys, nullptr, deadzone) > 0 ||
-            direction(table, Action::MoveDown, keys, nullptr, deadzone) > 0;
+            movement_held(table, keys, nullptr, deadzone);
         if (!keyboard_move_held) suppress_keyboard_move = false;
         const Uint8* move_keys = suppress_keyboard_move ? nullptr : keys;
         if (host().baseline) {
@@ -1745,10 +1726,7 @@ void tick(SDL_Window* window, bool gameplay, bool menu_open) {
         bool mapped_button_held = false;
         for (unsigned i = 0; i <= unsigned(Action::Menu); ++i)
             mapped_button_held |= is_down(Action(i));
-        if (focused && (mapped_button_held || direction(table, Action::MoveRight, keys, controller, deadzone, &blocked_base) > 0 ||
-            direction(table, Action::MoveLeft, keys, controller, deadzone, &blocked_base) > 0 ||
-            direction(table, Action::MoveUp, keys, controller, deadzone, &blocked_base) > 0 ||
-            direction(table, Action::MoveDown, keys, controller, deadzone, &blocked_base) > 0))
+        if (focused && (mapped_button_held || movement_held(table, keys, controller, deadzone, &blocked_base)))
             mapped_activity.store(true, std::memory_order_release);
         baseline_x.store(x, std::memory_order_release);
         baseline_y.store(y, std::memory_order_release);

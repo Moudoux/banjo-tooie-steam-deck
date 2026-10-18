@@ -6,9 +6,9 @@
 
 namespace tooie::frontend::settings {
 void initialize(const std::filesystem::path& config_root);
-bool flush();
-// Nonempty when the existing primary config could not be read. Writes stay
-// blocked so the primary file and its recovery backup remain untouched.
+// Explicit callers attempt immediately; periodic callers back off after failed I/O.
+bool flush(bool periodic = false);
+// Static notice for an unreadable primary (writes blocked) or transient write failure.
 std::string_view recovery_notice();
 #ifdef TOOIE_PERSISTENT_RUNTIME_EXPERIMENT
 // Conservative compatibility input, read-only and never flushed to disk here.

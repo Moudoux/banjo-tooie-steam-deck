@@ -6,6 +6,7 @@
 #include <type_traits>
 #include <array>
 #include <utility>
+#include <chrono>
 
 namespace {
 std::mutex mutex;
@@ -13,6 +14,8 @@ std::filesystem::path path;
 nlohmann::json values = nlohmann::json::object();
 bool dirty = false;
 bool write_blocked = false;
+bool write_failed = false;
+std::chrono::steady_clock::time_point retry_after{};
 
 void migrate_label(const char* id, std::initializer_list<std::pair<const char*,int>> labels) {
     auto it=values.find(id);
@@ -125,8 +128,10 @@ template <typename T> void write(std::string_view id, T value) {
 namespace tooie::frontend::settings {
 std::string_view recovery_notice() {
     std::lock_guard lock(mutex);
-    return write_blocked
-        ? "The primary settings file could not be read. Automatic saving is paused; tooie_imgui.json and its .bak are unchanged. Recover or replace the primary file outside the game, then restart."
+    if (write_blocked)
+        return "The primary settings file could not be read. Automatic saving is paused; tooie_imgui.json and its .bak are unchanged. Recover or replace the primary file outside the game, then restart.";
+    return write_failed
+        ? "Settings could not be saved. Automatic saving will retry. Changes may be lost when you close the game."
         : "";
 }
 #ifdef TOOIE_PERSISTENT_RUNTIME_EXPERIMENT
@@ -154,6 +159,8 @@ void initialize(const std::filesystem::path& config_root) {
     path = config_root / "tooie_imgui.json";
     values = nlohmann::json::object();
     write_blocked = false;
+    write_failed = false;
+    retry_after = {};
     merge_legacy(config_root / "general.json");
     merge_legacy(config_root / "graphics.json");
     merge_legacy(config_root / "sound.json");
@@ -163,14 +170,25 @@ void initialize(const std::filesystem::path& config_root) {
     dirty = false;
     establish_pacing_defaults();
 }
-bool flush() {
+bool flush(bool periodic) {
     std::lock_guard lock(mutex);
     if (!dirty) return true;
     if (path.empty() || write_blocked) return false;
+    if (periodic && write_failed && std::chrono::steady_clock::now() < retry_after) return false;
+    const auto failed = [] {
+        write_failed = true;
+        retry_after = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        return false;
+    };
     try {
         std::filesystem::create_directories(path.parent_path());
         const auto temp = path.string() + ".tmp";
-        { std::ofstream output(temp, std::ios::trunc); output << values.dump(2) << '\n'; if (!output) return false; }
+        {
+            std::ofstream output(temp, std::ios::trunc);
+            output << values.dump(2) << '\n';
+            output.close();
+            if (!output) return failed();
+        }
         std::error_code error;
         std::filesystem::rename(temp, path, error);
         if (error) {
@@ -178,17 +196,19 @@ bool flush() {
             std::filesystem::remove(backup, error);
             error.clear();
             std::filesystem::rename(path, backup, error);
-            if (error) return false;
+            if (error) return failed();
             std::filesystem::rename(temp, path, error);
             if (error) {
                 std::error_code restore_error;
                 std::filesystem::rename(backup, path, restore_error);
-                return false;
+                return failed();
             }
         }
-        if (!error) dirty = false;
-        return !error;
-    } catch (...) { return false; }
+        dirty = false;
+        write_failed = false;
+        retry_after = {};
+        return true;
+    } catch (...) { return failed(); }
 }
 bool get_bool(std::string_view id, bool fallback) { return read(id, fallback); }
 int get_int(std::string_view id, int fallback) { return read(id, fallback); }

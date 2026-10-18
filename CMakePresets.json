@@ -67,7 +67,7 @@
     {
       "name": "windows-player",
       "displayName": "Banjo-Tooie: Scurvy Dog Port Windows player",
-      "description": "Prepare the maintained player guest and qualify the selected raw archive before linking. Uses the pinned Windows toolchain.",
+      "description": "Configure the maintained Windows player using the prepared guest outputs and pinned toolchain; qualify the raw archive before linking.",
       "inherits": "windows-dev",
       "binaryDir": "${sourceDir}/build/windows-dev",
       "cacheVariables": {

@@ -2,7 +2,8 @@
 #include <filesystem>
 #include "ultramodern/ultramodern.hpp"
 
-// Private carrier boundary: one fixed device session, no product host linkage.
+// Device session for the baseline engine; host/player builds also drive the minimum host
+// and texture-pack registration.
 namespace baseline {
 enum class RenderMode { Original, Display };
 ultramodern::renderer::WindowHandle open_devices(const std::filesystem::path& root,
@@ -21,4 +22,8 @@ void vi_complete();
 void expect_first_graphics(uint32_t start, uint32_t size);
 bool first_graphics_processed();
 bool quit_was_requested();
+#ifdef BASELINE_TERMINAL_FENCE
+// The runtime error owner admitted a first report whose handler has not returned.
+bool runtime_error_report_pending() noexcept;
+#endif
 }

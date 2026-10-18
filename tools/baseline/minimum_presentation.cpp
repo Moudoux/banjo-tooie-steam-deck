@@ -69,6 +69,9 @@ void latch_startup(bool pillarbox_capable) {
     publication.store(0,std::memory_order_release);
     settings.store(word,std::memory_order_release);
 }
+// Startup policy is immutable after latch_startup; only the wide-request bits
+// below are sampled live. publication_word is a separate guest acknowledgement,
+// not a frame-coherent snapshot of displayed output.
 uint32_t settings_word() noexcept {
     return settings.load(std::memory_order_acquire) |
         ((uint32_t(tooie::widescreen::live_widescreen_request()+1)&BASELINE_PRESENT_WIDE_REQUEST_MASK)<<BASELINE_PRESENT_WIDE_REQUEST_SHIFT);

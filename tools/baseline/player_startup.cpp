@@ -277,9 +277,12 @@ Profile Profile::acquire(const fs::path& requested) {
         const DWORD error = GetLastError();
         if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
             fail("The profile folder " + utf8(root) + " could not be inspected" + windows_error(error) + ".");
-        if (!CreateDirectoryW(root.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS)
-            fail("The profile folder " + utf8(root) + " could not be created" + windows_error(GetLastError()) +
-                ". Check that its parent folder exists and can be written.");
+        if (!CreateDirectoryW(root.c_str(), nullptr)) {
+            const DWORD create_error = GetLastError();
+            if (create_error != ERROR_ALREADY_EXISTS)
+                fail("The profile folder " + utf8(root) + " could not be created" + windows_error(create_error) +
+                    ". Check that its parent folder exists and can be written.");
+        }
         attributes = GetFileAttributesW(root.c_str());
     }
     if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY) ||
@@ -379,8 +382,11 @@ Migration migrate_profile(const fs::path& previous, const fs::path& destination)
     }
     try {
         if (saves) {
-            if (!CreateDirectoryW((stage / L"saves").c_str(), nullptr))
-                fail("the saves folder could not be created" + windows_error(GetLastError()));
+            const auto stage_saves = stage / L"saves";
+            if (!CreateDirectoryW(stage_saves.c_str(), nullptr)) {
+                const DWORD error = GetLastError();
+                fail("the saves folder could not be created" + windows_error(error));
+            }
             // The runtime reads <save>.bak when the save itself cannot be opened.
             for (const auto& name : {std::wstring(save_name), std::wstring(save_name) + L".bak"})
                 copy_ordinary(old_saves / name, stage / L"saves" / name);
@@ -432,8 +438,11 @@ ImportResult import_save(const fs::path& source, const fs::path& root) {
     SaveBytes bytes{};
     if (!read_exact(input.handle, bytes.data(), DWORD(bytes.size())))
         fail("The earlier save " + utf8(source) + " could not be read completely. Nothing was copied.");
-    if (!CreateDirectoryW(saves.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS)
-        fail("The saves folder " + utf8(saves) + " could not be created" + windows_error(GetLastError()) + ".");
+    if (!CreateDirectoryW(saves.c_str(), nullptr)) {
+        const DWORD error = GetLastError();
+        if (error != ERROR_ALREADY_EXISTS)
+            fail("The saves folder " + utf8(saves) + " could not be created" + windows_error(error) + ".");
+    }
     if (!saves_empty(saves)) return ImportResult::DestinationNotEmpty;
     const auto staging = root / L"save-import.partial";
     DeleteFileW(staging.c_str()); // An interrupted earlier copy; never a save.

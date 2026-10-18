@@ -7,8 +7,7 @@ import sys
 from pathlib import Path
 
 
-def extract(source: str, function: str = "heap_realloc") -> str:
-    if function not in ("bs_setState", "bainput_update", "func_80800710_bsbtrot", "func_800F86D8",
+DEFAULT_ALLOWED = ("bs_setState", "bainput_update", "func_80800710_bsbtrot", "func_800F86D8",
                         "tooie_trot_toggle_retire", "tooie_trot_toggle_move", "bs_getCurrentState", "bs_getPreviousState", "bs_getNextState", "func_808000DC_bsbtrot", "func_8009DE38", "func_800E7EF4", "heap_realloc", "func_80800380_chhoneycarrier",
                         "boot_osInitialize", "tooie_core1_osInitialize", "boot___osSetFpcCsr",
                         "func_800EBED4", "func_8010A79C", "func_800A7840", "func_800E42F0", "func_800DCF48", "func_800DD998",
@@ -18,7 +17,11 @@ def extract(source: str, function: str = "heap_realloc") -> str:
                         "tooie_backpack621_leaf_begin", "tooie_backpack621_leaf_end",
                         "tooie_npc665_leaf_begin", "tooie_npc665_leaf_end",
                         "tooie_camera_construction_begin", "tooie_camera_construction_end", "tooie_camera_de498_ignore",
-                        "func_8008B10C", "anctrl_setSmoothTransition", "tooie_silo_preflight", "tooie_player_begin", "tooie_player_end", "tooie_player_bone_push", "tooie_player_bone_pop", "tooie_player_leaf_begin", "tooie_player_leaf_end"):
+                        "func_8008B10C", "anctrl_setSmoothTransition", "tooie_silo_preflight", "tooie_player_begin", "tooie_player_end", "tooie_player_bone_push", "tooie_player_bone_pop", "tooie_player_leaf_begin", "tooie_player_leaf_end")
+
+
+def extract(source: str, function: str = "heap_realloc", *, allowed=DEFAULT_ALLOWED) -> str:
+    if function not in allowed:
         raise RuntimeError("unsupported focused fixture function")
     pattern = re.compile(
         r"(?m)^RECOMP_FUNC void " + function + r"\(uint8_t\* rdram, recomp_context\* ctx\) \{"

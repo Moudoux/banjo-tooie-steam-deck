@@ -74,6 +74,25 @@ int main() {
     assert(!config::get_bool("tooie_vsync", true));
     assert(config::get_int("tooie_presentation_mode", -1) == 0);
 
+    // A failed temporary settings write stays visible until an immediate retry succeeds.
+    config::initialize(fresh);
+    assert(config::flush());
+    const auto before_failure = read_file(fresh / "tooie_imgui.json");
+    const auto blocked_temp = fresh / "tooie_imgui.json.tmp";
+    std::filesystem::create_directory(blocked_temp);
+    config::set_int("main_volume", 23);
+    assert(!config::flush(true));
+    assert(!config::recovery_notice().empty());
+    assert(read_file(fresh / "tooie_imgui.json") == before_failure);
+    assert(config::get_int("main_volume", 0) == 23);
+    std::filesystem::remove(blocked_temp);
+    assert(!config::flush(true));
+    assert(read_file(fresh / "tooie_imgui.json") == before_failure);
+    assert(config::flush());
+    assert(config::recovery_notice().empty());
+    config::initialize(fresh);
+    assert(config::get_int("main_volume", 0) == 23);
+
     write_file(damaged / "tooie_imgui.json", "{ damaged canonical settings");
     write_file(damaged / "tooie_imgui.json.bak", R"({"main_volume":41})");
     const auto damaged_primary = read_file(damaged / "tooie_imgui.json");

@@ -28,7 +28,8 @@ const Uint8* baseline_fixture_keyboard_state(int* count) noexcept {
 // This host fixture has no renderer; actual applied-state transport is covered
 // by baseline_output_rate and the production guest widescreen-owner fixture.
 namespace baseline::host::render {
-uint32_t publication_word() noexcept { return 0; }
+uint32_t fixture_publication = 0;
+uint32_t publication_word() noexcept { return fixture_publication; }
 }
 
 namespace {
@@ -435,9 +436,11 @@ int main() {
         require(first_log.find("issue-marker seq=1 local=") != std::string::npos &&
             first_log.find(" utc=") != std::string::npos && first_log.find(" version=") != std::string::npos &&
             first_log.find(" game_started=0 menu=0 ") != std::string::npos &&
-            first_log.find(" output_rate=") != std::string::npos && first_log.find(" fullscreen=") != std::string::npos &&
+            first_log.find(" requested_output_rate=") != std::string::npos && first_log.find(" sdl_fullscreen=0 ") != std::string::npos &&
             first_log.find(" controller=\"") != std::string::npos &&
-            first_log.find(" wide_request=-1 wide_publication=0x00000000") != std::string::npos,
+            first_log.find(" requested_wide=-1 ") != std::string::npos &&
+            first_log.find(" published_aspect_bits=0xffffffff ") != std::string::npos &&
+            first_log.find(" guest_publication=0x00000000") != std::string::npos,
             "F4 marker line lacks sequence, timestamps, version or current state");
         require(fixture.snapshot()->toast.find("#1") != std::string::npos,
             "F4 acknowledgement missing while menu closed");
@@ -548,6 +551,27 @@ int main() {
         preference(host::Preference::QuietTalonTrot,1);
         preference(host::Preference::Resolution,8);
         preference(host::Preference::Wide,1);
+        preference(host::Preference::NativeAspect,2);
+        preference(host::Preference::TalonTrotToggle,1);
+        host::render::fixture_publication = 0x00010003;
+        fixture.f4();
+        const auto live_log = fixture.log();
+        const auto live_marker = live_log.substr(live_log.rfind("baseline issue-marker seq="));
+        require(live_marker.find(" startup_wide=" + std::to_string(startup.wide) + " ") != std::string::npos &&
+            live_marker.find(" startup_aspect=" + std::to_string(startup.native_aspect) + " ") != std::string::npos &&
+            live_marker.find(" startup_cutscene_aspect=" + std::to_string(startup.cutscene_aspect) + " ") != std::string::npos &&
+            live_marker.find(" requested_resolution=8 ") != std::string::npos &&
+            live_marker.find(" requested_wide=1 ") != std::string::npos &&
+            live_marker.find(" requested_aspect=2 ") != std::string::npos &&
+            live_marker.find(" requested_quiet_trot=1 ") != std::string::npos &&
+            live_marker.find(" requested_trot_toggle=1 ") != std::string::npos &&
+            live_marker.find(" published_aspect_bits=0x00000008 ") != std::string::npos &&
+            live_marker.find(" guest_publication=0x00010003") != std::string::npos &&
+            live_marker.find(" wide=") == std::string::npos &&
+            live_marker.find(" live_aspect=") == std::string::npos,
+            "F4 marker confused startup, requested or published values");
+        preference(host::Preference::NativeAspect,0);
+        preference(host::Preference::TalonTrotToggle,0);
         require(tooie::frontend::settings::flush(), "live preferences did not persist");
         host::shutdown();
         require(tooie::widescreen::live_widescreen_request()==-1, "shutdown retained live wide request");

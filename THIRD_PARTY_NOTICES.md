@@ -52,11 +52,15 @@ The launcher and menus use Dear ImGui through RT64. The CIC algorithm in
 
 ## Windows libraries and packaged assets
 
-- [SDL2](https://github.com/libsdl-org/SDL): [zlib notice](third_party/notices/SDL2-zlib.txt).
-- [DirectX Shader Compiler v1.8.2502](https://github.com/microsoft/DirectXShaderCompiler/releases/tag/v1.8.2502):
+- [SDL2](https://github.com/libsdl-org/SDL): the Windows player uses RT64's bundled
+  version 2.26.3; [zlib notice](third_party/notices/SDL2-zlib.txt). The separately
+  locked SDL2 2.30.3 development bundle serves the retained native host.
+- [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler):
+  the Windows player uses RT64's bundled `dxcompiler.dll` (file version
+  1.7.0.4147) and `dxil.dll` (release 1.7.2212). The retained
   [LLVM license](third_party/notices/DXC-v1.8.2502-LICENSE-LLVM.txt) and
-  [release notes](third_party/notices/DXC-v1.8.2502-ReleaseNotes.md) from the
-  official archive distributed with `dxcompiler.dll`.
+  [release notes](third_party/notices/DXC-v1.8.2502-ReleaseNotes.md) describe the
+  separately locked v1.8.2502 development archive.
 - [SDL_GameControllerDB](https://github.com/gabomdq/SDL_GameControllerDB):
   [zlib-style notice](third_party/notices/SDL-GameControllerDB.txt).
   `recompcontrollerdb.txt` is a modified N64/GameCube-oriented subset.

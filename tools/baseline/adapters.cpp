@@ -594,6 +594,9 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
         std::any_of(base[1].funcs, base[1].funcs + base[1].num_funcs,
             [](const auto& entry) { return entry.offset == 0x8002D7B0 - 0x80012030; }))
         rejected_body("core1 publication registry/omitted initializer identity changed");
+    // Capture slots before register_overlay_metadata checks strict, unique ROM order.
+    // Runtime init_overlays later sorts this same table; the admitted order is
+    // already sorted, so the final slots retain these section identities.
     core1_section = &base[1]; following_section = &base[2];
 #endif
     static std::vector<FuncEntry> entries(base[0].funcs, base[0].funcs + base[0].num_funcs);
