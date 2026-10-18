@@ -1285,7 +1285,8 @@ void initialize_settings(const std::filesystem::path& config_root, bool allow_ba
         for (int i = 0, n = SDL_NumJoysticks(); i < n; ++i) connect(i);
         choose_controller();
     }
-    set_fast_forward_rate(tooie::frontend::settings::get_int("tooie_fast_forward_rate", 2));
+    if (host().product)
+        set_fast_forward_rate(tooie::frontend::settings::get_int("tooie_fast_forward_rate", 2));
 }
 void shutdown() noexcept {
     mapped_activity.store(false, std::memory_order_release);
@@ -1641,7 +1642,9 @@ void tick(SDL_Window* window, bool gameplay, bool menu_open) {
         if (utility_allowed && pressed && !previous) dispatch(action);
         previous = pressed;
     }
-    const float deadzone = std::clamp(float(tooie::frontend::settings::get_number("joystick_deadzone", 5.0)) / 100.0f, 0.0f, 0.9f);
+    // Baseline axis() applies baseline_axis and never reads this value.
+    const float deadzone = host().baseline ? 0.0f :
+        std::clamp(float(tooie::frontend::settings::get_number("joystick_deadzone", 5.0)) / 100.0f, 0.0f, 0.9f);
     const bool current_menu_open = host().menu_open();
     const bool menu_closed = was_menu_open && !current_menu_open;
     if (menu_closed || (focus_regained && !background_controller)) {
@@ -1743,7 +1746,8 @@ void tick(SDL_Window* window, bool gameplay, bool menu_open) {
     const bool fast = utility_allowed && fast_pressed && !suppress_fast_forward;
     if (fast && !last_fast_forward) note_discrete_action(DiscreteInputAction::FastForward);
     last_fast_forward = fast;
-    set_fast_forward_rate(tooie::frontend::settings::get_int("tooie_fast_forward_rate", 2));
+    if (host().product)
+        set_fast_forward_rate(tooie::frontend::settings::get_int("tooie_fast_forward_rate", 2));
     set_fast_forward_held(fast);
     const bool camera_enabled = enabled && focused && !focus_regained &&
         free_camera_enabled();
