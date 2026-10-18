@@ -53,7 +53,7 @@ struct Snapshot {
     std::vector<tooie::input::ControllerInfo> controllers;
     std::vector<std::string> profiles;
     std::string active_profile, notice, toast;
-    std::array<BindingRow, 19> bindings;
+    std::array<BindingRow, unsigned(tooie::input::Action::Menu) + 1> bindings;
     Preferences preferences;
 };
 struct RenderInput {
