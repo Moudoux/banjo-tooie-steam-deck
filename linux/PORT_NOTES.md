@@ -119,6 +119,16 @@ Steam Deck features:
   its pins are unchanged. Found via Lighthouse (HarbourMasters' Banjo-Kazooie
   port), which pads its frustum the same way.
 
+- **Menu maps at the original rate** (`tools/baseline/devices.cpp`,
+  `update_screen`): untagged menu models (startup logos, save-select picture
+  frames) jitter under RT64's automatic interpolation (`G_EX_ID_AUTO`). The
+  renderer reads the current map (u16 at `0x80132DC2`, returned by
+  `func_800EA05C`) each frame and presents maps `0x18B` (startup intro) and
+  `0x158` (game select) at Original while Display/Manual is selected; the
+  saved preference is untouched and gameplay keeps the chosen rate. Map
+  changes are logged as `baseline map=0x... menu_rate_original=...`. A real
+  fix would tag those draws with matrix groups in the guest.
+
 ## Verified vs not
 
 - Verified on the dev machine (Arch, Ryzen 9 3900X = Zen 2, RTX 4070 SUPER,
@@ -127,7 +137,8 @@ Steam Deck features:
   entries; repository checks.
 - Steam Deck (SteamOS 3.8.28, glibc 2.41, RADV), confirmed by the owner:
   runs after the Vulkan window flag fix, and the frustum padding removed the
-  green edge pop-in while turning the camera.
+  green edge pop-in while turning the camera; the menu-map rate override
+  stopped the logo and picture-frame jitter with gameplay still at 90 Hz.
 - Not verified: real gamepad input with the XBLA layout, battery and
   90 Hz pacing, extended gameplay.
 

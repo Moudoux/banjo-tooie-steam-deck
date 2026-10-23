@@ -273,6 +273,11 @@ class StockRenderer final : public ultramodern::renderer::RendererContext {
     std::array<uint8_t, 0x1000> dmem{}, imem{};
     std::array<uint32_t, 9> registers{};
     std::unique_ptr<RT64::Application> app;
+#if BASELINE_PLAYER
+    uint8_t* guest_rdram = nullptr;
+    uint32_t observed_map = 0xFFFFFFFFu;
+    bool menu_rate_forced = false;
+#endif
 public:
     StockRenderer(uint8_t* rdram, ultramodern::renderer::WindowHandle handle, bool developer) {
         using namespace ultramodern::renderer;
@@ -286,6 +291,9 @@ public:
         core.window = handle;
 #endif
         core.HEADER = header.data(); core.RDRAM = rdram;
+#if BASELINE_PLAYER
+        guest_rdram = rdram;
+#endif
         core.DMEM = dmem.data(); core.IMEM = imem.data();
         core.checkInterrupts = check_interrupts;
         core.MI_INTR_REG = &registers[0];
@@ -440,8 +448,18 @@ public:
             std::fprintf(stderr, "baseline resolution config-applied scale=%d owner=gfx presented=unobserved\n", resolution);
         }
         const auto requested = host::requested_output_rate();
+        // Untagged menu models (intro logos, save-select frames) mismatch under RT64's
+        // automatic interpolation and jitter, so menu maps present at the original rate.
+        // Current map: the u16 that func_800EA05C returns from 0x80132DC2.
+        const uint32_t map = *reinterpret_cast<const uint16_t*>(guest_rdram + ((0x80132DC2u ^ 2u) - 0x80000000u));
+        const bool menu_map = map == 0x158 || map == 0x18B;
+        const bool force_original = menu_map && requested.option >= 2;
+        if (map != observed_map || force_original != menu_rate_forced) {
+            std::fprintf(stderr, "baseline map=0x%03X menu_rate_original=%d\n", map, int(force_original));
+            observed_map = map; menu_rate_forced = force_original;
+        }
         auto config = ultramodern::renderer::get_graphics_config(); // Graphics owner only after startup.
-        host::render::preference_rate(config, requested.option, requested.manual_hz);
+        host::render::preference_rate(config, force_original ? 1 : requested.option, requested.manual_hz);
         if (config != ultramodern::renderer::get_graphics_config()) ultramodern::renderer::set_graphics_config(config);
 #endif
         app->updateScreen();
