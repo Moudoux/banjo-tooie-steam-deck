@@ -86,6 +86,7 @@ int trigger_press_percent = 50, trigger_release_percent = 45;
 BindingLayer scanned_layer = BindingLayer::Base;
 std::array<std::array<std::array<bool, 8>, 2>, count> axis_latches{};
 bool modifier_axis_latch = false;
+std::array<bool, 8> z_chord_latches{};
 std::map<std::pair<unsigned, int>, bool> chord_axis_latches;
 std::vector<Binding> chord_suppressed_base;
 std::array<bool, SDL_CONTROLLER_BUTTON_MAX> event_buttons_down{};
@@ -316,7 +317,7 @@ BindingTable defaults() {
     return table;
 }
 void reset_input_latches() {
-    axis_latches = {}; modifier_axis_latch = false; chord_axis_latches.clear(); chord_suppressed_base.clear();
+    axis_latches = {}; z_chord_latches = {}; modifier_axis_latch = false; chord_axis_latches.clear(); chord_suppressed_base.clear();
     event_buttons_down.fill(false); event_axes_values.fill(0); event_axis_latches.clear();
     event_modifier_axis_latch = false; event_buttons_device = event_axes_device = -1;
 }
@@ -652,6 +653,23 @@ bool down(const BindingTable& table, Action action, const Uint8* keys, SDL_GameC
         }
     }
     return false;
+}
+// XBLA talon trot: with Z on two controller inputs (LT and RT), holding one
+// and pressing the other is the N64's Z + C-left.
+bool z_chord_down(const BindingTable& table, SDL_GameController* controller, const std::vector<Binding>& suppressed) {
+    const auto& row = table[static_cast<size_t>(Action::Z)];
+    unsigned held = 0;
+    for (unsigned slot = 0; slot < row.size(); ++slot) {
+        const Binding binding = row[slot];
+        if (binding.device == Device::Keyboard || std::any_of(suppressed.begin(), suppressed.end(),
+                [&](Binding blocked) { return same_binding(binding, blocked); }) ||
+            std::any_of(row.begin(), row.begin() + slot, [&](Binding prior) { return same_binding(prior, binding); })) {
+            z_chord_latches[slot] = false;
+            continue;
+        }
+        if (physical_binding_down(binding, controller, z_chord_latches[slot])) ++held;
+    }
+    return held >= 2;
 }
 float axis(SDL_GameController* controller, SDL_GameControllerAxis which, float deadzone) {
     if (!controller) return 0;
@@ -1721,6 +1739,10 @@ void tick(SDL_Window* window, bool gameplay, bool menu_open) {
             if (down(table, action, nullptr, controller, BindingLayer::Base, &blocked_base, analog_camera_enabled) ||
                 (modifier_down && down(modified_table, action, nullptr, controller, BindingLayer::Modified))) controller_bits |= mask;
         }
+        // C-left only once last poll already sent Z, so a two-trigger press
+        // in the same frame still crouches before it trots.
+        if (z_chord_down(table, controller, blocked_base) &&
+            (published_buttons.load(std::memory_order_acquire) & 0x2000)) controller_bits |= 0x0002;
         suppressed_keyboard_buttons &= keyboard_bits;
         bits = (keyboard_bits & ~suppressed_keyboard_buttons) | controller_bits;
         suppressed_buttons &= bits;

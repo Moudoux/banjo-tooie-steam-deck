@@ -106,7 +106,17 @@ Steam Deck features:
   table: A=A, X and B=N64 B, LT/RT=Z, LB/RB=R, Y=C-up, right stick X=C-left/
   right (inverted at the owner's request), right stick up or down=C-down,
   LS click=L, View=menu. The camera is stepped C-buttons, not XBLA's analog
-  camera.
+  camera. XBLA's Talon Trot chord: while two controller inputs bound to Z
+  are held (LT + RT), `z_chord_down` adds C-left, but only once the previous
+  poll already sent Z, so pressing both in the same frame crouches first.
+
+- **Instant intro skip** (`tools/baseline/minimum_host_hooks.py`,
+  `INTRO_SKIP_TEXT`): the startup intro ticker (`func_808005AC_chintroticker`)
+  reads Start (`func_80015FA0(0)`) only when global flag `0xD56` is set
+  (`func_800DA298`, block at `0x8012C78C`), so Start did nothing for the
+  first part of the intro. A raw hook before `0x80800644` treats the flag as
+  set; the transition-busy check (`func_800A8264`) and the original exit to
+  the frontend (`gcfrontend` entrypoint 10) still run.
 
 - **Frustum padding** (`tools/baseline/minimum_host_hooks.py`, `FRUSTUM_HOOKS`):
   Tooie keeps its culling planes in the camera struct (FOV `+0xE4`, aspect
