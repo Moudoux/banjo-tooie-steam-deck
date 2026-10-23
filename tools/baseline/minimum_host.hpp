@@ -31,9 +31,9 @@ struct Preferences {
     int master_volume = 100;
     int music_volume = 100;
     int rumble_strength = 100;
-    int analog_camera = 0, camera_invert_x = 0;
+    int analog_camera = 0, camera_invert_x = 0, camera_invert_y = 0;
 };
-enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume, AnalogCamera, CameraInvertX };
+enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume, AnalogCamera, CameraInvertX, CameraInvertY };
 struct OutputRate { int option = 0, manual_hz = 60; };
 inline uint32_t pack_output_rate(OutputRate rate) noexcept {
     return (uint32_t(rate.option) << 16) | uint32_t(rate.manual_hz);

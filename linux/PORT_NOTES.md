@@ -104,7 +104,7 @@ Steam Deck features:
 - **XBLA button layout** as the Deck default (`src/frontend_input_preference.cpp`
   `defaults()`, `TOOIE_DECK_DEFAULTS`), checked against the XBLA manual
   table: A=A, X and B=N64 B, LT/RT=Z, LB/RB=R, Y=C-up, right stick X=C-left/
-  right (inverted at the owner's request), right stick up or down=C-down,
+  right (inverted at the owner's request), right stick up or down and RS click=C-down,
   LS click=L, View=menu. The camera is stepped C-buttons, not XBLA's analog
   camera. XBLA's Talon Trot chord: while two controller inputs bound to Z
   are held (LT + RT), `z_chord_down` adds C-left, but only once the previous
@@ -147,31 +147,44 @@ Steam Deck features:
   (the original C-left/C-right gate) calls `tooie_camera_analog_apply`, which
   feeds right-stick X proportionally into the original rotate routine
   (`func_80114D98`, `func_801111D0`). Settings `tooie_analog_camera_enabled`
-  and `tooie_camera_invert_x` (menu checkboxes); with it on, only right-stick X
-  leaves the C-button bindings, so up/down still toggles camera views. No
-  free pitch: unlike Lighthouse's free-look, Tooie's camera is not taken over.
+  `tooie_camera_invert_x` and `tooie_camera_invert_y` (menu checkboxes);
+  with it on, both right-stick axes leave the C-button bindings and the Deck
+  layout's view toggle (C-down) is on the right stick click.
   `baseline_input_host_test` (not built by default) now needs
   `camera_analog.cpp` too.
   The player's `tooie::input::snapshot()` used to hard-code the right stick
   to zero, which made the first Deck build's analog camera dead; it now
   publishes `published_rx`/`ry`.
   The camera is a Lighthouse-style orbit (`FreeLookCamera.cpp`), owned in
-  native code while active: entered at a 0.30 stick (shaped like Lighthouse's
-  `ReadStick`, radial 0.15 deadzone), yaw changes by stick x 160 deg/s x dt,
-  distance and elevation are captured on entry, the aim height is smoothed at
-  rate 8, and it stays where it was left. A second raw hook before
+  native code while active: entered at a 0.30 stick, yaw changes by stick x
+  160 deg/s x dt
+  and elevation by stick y x 100 deg/s x dt (up raises the camera, as in
+  Lighthouse; clamped to Lighthouse's pitch range, -40 to 85 degrees of
+  elevation, and an entry angle outside it only moves inwards), distance and
+  elevation are captured on entry, the aim height is smoothed at
+  rate 8, and it stays where it was left. The stick is shaped as Lighthouse's
+  free-look receives it (`frontend_input_preference.cpp`): libultraship's
+  default `ControllerStick::Process` (20% circular deadzone on its +-85
+  scale, N64 octagon, int8), Lighthouse's `controller_getRightStick` divide
+  by 127 (a full push reads 0.67), then `ReadStick` (radial 0.15 deadzone,
+  rescaled). Full tilt is therefore 98 deg/s yaw and 61 deg/s pitch, and
+  nothing moves below about 38% deflection. The first Deck builds skipped
+  the libultraship and /127 stages and turned 1.6x faster at full tilt.
+  Lighthouse also eases the camera to its orbit target with a spring
+  (`func_802BE190`, gain 20); this orbit places it directly. A second raw hook before
   `0x8011066C` in `func_80110588` (`tooie_camera_orbit_apply`) writes the pose
   into the view copies (sp+0x34 position, sp+0x28 rotation) and the camera's
   own state (+0x74, +0x80, yaw controller +0x10/+0x14, velocity +0x18 = 0), so
   the game resumes from it. Tooie conventions: rotation (pitch, yaw, roll) in
   degrees, yaw = atan2(dx, dz) of position minus focus (`func_80112550`),
-  pitch = 360 - elevation. Turn steps are refused when `func_8011349C` reports
-  the path blocked. The orbit ends on a game yaw transition (C buttons), a
+  pitch = 360 - elevation. Steps are refused when `func_8011349C(from, to)`
+  reports the path between the two camera positions blocked; a blocked
+  combined step retries yaw alone, then pitch alone. The orbit ends on a game yaw transition (C buttons), a
   camera mode change, or a frame without manual rotation (cutscene, menu,
   view toggle). The camera component is relocated by the heap, so its
   address changing in the same mode keeps the orbit. Measured with a virtual
-  pad: constant 84.7 deg/s from the first frame at 0.53 shaped stick, rotation
-  equal to yaw, zero motion after release, kept while walking. Unlike
+  pad, before the libultraship shaping: constant 84.7 deg/s from the first
+  frame at 0.53 shaped stick, rotation equal to yaw, zero motion after release, kept while walking. Unlike
   Lighthouse, no collision pull-in while walking during an orbit.
 
 ## Verified vs not

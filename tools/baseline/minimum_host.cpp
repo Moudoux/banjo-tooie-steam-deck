@@ -311,6 +311,10 @@ void update_preference(Preference key, int value) {
         if (value < 0 || value > 1) return;
         selected.camera_invert_x = value; settings::set_bool("tooie_camera_invert_x", value != 0);
         tooie::camera::set_horizontal_inverted(value != 0); break;
+    case Preference::CameraInvertY:
+        if (value < 0 || value > 1) return;
+        selected.camera_invert_y = value; settings::set_bool("tooie_camera_invert_y", value != 0);
+        tooie::camera::set_vertical_inverted(value != 0); break;
     case Preference::QuietTalonTrot:
         if (value < 0 || value > 1) return;
         selected.quiet_talon_trot = value;
@@ -591,8 +595,10 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
 #endif
     selected.analog_camera = settings::get_bool("tooie_analog_camera_enabled", fresh.analog_camera != 0);
     selected.camera_invert_x = settings::get_bool("tooie_camera_invert_x", fresh.camera_invert_x != 0);
+    selected.camera_invert_y = settings::get_bool("tooie_camera_invert_y", fresh.camera_invert_y != 0);
     tooie::camera::set_analog_enabled(selected.analog_camera != 0);
     tooie::camera::set_horizontal_inverted(selected.camera_invert_x != 0);
+    tooie::camera::set_vertical_inverted(selected.camera_invert_y != 0);
     latched = selected; vsync.store(selected.vsync, std::memory_order_release);
     resolution.store(selected.resolution, std::memory_order_release);
     texture_filter.store(selected.texture_filter, std::memory_order_release);
