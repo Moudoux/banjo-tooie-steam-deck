@@ -54,7 +54,11 @@ void mark_issue() {
     }
     const auto now = std::time(nullptr);
     std::tm local{}, utc{};
+#ifdef _WIN32
     localtime_s(&local, &now); gmtime_s(&utc, &now);
+#else
+    localtime_r(&now, &local); gmtime_r(&now, &utc);
+#endif
     char local_stamp[32]{}, utc_stamp[32]{}, clock_stamp[16]{};
     std::strftime(local_stamp, sizeof(local_stamp), "%Y-%m-%d %H:%M:%S", &local);
     std::strftime(utc_stamp, sizeof(utc_stamp), "%Y-%m-%dT%H:%M:%SZ", &utc);

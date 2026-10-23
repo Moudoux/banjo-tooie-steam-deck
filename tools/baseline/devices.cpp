@@ -25,8 +25,18 @@
 #endif
 #include "SDL.h"
 #include "SDL_syswm.h"
+#ifndef _WIN32
+// X11 macros from SDL_syswm.h collide with RT64 enumerators.
+#undef None
+#undef Status
+#undef Bool
+#undef Always
+#undef Success
+#endif
+#ifdef _WIN32
 // Runtime's lean Windows include omits the COM bases required by DXC headers.
 #include <objbase.h>
+#endif
 #include "hle/rt64_application.h"
 #include "hle/rt64_state.h"
 #include "hle/rt64_rsp.h"
@@ -270,7 +280,11 @@ public:
         chosen_api = GraphicsApi::Auto;
         if (developer != bool(BASELINE_RENDERER_COMPARISON)) fail("Developer mode differs from selected baseline admission");
         RT64::Application::Core core{};
+#ifdef _WIN32
         core.window = handle.window;
+#else
+        core.window = handle;
+#endif
         core.HEADER = header.data(); core.RDRAM = rdram;
         core.DMEM = dmem.data(); core.IMEM = imem.data();
         core.checkInterrupts = check_interrupts;
@@ -314,7 +328,11 @@ public:
 #if TOOIE_BASELINE_HOST
         host::render::configure_startup(*app);
 #endif
+#ifdef _WIN32
         const auto original = app->setup(handle.thread_id);
+#else
+        const auto original = app->setup(0);
+#endif
         setup_result = map_result(original);
         if (setup_result == SetupResult::Success && (!app->device || !app->swapChain || !app->interpreter ||
             !app->state || !app->workloadQueue || !app->presentQueue || !app->sharedQueueResources
@@ -795,7 +813,11 @@ ultramodern::renderer::WindowHandle open_devices(const std::filesystem::path& ro
     quit_published.store(false, std::memory_order_relaxed);
     quit_at = seconds ? std::chrono::steady_clock::now() + std::chrono::seconds(seconds)
         : std::chrono::steady_clock::time_point::max();
+#ifdef _WIN32
     return {wm.info.win.window, GetCurrentThreadId()};
+#else
+    return window;
+#endif
 }
 void emit_audio_summary() {
     std::lock_guard guard(audio_mutex);

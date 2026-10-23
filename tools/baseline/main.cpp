@@ -28,11 +28,19 @@
 #include <stdexcept>
 #include <string_view>
 #include <thread>
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace {
 std::atomic<bool> runtime_error_reported = false;
 constexpr char profile_marker[] = "TooieBaseline isolated profile v1\n";
+#ifdef _WIN32
 class ProfileLock {
     HANDLE handle = INVALID_HANDLE_VALUE;
 public:
@@ -52,6 +60,26 @@ public:
     }
     ~ProfileLock() { if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle); }
 };
+#else
+class ProfileLock {
+    int fd = -1;
+public:
+    void acquire(const std::filesystem::path& root) {
+        struct stat info{};
+        if (::lstat(root.c_str(), &info) != 0 || S_ISLNK(info.st_mode))
+            throw std::runtime_error("Baseline profile must not be a link");
+        fd = ::open((root / ".baseline-profile").c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+        if (fd < 0 || ::flock(fd, LOCK_EX | LOCK_NB) != 0)
+            throw std::runtime_error("Baseline marker absent or profile already in use");
+        char marker[sizeof(profile_marker)]{};
+        const ssize_t bytes = ::read(fd, marker, sizeof(marker));
+        if (bytes != ssize_t(sizeof(profile_marker) - 1) ||
+            std::string_view(marker, size_t(bytes)) != std::string_view(profile_marker))
+            throw std::runtime_error("Baseline ownership marker does not match");
+    }
+    ~ProfileLock() { if (fd >= 0) ::close(fd); }
+};
+#endif
 struct Options {
     std::filesystem::path rom, profile, input_script;
     std::string condition;

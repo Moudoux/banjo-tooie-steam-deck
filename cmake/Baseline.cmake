@@ -1,6 +1,6 @@
 # Declared baseline selection; optional generic RT64 repairs exclude product policies.
-if(NOT WIN32)
-    message(FATAL_ERROR "The reviewed baseline carrier currently supports Windows only")
+if(NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "The reviewed baseline carrier currently supports Windows and Linux only")
 endif()
 set(TOOIE_DEPS_ROOT "${CMAKE_SOURCE_DIR}/deps" CACHE PATH "Pinned dependency root")
 set(TOOIE_BASELINE_GENERATED_DIR "${CMAKE_BINARY_DIR}/baseline/raw" CACHE PATH "Raw baseline guest corpus")
@@ -89,10 +89,17 @@ find_package(Threads REQUIRED)
 add_subdirectory("${RUNTIME_ROOT}" "${CMAKE_BINARY_DIR}/runtime")
 target_include_directories(librecomp PUBLIC "${RUNTIME_RECOMP_INCLUDE}")
 target_include_directories(ultramodern PUBLIC "${RUNTIME_RECOMP_INCLUDE}")
-set(SDL2_INCLUDE_DIRS "${_baseline_sdl}/include")
-set(SDL2_LIBRARIES "${_baseline_sdl}/lib/x64/SDL2.lib")
+if(WIN32)
+    set(SDL2_INCLUDE_DIRS "${_baseline_sdl}/include")
+    set(SDL2_LIBRARIES "${_baseline_sdl}/lib/x64/SDL2.lib")
+    set(RT64_SDL_WINDOW_VULKAN OFF CACHE BOOL "Stock Windows backend" FORCE)
+else()
+    # Linux: system SDL2 and RT64's SDL Vulkan window, matching ultramodern's SDL_Window* handle.
+    find_package(SDL2 REQUIRED)
+    set(SDL2_LIBRARIES SDL2::SDL2)
+    set(RT64_SDL_WINDOW_VULKAN ON CACHE BOOL "SDL Vulkan Linux" FORCE)
+endif()
 set(RT64_STATIC ON CACHE BOOL "Stock static RT64" FORCE)
-set(RT64_SDL_WINDOW_VULKAN OFF CACHE BOOL "Stock Windows backend" FORCE)
 add_subdirectory("${_baseline_rt64}" "${CMAKE_BINARY_DIR}/rt64")
 
 # Only source-demonstrated generic repairs; never select the product matcher bundle.
@@ -361,15 +368,21 @@ inline constexpr char product[] = "Banjo-Tooie: Scurvy Dog Port";
 inline constexpr char version[] = "@TOOIE_PLAYER_VERSION@";
 }
 ]] @ONLY)
-    target_sources(TooieBaseline PRIVATE tools/baseline/player_startup.cpp)
     target_include_directories(TooieBaseline PRIVATE "${_player_generated}")
     target_compile_definitions(TooieBaseline PRIVATE BASELINE_PLAYER=1)
+    if(WIN32)
+    target_sources(TooieBaseline PRIVATE tools/baseline/player_startup.cpp)
     target_link_libraries(TooieBaseline PRIVATE user32 shell32 ole32 comdlg32)
     # Double-click play opens no console; diagnostics go to the profile log.
     set_target_properties(TooieBaseline PROPERTIES OUTPUT_NAME BanjoTooieScurvyDogPort WIN32_EXECUTABLE TRUE)
     target_link_options(TooieBaseline PRIVATE /ENTRY:mainCRTStartup)
     # Release-family PDB reference without the build machine's absolute path.
     target_link_options(TooieBaseline PRIVATE "/PDBALTPATH:%_PDB%")
+    else()
+    target_sources(TooieBaseline PRIVATE tools/baseline/player_startup_posix.cpp)
+    target_link_libraries(TooieBaseline PRIVATE nfd)
+    set_target_properties(TooieBaseline PROPERTIES OUTPUT_NAME BanjoTooieScurvyDogPort)
+    endif()
     add_executable(BaselinePlayerStartupTest EXCLUDE_FROM_ALL tests/baseline_player_startup_test.cpp
         tools/baseline/player_startup.cpp)
     target_include_directories(BaselinePlayerStartupTest PRIVATE "${CMAKE_SOURCE_DIR}/tools/baseline" "${_player_generated}")
@@ -1342,9 +1355,16 @@ target_include_directories(TooieBaseline PRIVATE
 target_compile_definitions(TooieBaseline PRIVATE SDL_MAIN_HANDLED HLSL_CPU NOMINMAX __PRFCHWINTRIN_H)
 target_compile_definitions(TooieBaseline PRIVATE "BASELINE_QUIET_TROT=$<BOOL:${_baseline_quiet_trot}>")
 target_link_libraries(TooieBaseline PRIVATE BaselineRecompiledFuncs librecomp ultramodern rt64
-    Threads::Threads "${SDL2_LIBRARIES}" bcrypt winmm)
+    Threads::Threads "${SDL2_LIBRARIES}")
+if(WIN32)
+    target_link_libraries(TooieBaseline PRIVATE bcrypt winmm)
+else()
+    find_package(OpenSSL REQUIRED)
+    target_link_libraries(TooieBaseline PRIVATE OpenSSL::Crypto)
+endif()
 # Qualification is a manual reviewed step; build targets never create/refresh it.
-if(TOOIE_BASELINE_CAMERA_IDENTITY)
+# The gate reads the MSVC map and PE image, so it applies to the Windows build only.
+if(TOOIE_BASELINE_CAMERA_IDENTITY AND WIN32)
     if(NOT MSVC OR NOT TOOIE_BASELINE_TERMINAL_FENCE OR NOT _baseline_map)
         message(FATAL_ERROR "Selected raw gate requires a map-producing composition")
     endif()
@@ -1366,12 +1386,14 @@ if(TOOIE_BASELINE_CAMERA_IDENTITY)
 endif()
 
 # Original RT64 exposes bare SDL2/SDL2main imports from its directory scope.
+if(WIN32)
 target_link_directories(TooieBaseline PRIVATE "${_baseline_sdl}/lib/x64")
 add_custom_command(TARGET TooieBaseline POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_baseline_sdl}/lib/x64/SDL2.dll" "$<TARGET_FILE_DIR:TooieBaseline>"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_baseline_rt64}/src/contrib/dxc/bin/x64/dxcompiler.dll" "$<TARGET_FILE_DIR:TooieBaseline>"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_baseline_rt64}/src/contrib/dxc/bin/x64/dxil.dll" "$<TARGET_FILE_DIR:TooieBaseline>"
     VERBATIM)
+endif()
 message(STATUS "Baseline: declared runtime sources + RT64 generic repairs=${TOOIE_BASELINE_RT64_GENERIC_FIXES}; raw=${TOOIE_BASELINE_GENERATED_DIR}; fatal carriers=${TOOIE_BASELINE_FATAL_PROVIDERS}; fatal imports=${TOOIE_BASELINE_FATAL_IMPORTS}")
 message(STATUS "Baseline boot patch=${TOOIE_BASELINE_BOOT_PATCH_DIR}; boot PI=${TOOIE_BASELINE_BOOT_PI}; observer=${TOOIE_BASELINE_BOOT_OBSERVER}")
 enable_testing()

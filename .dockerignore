@@ -1,0 +1,5 @@
+# Ignore absolutely everything
+*
+
+# Allow only the Dockerfile
+!Dockerfile
