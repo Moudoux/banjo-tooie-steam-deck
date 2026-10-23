@@ -1,99 +1,131 @@
-# Banjo-Tooie: Scurvy Dog Port
+# Banjo-Tooie: Scurvy Dog Port (Linux / Steam Deck)
 
-Banjo-Tooie: Scurvy Dog Port is an unofficial PC port of Banjo-Tooie. It
-statically recompiles the original game code with
+An unofficial Linux build of
+[Banjo-Tooie: Scurvy Dog Port](https://github.com/some-scurvy-dog/banjo-tooie-scurvy-dog-port),
+a PC port that statically recompiles Banjo-Tooie with
 [N64Recomp](https://github.com/N64Recomp/N64Recomp) and renders it with
-[RT64](https://github.com/rt64/rt64). It is an alpha. The game is not
-included: you need your own NTSC-U 1.0 ROM.
+[RT64](https://github.com/rt64/rt64). This fork adds a native Linux player
+tuned for the Steam Deck OLED. It is an alpha, built from source only. The
+game is not included: you need your own NTSC-U 1.0 ROM.
 
-This project is a work in progress. The design is not final, and improvements are continually evaluated.
+Not affiliated with the upstream project, BanjoRecomp, Rare or Nintendo.
+Report Linux problems here, not upstream.
 
-The current release is for Windows x64.
+## What this fork adds
 
-**This project is not affiliated with BanjoRecomp.**
+- Native Linux player (Vulkan through RT64, SDL2).
+- Steam Deck build: Zen 2 code generation, and defaults for new profiles of
+  3x resolution, output following the display rate, 16:10 widescreen and
+  fullscreen.
+- A 16:10 gameplay aspect and an "Auto (fit window)" resolution setting.
+- Xbox 360 (XBLA) button layout as the controller default.
+- The ROM is picked up automatically when it sits beside the game.
+- `recompcontrollerdb.txt` fills in controllers that SDL and Steam don't
+  already know.
 
-## AI disclosure
+The 16:10 option changes the game-code patches, so this build's guest image
+differs from upstream's verified one.
 
-AI tools generated substantial portions of this project's code and assisted
-with engineering and review. The project owner directs development, tests the
-game and checks its behavior. Some upstream projects do not accept AI-generated
-contributions. Respect their policies when you contribute to them.
+## Build
+
+You need Docker and your ROM. Its SHA-256 must be
+`9ec37fba6890362eba86fb855697a9cff1519275531b172083a1a6a045483583`.
+
+```sh
+git clone git@github.com:Moudoux/banjo-tooie.git
+cd banjo-tooie
+git switch linux
+cp /path/to/your/rom.z64 baserom.us.z64
+docker build -t tooie-toolchain:latest .
+docker run --rm -it -v "$(pwd)":/workspace tooie-toolchain:latest linux/build.sh
+sudo chown -R "$USER": .
+```
+
+The first build downloads about 10 GB of pinned tools and takes a while.
+The game ends up in `build/linux-player/baseline/player-bin/`.
+
+Build options (pass with `-e NAME=value` to `docker run`):
+
+| Option | Meaning |
+| --- | --- |
+| `TARGET=deck` | Default. Tuned for the Steam Deck and other Zen 2 CPUs, with Deck defaults and XBLA controls. |
+| `TARGET=generic` | Any x86-64 CPU, upstream defaults and controls. |
+| `CLEAN=1` | Start from fresh build folders. Needed after pulling changes to the game patches. |
+
+Nothing ROM-derived may be shared: not the ROM, not `generated/`, `deps/`,
+`build/`, nor the built game.
 
 ## Play
 
-Download the latest ZIP from
-[Releases](https://github.com/some-scurvy-dog/banjo-tooie-scurvy-dog-port/releases).
-Extract all of it into one folder and run `BanjoTooieScurvyDogPort.exe`. On
-first launch, choose your ROM when asked.
+Copy `BanjoTooieScurvyDogPort`, `recompcontrollerdb.txt` and your ROM (as
+`baserom.us.z64`) into one folder and run the game. The ROM is copied into
+your profile on first launch, after which the folder copy is no longer needed.
 
-- [Player guide](docs/PLAYER_GUIDE.md): supported ROM, saves, bringing over an
-  Alpha 3 save, controls, settings and troubleshooting.
-- [Release notes](docs/RELEASE_NOTES.md): changes and known issues.
+Your profile, saves, settings and `player.log` are in
+`~/.local/share/BanjoTooieScurvyDogPort` (or `$XDG_DATA_HOME`).
 
-## Renderer direction
+### Steam Deck
 
-The port draws through the original game's recompiled code. Smoother output
-comes from labelling that output for RT64, not from running the game faster.
-The renderer work follows three principles:
+1. Check `ldd --version` in Desktop Mode: SteamOS needs glibc 2.38 or newer.
+2. Put the game folder somewhere in your home directory and add the
+   executable to Steam as a non-Steam game.
+3. Launch it from Game Mode. Steam Input's default gamepad template works as
+   is; cap the frame rate in the quick access menu to save battery.
 
-- **Stable history.** Each object, model part and view keeps a consistent
-  identity across game updates, so interpolation pairs the right transforms.
-- **Shared handling.** Deformation, attachments and split play follow common
-  rules rather than fixes for individual characters.
-- **Correct ownership.** Game behavior stays in patches to the game's own
-  code; the runtime and renderer provide services, not game policy.
+### Controls (Deck build)
 
-Player testing has accepted ordinary models, split play, camera movement,
-save-select animation and widescreen zone transitions. Known issues are in the
-[release notes](docs/RELEASE_NOTES.md), and [Rendering](docs/RENDERING.md)
-describes the current design and its limits. Texture pack support is in the
-source but untested; code mods and ROM patches are not supported.
+| Button | N64 | Action |
+| --- | --- | --- |
+| Left stick | Stick | Move |
+| A | A | Jump |
+| X | B | Attack, talk |
+| LT / RT | Z | Crouch |
+| LB / RB | R | Centre camera |
+| Y | C-up | First person; crouch + Y spits eggs |
+| B | C-down | Camera view; crouch + B fires eggs backwards |
+| Right stick left / right | C-left / C-right | Turn camera |
+| Right stick down | C-down | Camera view |
+| Left stick click | L | |
+| Start | Start | Pause |
+| View | | Settings menu |
 
-## Looking ahead to Alpha 5
+Everything can be rebound in the settings menu. Profiles made before this
+layout keep their bindings until you choose "Reset bindings".
 
-These are general aims, not promises or a schedule:
+## Updating
 
-- Make maintained game patches, runtime integration and build tools easier to
-  understand and change.
-- Simplify duplicated handling while preserving established game behavior and
-  renderer lifetimes.
-- Prove improvements on small, independently reviewed examples before expanding
-  them across the port.
+```sh
+git fetch upstream
+git rebase upstream/main
+docker run --rm -it -e CLEAN=1 -v "$(pwd)":/workspace tooie-toolchain:latest linux/build.sh
+```
 
-## Build and contribute
+Add the upstream remote once with
+`git remote add upstream https://github.com/some-scurvy-dog/banjo-tooie-scurvy-dog-port.git`.
 
-- [Windows build guide](docs/WINDOWS.md): the maintained way to build and
-  package the port from source.
-- [Contributing](CONTRIBUTING.md): reporting problems and proposing changes.
-- [Architecture](docs/ARCHITECTURE.md): what is built, who owns each
-  behavior, and the rules for changes.
+## For developers and AI agents
 
-`python tools/check_repository.py` runs the ROM-free source checks.
+Read [linux/PORT_NOTES.md](linux/PORT_NOTES.md) first: how the build works,
+every change made for Linux and the Deck, what has and hasn't been tested,
+and how to handle upstream updates. Upstream's rules in
+[CONTRIBUTING.md](CONTRIBUTING.md) and
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) still apply, and
+`python tools/check_repository.py` must pass.
 
-### Agents: start here
+## AI disclosure
 
-If you are an AI agent or automated tool working in this repository:
-
-1. Read [CONTRIBUTING.md](CONTRIBUTING.md). Its rules on checks, private
-   files and AI disclosure apply to you.
-2. Read [Rules for changes](docs/ARCHITECTURE.md#rules-for-changes) before
-   you edit code.
-3. Use
-   [How to find what is selected](docs/ARCHITECTURE.md#how-to-find-what-is-selected)
-   to confirm that a file is in the player before you change it.
-
-## Report a problem
-
-See [how to report a problem](CONTRIBUTING.md#report-a-problem).
+AI tools generated substantial portions of the upstream project's code. This
+fork's Linux and Steam Deck changes were written with an AI agent and
+reviewed by the fork's owner.
 
 ## Credits and license
 
-The port uses N64Recomp, N64ModernRuntime, RT64, Dear ImGui, SDL2 and other
-projects listed in [third-party notices](THIRD_PARTY_NOTICES.md). The
-[Banjo-Tooie decompilation](https://github.com/Mr-Wiseguy/banjo-tooie) provides
-symbols and reverse-engineering groundwork. Credit for that work stays with
-their contributors.
+Upstream port by its authors; see the
+[upstream project](https://github.com/some-scurvy-dog/banjo-tooie-scurvy-dog-port).
+It builds on N64Recomp, N64ModernRuntime, RT64, Dear ImGui, SDL2 and the
+others listed in [third-party notices](THIRD_PARTY_NOTICES.md), and on the
+[Banjo-Tooie decompilation](https://github.com/Mr-Wiseguy/banjo-tooie).
 
-Project material that its authors can license is under
-[GPL-3.0-only](LICENSE). Dependencies and game-derived material keep their own
-terms. Banjo-Tooie belongs to its rights holders.
+Project material is under [GPL-3.0-only](LICENSE). Dependencies and
+game-derived material keep their own terms. Banjo-Tooie belongs to its
+rights holders.
