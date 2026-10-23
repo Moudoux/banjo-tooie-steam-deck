@@ -6,6 +6,7 @@
 #include "widescreen.hpp"
 #include "minimum_render.hpp"
 #include "platform_support.hpp"
+#include "camera_analog.hpp"
 #if BASELINE_PLAYER
 #include "virtual_clock.hpp"
 #include "player_version.hpp"
@@ -302,6 +303,14 @@ void update_preference(Preference key, int value) {
         music_volume.store(value, std::memory_order_release);
 #endif
         break;
+    case Preference::AnalogCamera:
+        if (value < 0 || value > 1) return;
+        selected.analog_camera = value; settings::set_bool("tooie_analog_camera_enabled", value != 0);
+        tooie::camera::set_analog_enabled(value != 0); break;
+    case Preference::CameraInvertX:
+        if (value < 0 || value > 1) return;
+        selected.camera_invert_x = value; settings::set_bool("tooie_camera_invert_x", value != 0);
+        tooie::camera::set_horizontal_inverted(value != 0); break;
     case Preference::QuietTalonTrot:
         if (value < 0 || value > 1) return;
         selected.quiet_talon_trot = value;
@@ -539,7 +548,8 @@ void queue_event(const SDL_Event& event) {
 // Steam Deck defaults for settings a profile has not saved yet: 3x of 240 lines
 // suits the 800-line panel, output follows the display rate, and widescreen
 // fitted to the window fills the 16:10 screen.
-constexpr Preferences fresh{.resolution = 3, .output_rate = 2, .wide = 1, .native_aspect = fit_aspect, .fullscreen = 1};
+constexpr Preferences fresh{.resolution = 3, .output_rate = 2, .wide = 1, .native_aspect = fit_aspect, .fullscreen = 1,
+    .analog_camera = 1, .camera_invert_x = 1};
 #else
 constexpr Preferences fresh{};
 #endif
@@ -579,6 +589,10 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     selected.talon_trot_toggle = 0;
     selected.first_person_aim = 0;
 #endif
+    selected.analog_camera = settings::get_bool("tooie_analog_camera_enabled", fresh.analog_camera != 0);
+    selected.camera_invert_x = settings::get_bool("tooie_camera_invert_x", fresh.camera_invert_x != 0);
+    tooie::camera::set_analog_enabled(selected.analog_camera != 0);
+    tooie::camera::set_horizontal_inverted(selected.camera_invert_x != 0);
     latched = selected; vsync.store(selected.vsync, std::memory_order_release);
     resolution.store(selected.resolution, std::memory_order_release);
     texture_filter.store(selected.texture_filter, std::memory_order_release);

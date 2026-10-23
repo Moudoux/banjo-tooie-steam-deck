@@ -83,12 +83,14 @@ Your profile, saves, settings and `player.log` are in
 | LT / RT | Z | Crouch |
 | LB / RB | R | Centre camera behind Banjo |
 | Y | C-up | First-person view |
-| Right stick left / right | C-right / C-left | Rotate camera (inverted X) |
+| Right stick left / right | | Orbit the camera (Lighthouse-style, inverted X) |
 | Right stick up / down | C-down | Toggle camera views |
 | Left stick click | L | |
 | Start | Start | Pause |
 | View | | Settings menu |
 
+The settings menu has **Analog camera** and **Invert camera X**. With the
+analog camera off, the right stick acts as C-left / C-right in steps.
 Everything can be rebound in the settings menu. Profiles made before this
 layout keep their bindings until you choose "Reset bindings".
 

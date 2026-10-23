@@ -557,6 +557,9 @@ inline constexpr char version[] = "@TOOIE_PLAYER_VERSION@";
     target_sources(TooieBaseline PRIVATE ${_baseline_player_startup} tools/baseline/issue_evidence.cpp)
     target_include_directories(TooieBaseline PRIVATE "${_player_generated}")
     target_compile_definitions(TooieBaseline PRIVATE BASELINE_PLAYER=1)
+    # Analog orbit camera from the retired frontend, reached by the func_800A4878 raw hook.
+    target_sources(TooieBaseline PRIVATE src/camera_analog.cpp)
+    set_source_files_properties(src/camera_analog.cpp PROPERTIES COMPILE_DEFINITIONS TOOIE_NATIVE_HOST=1)
     if(_baseline_elf)
         set_target_properties(TooieBaseline PROPERTIES OUTPUT_NAME BanjoTooieScurvyDogPort)
     else()
