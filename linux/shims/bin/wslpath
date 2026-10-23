@@ -1,0 +1,9 @@
+#!/bin/sh
+# Stand-in for WSL's wslpath: the pinned Windows LLVM tools run under Wine,
+# whose Z: drive is the Linux root.
+mode="$1"; path="$2"
+case "$mode" in
+    -w) path=$(realpath -m -- "$path"); printf 'Z:%s\n' "$path" | tr '/' '\\' ;;
+    -u) printf '%s\n' "$path" | sed -e 's/^[Zz]://' -e 's/\\/\//g' ;;
+    *) echo "wslpath shim: unsupported option $mode" >&2; exit 2 ;;
+esac
