@@ -12,12 +12,24 @@ HOOKS=((CUTSCENE_FUNCTION,0x80800018,CUTSCENE_TEXT),
        (TICKER_DESTROY_FUNCTION,0x808003BC,'baseline_cutscene_ticker_destroy(rdram, ctx);'))
 # The thunk passes s3 as the actor; require that exact original consumer.
 TICKER_ACTOR_ANCHOR='    // 0x80800614: lbu         $v0, 0x79($s3)\n'
+# Frustum slack: the camera planes are built from exact half-angles (in
+# degrees), so widescreen edges and interpolated frames showed culled geometry
+# while the camera turned. Each hook widens one builder's angle argument
+# before use: a1 at entry of func_800CA218/func_800CA2A8, and the side-plane
+# angle in a2 just before func_800CA1B0 rotates it. Projection is unchanged.
+FRUSTUM_PAD_DEGREES='5.0f'
+def _pad(register):
+    return ('{ union { uint32_t u; float f; } tooie_pad = { (uint32_t)ctx->%s }; '
+            'tooie_pad.f += %s; ctx->%s = (gpr)(int32_t)tooie_pad.u; }' % (register, FRUSTUM_PAD_DEGREES, register))
+FRUSTUM_HOOKS=(('func_800CA218',0x800CA218,_pad('r5')),
+               ('func_800CA2A8',0x800CA2A8,_pad('r5')),
+               ('func_800CA1B0',0x800CA200,_pad('r6')))
 
 def add_hooks(hooks,selected):
     assert type(selected) is bool
     if not selected:return
     assert not any(h['func']==GLOBAL_FUNCTION and h.get('before_vram')==0x80800044 for h in hooks), 'Retired G07 query hook'
-    for func,pc,text in HOOKS:
+    for func,pc,text in HOOKS+FRUSTUM_HOOKS:
         assert not any(h['func']==func and h.get('before_vram')==pc for h in hooks),(func,hex(pc))
         hooks.append(dict(func=func,before_vram=pc,text=text))
 
@@ -25,7 +37,7 @@ def strip_and_verify(bodies,selected):
     """Return mechanical inverse for the existing camera/raw proof, not a writer."""
     result=dict(bodies)
     assert 'tooie_widescreen_latched_settings_word(' not in result[GLOBAL_FUNCTION], 'Retired G07 query substitution'
-    for func,pc,text in HOOKS:
+    for func,pc,text in HOOKS+FRUSTUM_HOOKS:
         call='    '+text+'\n'
         assert result[func].count(call)==int(selected),(func,hex(pc))
         if selected:

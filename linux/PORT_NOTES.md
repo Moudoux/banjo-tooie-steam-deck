@@ -107,15 +107,27 @@ Steam Deck features:
   LS click=L, View=menu. Known gaps: talking is on X (XBLA B is contextual),
   camera is stepped C-buttons not analog, no zoom-in.
 
+- **Frustum padding** (`tools/baseline/minimum_host_hooks.py`, `FRUSTUM_HOOKS`):
+  Tooie keeps its culling planes in the camera struct (FOV `+0xE4`, aspect
+  `+0xE8`, plane normals from `+0xF8`), built by `func_800CA1B0`,
+  `func_800CA218` and `func_800CA2A8` from exact half-angles in degrees
+  (read by `func_800AB0BC`/`func_800AC978`). With no slack, widescreen edges
+  and RT64's interpolated frames showed background where geometry was culled
+  while the camera turned (upstream known issue). Three raw-corpus hooks add
+  5 degrees to those angle arguments; projection is untouched. The hooks ride
+  the existing `add_hooks`/`strip_and_verify` proof, so the guest image and
+  its pins are unchanged. Found via Lighthouse (HarbourMasters' Banjo-Kazooie
+  port), which pads its frustum the same way.
+
 ## Verified vs not
 
 - Verified on the dev machine (Arch, Ryzen 9 3900X = Zen 2, RTX 4070 SUPER,
   Vulkan): boots, reaches map loading, clean shutdown and saves; 16:10 output
   observed; adjacent-ROM startup; controller DB gap-filling with synthetic
   entries; repository checks.
-- Steam Deck (SteamOS 3.8.28, glibc 2.41, RADV): the first build crashed on
-  the first frame (fixed by the Vulkan window flag); the fixed build is not
-  yet confirmed on the Deck.
+- Steam Deck (SteamOS 3.8.28, glibc 2.41, RADV), confirmed by the owner:
+  runs after the Vulkan window flag fix, and the frustum padding removed the
+  green edge pop-in while turning the camera.
 - Not verified: real gamepad input with the XBLA layout, battery and
   90 Hz pacing, extended gameplay.
 
