@@ -178,21 +178,44 @@ Steam Deck features:
   nothing moves below about 38% deflection. The first Deck builds skipped
   the libultraship and /127 stages and turned 1.6x faster at full tilt.
   Lighthouse also eases the camera to its orbit target with a spring
-  (`func_802BE190`, gain 20); this orbit places it directly. A second raw hook before
-  `0x8011066C` in `func_80110588` (`tooie_camera_orbit_apply`) writes the pose
-  into the view copies (sp+0x34 position, sp+0x28 rotation) and the camera's
-  own state (+0x74, +0x80, yaw controller +0x10/+0x14, velocity +0x18 = 0), so
-  the game resumes from it. Tooie conventions: rotation (pitch, yaw, roll) in
-  degrees, yaw = atan2(dx, dz) of position minus focus (`func_80112550`),
-  pitch = 360 - elevation. Steps are refused when `func_8011349C(from, to)`
-  reports the path between the two camera positions blocked; a blocked
-  combined step retries yaw alone, then pitch alone. The orbit ends on a game yaw transition (C buttons), a
-  camera mode change, or a frame without manual rotation (cutscene, menu,
-  view toggle). The camera component is relocated by the heap, so its
-  address changing in the same mode keeps the orbit. Measured with a virtual
-  pad, before the libultraship shaping: constant 84.7 deg/s from the first
-  frame at 0.53 shaped stick, rotation equal to yaw, zero motion after release, kept while walking. Unlike
-  Lighthouse, no collision pull-in while walking during an orbit.
+  (`func_802BE190`, gain 20); this orbit places it directly.
+  A second raw hook at `0x8011061C` in `func_80110588`
+  (`tooie_camera_orbit_apply`), after the mode update and where both of its
+  paths meet, writes the camera's own state (+0x74, +0x80, yaw controller
+  +0x10/+0x14, velocity +0x18 = 0) before the view copies are taken, so the
+  game's shake (`0x800893E0`) and roll (`func_80116024`) still apply and the
+  game resumes from the pose. (It used to sit at `0x8011066C` and overwrite
+  the copies, dropping both.) Tooie conventions: rotation (pitch, yaw, roll)
+  in degrees, yaw = atan2(dx, dz) of position minus focus
+  (`func_80112550`), pitch = 360 - elevation. Distance: the one captured on
+  entry, clamped every frame to the mode's range (`func_80115358`: +0xC..
+  +0x10 of the block at +0x14), standing in for Lighthouse's zoom distance.
+  Collision mirrors Lighthouse's `port_freeLookCamera_update`, using Tooie's
+  counterpart of each BK routine (Tooie's own follow mode, `ncbapivot`, runs
+  the same chain through `func_80111CC8`):
+  - `func_8011329C` = `func_802BE60C`: sweep a 45-unit sphere from the
+    position `func_8011347C` saved at the start of the frame (pointer at
+    +0x28) to the orbit target and slide; honours the no-collision flag
+    (+0x64 -> +0x19).
+  - On a colliding frame only, `func_802BC84C`'s probe: ray
+    (`func_8011349C`) from the camera to the focus, then 100 units to each
+    side, then 100 above; five blocked in a row call `func_801138F4`, whose
+    `func_80112E98` is `func_802BC640` (angle table at `0x80124A38`, 150 /
+    100 clearance), to move the camera to a clear spot.
+  - Otherwise `func_802C03BC` (Tooie `func_80111C04`, reimplemented rather
+    than called so the game's own guard state at +0x34 is untouched): if the
+    slide turned against the intended move this frame or on the last
+    colliding frame, the camera stays at the start position.
+  - `func_802C04B0`: the orbit yaw is re-read from the resolved position.
+    Pitch is kept, as in Lighthouse.
+  The orbit ends on a game yaw transition (C buttons), a camera mode change,
+  or a frame without manual rotation (cutscene, menu, view toggle); a frame
+  with +0x72 set (mode update skipped) leaves the camera alone. The camera
+  component is relocated by the heap, so its address changing in the same
+  mode keeps the orbit. Measured with a virtual pad, before the libultraship
+  shaping and collision: constant 84.7 deg/s from the first frame at 0.53
+  shaped stick, rotation equal to yaw, zero motion after release, kept while
+  walking.
 
 ## Verified vs not
 
