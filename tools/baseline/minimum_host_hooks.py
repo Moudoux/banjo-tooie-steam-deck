@@ -31,7 +31,13 @@ ANALOG_CAMERA_TEXT=('{ extern int tooie_camera_analog_apply(uint8_t*, recomp_con
 # Orbit pose: before func_80110588 hands the position/rotation copies to the view.
 ORBIT_CAMERA_TEXT=('{ extern void tooie_camera_orbit_apply(uint8_t*, recomp_context*); '
     'tooie_camera_orbit_apply(rdram, ctx); }')
-FRUSTUM_HOOKS=(('func_800A4878',0x800A4908,ANALOG_CAMERA_TEXT),
+# Instant intro skip: the startup intro ticker (func_808005AC_chintroticker)
+# only honours Start once global flag 0xD56 is set, which is not true at the
+# start of the intro. Treat it as set; the transition check and frontend exit
+# still run.
+INTRO_SKIP_TEXT='ctx->r2 = 1;'
+FRUSTUM_HOOKS=(('func_808005AC_chintroticker',0x80800644,INTRO_SKIP_TEXT),
+               ('func_800A4878',0x800A4908,ANALOG_CAMERA_TEXT),
                ('func_80110588',0x8011066C,ORBIT_CAMERA_TEXT),
                ('func_800CA218',0x800CA218,_pad('r5')),
                ('func_800CA2A8',0x800CA2A8,_pad('r5')),

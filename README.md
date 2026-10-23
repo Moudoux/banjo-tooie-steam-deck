@@ -81,6 +81,7 @@ Your profile, saves, settings and `player.log` are in
 | X | B | Attack |
 | B | B | Talk, read signs, cancel text |
 | LT / RT | Z | Crouch |
+| Hold LT or RT, press the other | Z + C-left | Talon Trot |
 | LB / RB | R | Centre camera behind Banjo |
 | Y | C-up | First-person view |
 | Right stick left / right | | Orbit the camera (Lighthouse-style, inverted X) |
