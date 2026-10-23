@@ -118,6 +118,13 @@ Steam Deck features:
   set; the transition-busy check (`func_800A8264`) and the original exit to
   the frontend (`gcfrontend` entrypoint 10) still run.
 
+- **No on-screen keyboard at launch** (`tools/baseline/devices.cpp`, before
+  `SDL_Init`): sdl2-compat before `30ee26c` (2026-06-07) starts text input
+  on each new window without suppressing the screen keyboard, and SDL3 shows
+  Steam's keyboard when no physical keyboard is attached, so it opened on
+  every Deck launch. `SDL_ENABLE_SCREEN_KEYBOARD=0` at default priority (the
+  environment variable still wins); text input events and Steam+X still work.
+
 - **Frustum padding** (`tools/baseline/minimum_host_hooks.py`, `FRUSTUM_HOOKS`):
   Tooie keeps its culling planes in the camera struct (FOV `+0xE4`, aspect
   `+0xE8`, plane normals from `+0xF8`), built by `func_800CA1B0`,

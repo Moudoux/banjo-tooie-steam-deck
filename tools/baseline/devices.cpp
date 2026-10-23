@@ -714,6 +714,11 @@ ultramodern::renderer::WindowHandle open_devices(const std::filesystem::path& ro
         audio_summary.armed=false;
     }
     if (audio_summary.limit && std::getenv("SDL_DYNAMIC_API")) throw std::runtime_error("Audio summary forbids redirected SDL dynapi");
+    // sdl2-compat before 30ee26c (2026-06) starts text input on each new window
+    // and SDL3 then opens Steam's on-screen keyboard when no keyboard is
+    // attached, i.e. on every Steam Deck launch. Text events still arrive;
+    // Steam+X still opens the keyboard. Default priority: the env var wins.
+    SDL_SetHintWithPriority(SDL_HINT_ENABLE_SCREEN_KEYBOARD, "0", SDL_HINT_DEFAULT);
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) throw std::runtime_error(SDL_GetError());
 #ifdef BASELINE_PLAYER
     constexpr const char* window_title = "Banjo-Tooie: Scurvy Dog Port";
