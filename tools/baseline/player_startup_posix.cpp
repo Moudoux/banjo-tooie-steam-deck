@@ -487,7 +487,32 @@ void open_log(const fs::path& root) {
     std::fprintf(stderr, "%s %s\nprofile=%s\n", build::product, build::version, utf8(root).c_str());
 }
 
+// A ROM beside the executable, so first launch in Steam Game Mode needs no
+// file dialog: baserom.us.z64, otherwise the folder's only N64 ROM file.
+std::optional<fs::path> adjacent_rom() {
+    std::error_code error;
+    const auto folder = fs::read_symlink("/proc/self/exe", error).parent_path();
+    if (error || folder.empty()) return std::nullopt;
+    if (fs::is_regular_file(folder / "baserom.us.z64", error)) return folder / "baserom.us.z64";
+    std::optional<fs::path> found;
+    for (const auto& entry : fs::directory_iterator(folder, error)) {
+        const auto extension = entry.path().extension();
+        if (!entry.is_regular_file(error) || (extension != ".z64" && extension != ".n64" && extension != ".v64")) continue;
+        if (found) return std::nullopt;
+        found = entry.path();
+    }
+    return found;
+}
+
 std::optional<fs::path> pick_rom() {
+    // Offered once; a rejected adjacent ROM falls through to the picker on retry.
+    static bool adjacent_offered = false;
+    if (!std::exchange(adjacent_offered, true)) {
+        if (auto rom = adjacent_rom()) {
+            std::fprintf(stderr, "player using ROM beside the executable: %s\n", utf8(*rom).c_str());
+            return rom;
+        }
+    }
     if (NFD_Init() != NFD_OKAY) fail(std::string("The file picker could not open: ") + NFD_GetError());
     const nfdu8filteritem_t filters[] = {{"N64 ROM", "z64,n64,v64"}};
     nfdu8char_t* chosen = nullptr;

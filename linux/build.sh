@@ -10,13 +10,25 @@
 # qualification (step 5) and packaging are skipped.
 #
 # Stages are skipped when their outputs already exist. Set CLEAN=1 to move
-# earlier build folders aside and start over.
+# earlier build folders aside and start over (needed after guest patch edits).
+#
+# TARGET=deck (default) tunes for the Steam Deck's Zen 2 CPU and gives new
+# profiles Deck defaults (3x, display rate, 16:10, fullscreen).
+# TARGET=generic builds for any x86-64 CPU with the upstream defaults.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
 ROM=${ROM:-baserom.us.z64}
 JOBS=${JOBS:-$(nproc)}
 BUILD=build/linux-player
+TARGET=${TARGET:-deck}
+# No FMA contraction: fused multiply-adds would round guest float math
+# differently from the N64 and the Windows build.
+case $TARGET in
+    deck) ARCH_FLAGS="-march=znver2 -mtune=znver2 -ffp-contract=off"; DEFAULTS="-DTOOIE_DECK_DEFAULTS=1" ;;
+    generic) ARCH_FLAGS="-ffp-contract=off"; DEFAULTS="" ;;
+    *) echo "TARGET must be deck or generic" >&2; exit 2 ;;
+esac
 GUEST=build/windows-dev/baseline   # Fixed output location of the guest preparation scripts.
 
 export PATH="$ROOT/linux/shims/bin:$PATH"
@@ -75,10 +87,12 @@ EOF
 # libc++ like MSVC's STL aliases high_resolution_clock to steady_clock, which the
 # pinned timer patch requires. It is linked statically so the binary runs
 # without libc++ installed on the host.
+# Release (-O3, stripped) replaces the preset's RelWithDebInfo.
 cmake -S . -B "$BUILD" -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
-    -DCMAKE_CXX_FLAGS=-stdlib=libc++ -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++ -static-libstdc++" \
-    -DPython3_EXECUTABLE="$ROOT/.venv-codegen/bin/python" "${CACHE_ARGS[@]}"
+    -DCMAKE_C_FLAGS="$ARCH_FLAGS" -DCMAKE_CXX_FLAGS="-stdlib=libc++ $ARCH_FLAGS $DEFAULTS" \
+    -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++ -static-libstdc++ -s" \
+    -DPython3_EXECUTABLE="$ROOT/.venv-codegen/bin/python" "${CACHE_ARGS[@]}" -DCMAKE_BUILD_TYPE=Release
 
 echo "== 6. Build the player"
 cmake --build "$BUILD" --target TooieBaseline -j "$JOBS" ${BUILD_ARGS:-}
-echo "Built $BUILD/baseline/player-bin/BanjoTooieScurvyDogPort"
+echo "Built $BUILD/baseline/player-bin/BanjoTooieScurvyDogPort (TARGET=$TARGET)"

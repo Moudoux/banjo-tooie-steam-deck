@@ -44,11 +44,16 @@ bool update_rate(RT64::UserConfiguration& app_user,RT64::SharedQueueResources& s
     return true;
 }
 bool update_resolution(RT64::UserConfiguration& app_user,RT64::SharedQueueResources& shared,int scale) {
-    if(scale<1 || scale>8)throw std::runtime_error("Invalid resolution scale");
+    if(scale<0 || scale>8)throw std::runtime_error("Invalid resolution scale");
+    // Scale 0 lets RT64 pick the integer scale that covers the window height.
+    using Mode=RT64::UserConfiguration::Resolution;
+    const Mode mode=scale==0?Mode::WindowIntegerScale:Mode::Manual;
     std::lock_guard lock(shared.configurationMutex);
-    if(shared.userConfig.resolutionMultiplier==scale && app_user.resolutionMultiplier==scale)return false;
+    if(shared.userConfig.resolution==mode && app_user.resolution==mode &&
+       (scale==0 || (shared.userConfig.resolutionMultiplier==scale && app_user.resolutionMultiplier==scale)))return false;
     // RT64's workload owner rebuilds targets after this configuration change.
-    shared.userConfig.resolutionMultiplier=app_user.resolutionMultiplier=scale;
+    shared.userConfig.resolution=app_user.resolution=mode;
+    if(scale)shared.userConfig.resolutionMultiplier=app_user.resolutionMultiplier=scale;
     shared.userConfigChanged=true;shared.fbConfigChanged=true;shared.newConfigValidated=false;
     return true;
 }
@@ -82,8 +87,8 @@ Status reconcile_aspect(RT64::SharedQueueResources& shared,uint32_t word,uint32_
     const bool bars=wide && (word&BASELINE_PRESENT_PILLARBOX_CAPABLE) &&
         (word>>BASELINE_PRESENT_GENERATION_SHIFT)==(guest>>1) && (guest&1u);
     const Aspect wanted=wide?Aspect::Manual:Aspect::Original;
-    constexpr double aspects[]={16.0/9.0,21.0/9.0,32.0/9.0,43.0/18.0};
-    const double target=bars?4.0/3.0:aspects[(word>>BASELINE_PRESENT_ASPECT_SHIFT)&3u];
+    constexpr double aspects[]={16.0/9.0,21.0/9.0,32.0/9.0,43.0/18.0,16.0/10.0,16.0/9.0,16.0/9.0,16.0/9.0};
+    const double target=bars?4.0/3.0:aspects[(word>>BASELINE_PRESENT_ASPECT_SHIFT)&7u];
     std::unique_lock lock(shared.configurationMutex,std::try_to_lock);
     if(!lock.owns_lock())return Status::Pending;
     auto& config=shared.userConfig;
@@ -98,7 +103,8 @@ Status reconcile_aspect(RT64::SharedQueueResources& shared,uint32_t word,uint32_
 }
 void configure_startup(RT64::Application& app) {
     const auto& prefs=latched_preferences();
-    app.userConfig.resolutionMultiplier=prefs.resolution;
+    if(prefs.resolution)app.userConfig.resolutionMultiplier=prefs.resolution;
+    else app.userConfig.resolution=RT64::UserConfiguration::Resolution::WindowIntegerScale;
 #if BASELINE_PLAYER
     // Player presentation stays independent of the engineering RenderMode and output rate.
     app.enhancementConfig.presentation.mode=RT64::EnhancementConfiguration::Presentation::Mode::PresentEarly;

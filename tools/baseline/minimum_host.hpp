@@ -78,7 +78,7 @@ void request_quit() noexcept;
 void publish_ready(bool) noexcept;
 RenderInput take_render_input();
 int requested_vsync() noexcept;
-int requested_resolution() noexcept; // Graphics owner; range 1..8.
+int requested_resolution() noexcept; // Graphics owner; 0 fits the window, else 1..8.
 bool requested_quiet_talon_trot() noexcept; // Guest sound-call boundary.
 // Graphics owner only: consume the SDL owner's atomic requested pair.
 OutputRate requested_output_rate() noexcept;

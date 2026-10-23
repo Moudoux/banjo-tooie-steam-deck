@@ -55,10 +55,10 @@ def linked(elf):
     section=elf.get_section_by_name('.baseline_host_helpers');state=elf.get_section_by_name('.baseline_host_state');literals=elf.get_section_by_name('.baseline_g07_literals')
     assert section and state and literals and state['sh_type']=='SHT_PROGBITS'
     assert state['sh_size']==8 and state.data()==bytes(8) and state['sh_addr']==section['sh_addr']+section['sh_size']
-    assert literals['sh_size']==24 and literals['sh_addr']%8==0 and literals['sh_addr']>=state['sh_addr']+8
-    assert literals['sh_addr']+24<=0x81000000
+    assert literals['sh_size']==32 and literals['sh_addr']%8==0 and literals['sh_addr']>=state['sh_addr']+8
+    assert literals['sh_addr']+32<=0x81000000
     assert symbols[HELPER]['st_shndx']==elf.get_section_index(section.name)
     assert symbols[PROJECTION]['st_shndx']==elf.get_section_index('.recomp_patch')
     assert {name:symbols[name]['st_value'] for name in NATIVE_IMPORTS}==NATIVE_IMPORTS
     return dict(rom=section['sh_addr']-0x80801000,ram=section['sh_addr'],size=section['sh_size'],index=elf.get_section_index(section.name),
-                state=state['sh_addr'],state_bytes=8,literals=literals['sh_addr'],literal_bytes=24,image_end=literals['sh_addr']+24)
+                state=state['sh_addr'],state_bytes=8,literals=literals['sh_addr'],literal_bytes=32,image_end=literals['sh_addr']+32)

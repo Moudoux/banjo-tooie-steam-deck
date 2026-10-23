@@ -84,7 +84,7 @@ void video(const Snapshot& snapshot) {
     ImGui::TextWrapped("Display settings except VSync take effect next launch.");
 #endif
     int resolution=prefs.resolution;
-    if(ImGui::SliderInt("Resolution scale",&resolution,1,8,"%dx"))preference(Preference::Resolution,resolution);
+    if(ImGui::SliderInt("Resolution scale",&resolution,0,8,resolution?"%dx":"Auto (fit window)"))preference(Preference::Resolution,resolution);
     int rate=prefs.output_rate;
     if(ImGui::Combo("Output rate",&rate,"Default (Original)\0Original\0Display\0Manual\0"))preference(Preference::OutputRate,rate);
     if(rate==3) {
@@ -93,7 +93,7 @@ void video(const Snapshot& snapshot) {
     int wide=prefs.wide+1;
     if(ImGui::Combo("Widescreen",&wide,"Use game setting\0Off\0On\0"))preference(Preference::Wide,wide-1);
     int aspect=prefs.native_aspect;
-    if(ImGui::Combo("Gameplay aspect",&aspect,"16:9\0 21:9\0 32:9\0 43:18\0"))preference(Preference::NativeAspect,aspect);
+    if(ImGui::Combo("Gameplay aspect",&aspect,"16:9\0 21:9\0 32:9\0 43:18\0 16:10\0"))preference(Preference::NativeAspect,aspect);
     int cutscene=prefs.cutscene_aspect;
     if(ImGui::Combo("Cutscene aspect",&cutscene,"Original (4:3)\0Match gameplay\0"))preference(Preference::CutsceneAspect,cutscene);
     bool sync=prefs.vsync<0?render::effective_vsync():prefs.vsync!=0;

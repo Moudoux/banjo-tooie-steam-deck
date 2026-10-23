@@ -70,22 +70,28 @@ def validate_heap_object(path, data=HEAP_DATA, functions=('heap_realloc',), call
             aspect_name = '.tooie_aspect_literals' if linked else '.rodata.cst8'
             aspect = elf.get_section_by_name(aspect_name)
             if (aspect is None or aspect['sh_type'] != 'SHT_PROGBITS' or aspect['sh_flags'] != 18 or
-                    aspect['sh_size'] != 24 or aspect['sh_addralign'] != 8 or aspect['sh_entsize'] != 8 or
-                    aspect.data() != bytes.fromhex('3ff50000000000013ff58000000000004000000000000000')):
+                    aspect['sh_size'] != 32 or aspect['sh_addralign'] != 8 or aspect['sh_entsize'] != 8 or
+                    aspect.data() != bytes.fromhex('3fecccccccccccce3ff50000000000013ff58000000000004000000000000000' if linked
+                                                     # The linker merges and sorts; objects keep emission order.
+                                                     else '3ff50000000000013fecccccccccccce40000000000000003ff5800000000000')):
                 raise ValueError('aspect literal section drift')
             allowed_sections.add(aspect_name)
             aspect_index = next(i for i,section in enumerate(elf.iter_sections()) if section.name == aspect_name)
             aspect_symbols = {symbol.name:symbol for symbol in symbols.iter_symbols()
                               if symbol['st_shndx'] == aspect_index and symbol['st_info']['type'] != 'STT_SECTION'}
-            aspect_names = {f'$CPI0_{i}' for i in range(3)}
+            aspect_names = {f'$CPI0_{i}' for i in range(4)}
             if set(aspect_symbols) != aspect_names:
                 raise ValueError('aspect literal definition closure drift')
+            # $CPI0_i keeps its emitted constant wherever the linker's sort places it.
+            emitted = ('3ff5000000000001', '3fecccccccccccce', '4000000000000000', '3ff5800000000000')
             for i,name in enumerate(sorted(aspect_names)):
                 symbol = aspect_symbols[name]
+                offset = symbol['st_value'] - aspect['sh_addr']
                 if ((symbol['st_info']['bind'],symbol['st_info']['type'],symbol['st_other']['visibility'],symbol['st_size']) !=
-                        ('STB_LOCAL','STT_NOTYPE','STV_DEFAULT',0) or symbol['st_value'] != aspect['sh_addr'] + 8*i):
+                        ('STB_LOCAL','STT_NOTYPE','STV_DEFAULT',0) or offset not in range(0, 32, 8) or
+                        aspect.data()[offset:offset+8] != bytes.fromhex(emitted[i])):
                     raise ValueError('aspect literal symbol drift')
-            if linked and not 0x80801000 <= aspect['sh_addr'] < aspect['sh_addr'] + 24 <= 0x81000000:
+            if linked and not 0x80801000 <= aspect['sh_addr'] < aspect['sh_addr'] + 32 <= 0x81000000:
                 raise ValueError('aspect literals outside reserved image')
         if literals:
             literal_name = '.tooie_hud_literals' if linked else '.rodata.cst4'

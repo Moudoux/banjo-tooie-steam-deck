@@ -40,7 +40,7 @@ SECTIONS {
     .baseline_host_state ALIGN(4) : { *minimum_cutscene.o(.baseline_host_state) } >patch
     .baseline_g07_literals ALIGN(8) : { *native_aspect_projection.o(.rodata.cst8) } >patch
     ASSERT(SIZEOF(.baseline_host_state)==0 || SIZEOF(.baseline_host_state)==8, "HOST state extent")
-    ASSERT(SIZEOF(.baseline_g07_literals)==0 || SIZEOF(.baseline_g07_literals)==24, "G07 literal extent")
+    ASSERT(SIZEOF(.baseline_g07_literals)==0 || SIZEOF(.baseline_g07_literals)==32, "G07 literal extent")
     .tooie_npc665_helpers ALIGN(4) : { *npc665.o(.tooie_npc665_helpers) } >patch
     .tooie_npc665_state ALIGN(4) : { *npc665.o(.tooie_npc665_state) } >patch
     ASSERT(SIZEOF(.tooie_npc665_state)==0 || SIZEOF(.tooie_npc665_state)==16, "NPC665 sidecar extent")

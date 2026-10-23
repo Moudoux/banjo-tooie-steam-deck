@@ -25,7 +25,7 @@ SECTIONS {
     ASSERT(SIZEOF(.recomp_patch) > 0, "missing patch code")
     ASSERT(SIZEOF(.tooie_hud_literals) == 16, "HUD literal extent changed")
     ASSERT(SIZEOF(.tooie_wrapper_literals) == 8, "wrapper literal extent changed")
-    ASSERT(SIZEOF(.tooie_aspect_literals) == 24, "aspect literal extent changed")
+    ASSERT(SIZEOF(.tooie_aspect_literals) == 32, "aspect literal extent changed")
     ASSERT(SIZEOF(.tooie_gfx_buffers) == 112016, "Gfx pool extent changed")
     ASSERT(SIZEOF(.tooie_family_birth_state) == 1168, "birth object extent changed")
     ASSERT(SIZEOF(.forbidden) == 0, "patch image cannot define helpers or runtime data")

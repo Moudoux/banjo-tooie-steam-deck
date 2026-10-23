@@ -9,6 +9,7 @@ enum class NativeAspect : std::uint32_t {
     Ratio21x9 = 1,
     Ratio32x9 = 2,
     Ratio43x18 = 3,
+    Ratio16x10 = 4,
 };
 
 // The frontend profile owns this optional preference. The value is latched when

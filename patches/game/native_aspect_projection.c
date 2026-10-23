@@ -54,6 +54,8 @@ TOOIE_RECOMP_PATCH f32 func_80015D14(const TooieAspectInputs* input) {
         scale = 0x1.5000000000001p+0;
     } else if (aspect == 2u) {
         scale = 0x1.0000000000000p+1;
+    } else if (aspect == 4u) {
+        scale = 0x1.ccccccccccccep-1; /* 16:10 */
     } else {
         scale = 0x1.5800000000000p+0;
     }

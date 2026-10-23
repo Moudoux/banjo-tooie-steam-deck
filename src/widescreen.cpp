@@ -20,6 +20,7 @@ constexpr tooie::widescreen::NativeAspect normalize_aspect(
         case tooie::widescreen::NativeAspect::Ratio21x9:
         case tooie::widescreen::NativeAspect::Ratio32x9:
         case tooie::widescreen::NativeAspect::Ratio43x18:
+        case tooie::widescreen::NativeAspect::Ratio16x10:
             return aspect;
         default:
             return tooie::widescreen::NativeAspect::Ratio16x9;
@@ -31,6 +32,7 @@ constexpr double aspect_ratio(tooie::widescreen::NativeAspect aspect) noexcept {
         case tooie::widescreen::NativeAspect::Ratio21x9: return 21.0 / 9.0;
         case tooie::widescreen::NativeAspect::Ratio32x9: return 32.0 / 9.0;
         case tooie::widescreen::NativeAspect::Ratio43x18: return 43.0 / 18.0;
+        case tooie::widescreen::NativeAspect::Ratio16x10: return 16.0 / 10.0;
         default: return 16.0 / 9.0;
     }
 }

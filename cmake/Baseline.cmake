@@ -1022,7 +1022,7 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                     # Same composition; shadow_projection.o (TOOIE_SHADOW_COEFFICIENTS=1) and actor.o (TOOIE_HAND862=1) differ.
                     set(_baseline_expected_image "d4edc0fc90a7121906a969a87e0b0b239523a803b46a76ab60a78ec92c844525")
                     if(_baseline_quiet_trot)
-                        set(_baseline_expected_image "3ab2614823ac33e1d6f271aeb0ba6a34f8457efcbf5b75da6d2c4b952f7c7e7e")
+                        set(_baseline_expected_image "9ccd8db3190529a281446462a619fcf59037461fa0dd3ce87cfccbe3ffd99a3a")
                     endif()
                 endif()
                 string(JSON _baseline_raw_b621_type TYPE "${_baseline_raw_binding}" backpack621)
