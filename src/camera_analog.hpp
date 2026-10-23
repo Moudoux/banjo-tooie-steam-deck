@@ -18,8 +18,9 @@ bool vertical_inverted() noexcept;
 // the original downstream command result after consuming this analog frame.
 extern "C" int tooie_camera_analog_apply(std::uint8_t* rdram, recomp_context* ctx);
 
-// Called in func_80110588 before the camera pose is handed to the view
-// (0x8011066C): while the right-stick orbit is active, it supplies the pose.
+// Called in func_80110588 after the camera mode's update and before the pose
+// is copied for the view (0x8011061C): while the right-stick orbit is active,
+// it places the camera, with the game's own collision.
 extern "C" void tooie_camera_orbit_apply(std::uint8_t* rdram, recomp_context* ctx);
 
 // Called after Tooie's original bastick_getX/Y calls, inside bafpctrl's own

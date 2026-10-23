@@ -15,9 +15,14 @@
 // Right-stick orbit camera with the feel of Lighthouse's free-look
 // (src/port/Enhancements/Camera/FreeLookCamera.cpp): entered past a 0.30
 // stick, yaw changes linearly at 160 and elevation at 100 degrees per second
-// (pushing up raises the camera, as there), the camera keeps its captured
-// distance around the focus, and it stays where it was left until the game
-// takes the camera back. Tooie conventions, measured from
+// (pushing up raises the camera, as there), the distance is the one captured
+// on entry kept inside the mode's own range, and the camera stays where it
+// was left until the game takes the camera back. Collision follows
+// Lighthouse's free-look update: the pose is swept and slid from last frame's
+// position, a slide that crossed over is undone, a camera that keeps
+// colliding while Banjo is hidden is moved to a clear spot, and the orbit
+// yaw is re-read from wherever the camera ended up. Tooie has a counterpart
+// for each of those Banjo-Kazooie routines. Tooie conventions, measured from
 // the camera component: position at +0x74, rotation (pitch, yaw, roll in
 // degrees) at +0x80, yaw = atan2(dx, dz) of position minus focus, and pitch =
 // 360 - elevation. The yaw controller at +0x60 keeps target +0x10, current
@@ -43,6 +48,10 @@ struct Orbit {
     std::int32_t mode = 0;
     float yaw = 0.0f, elevation = 0.0f, distance = 0.0f, aim_y = 0.0f, pending_turn = 0.0f,
         pending_pitch = 0.0f;
+    // Lighthouse's crossover guard (func_802C03BC) and occlusion probe
+    // (func_802BC84C) state; both only advance on frames that collided.
+    float crossover_dot = 0.0f;
+    int occlusion_probe = 0;
     // The input hook runs once per camera frame while manual rotation is allowed.
     std::uint32_t input_frames = 0, seen_input_frames = 0;
     std::chrono::steady_clock::time_point last_input{};
@@ -60,6 +69,13 @@ void store_float(std::uint8_t* rdram, gpr address, float value) {
 }
 void store_vector(std::uint8_t* rdram, gpr address, const float (&value)[3]) {
     for (int i = 0; i < 3; ++i) store_float(rdram, address + 4 * i, value[i]);
+}
+void load_vector(std::uint8_t* rdram, gpr address, float (&value)[3]) {
+    for (int i = 0; i < 3; ++i) value[i] = load_float(rdram, address + 4 * i);
+}
+bool rdram_pointer(gpr address) {
+    const auto value = static_cast<std::uint32_t>(address);
+    return value >= 0x80000000u && value < 0x80800000u && (value & 3u) == 0;
 }
 
 // Guest calls may scratch any caller-saved register; scratch vectors live in a
@@ -189,8 +205,9 @@ extern "C" int tooie_camera_analog_apply(std::uint8_t* rdram, recomp_context* ct
 }
 
 extern "C" void tooie_camera_orbit_apply(std::uint8_t* rdram, recomp_context* ctx) {
-    // Called in func_80110588 just before the camera position (sp+0x34) and
-    // rotation (sp+0x28) copies are handed to the view at 0x8011066C.
+    // Called in func_80110588 at 0x8011061C, after the mode update and before
+    // the position (+0x74) and rotation (+0x80) are copied for the view, so
+    // the game's shake and roll still apply on top of the orbit.
     const gpr component = ctx->r16;
     const bool input_this_frame = orbit.input_frames != orbit.seen_input_frames;
     orbit.seen_input_frames = orbit.input_frames;
@@ -209,12 +226,15 @@ extern "C" void tooie_camera_orbit_apply(std::uint8_t* rdram, recomp_context* ct
         exit_orbit();
         return;
     }
+    // A nonzero +0x72 skips this frame's mode update, including the copy of
+    // the start position (func_8011347C) that the collision sweep starts from.
+    if (MEM_BU(component, 0x72) != 0) return;
 
     float focus[3]{};
     guest_call(ctx, [&](gpr out) {
         ctx->r4 = component; ctx->r5 = out;
         func_80112550(rdram, ctx);
-        for (int i = 0; i < 3; ++i) focus[i] = load_float(rdram, out + 4 * i);
+        load_vector(rdram, out, focus);
     });
 
     float dt = 0.0f;
@@ -236,6 +256,8 @@ extern "C" void tooie_camera_orbit_apply(std::uint8_t* rdram, recomp_context* ct
         orbit.yaw = wrap_degrees(std::atan2(dx, dz) * k_degrees);
         orbit.elevation = std::atan2(dy, horizontal) * k_degrees;
         orbit.aim_y = focus[1];
+        orbit.crossover_dot = 0.0f;
+        orbit.occlusion_probe = 0;
         orbit.entering = false;
         orbit.active = true;
     } else {
@@ -243,59 +265,121 @@ extern "C" void tooie_camera_orbit_apply(std::uint8_t* rdram, recomp_context* ct
         orbit.aim_y += (focus[1] - orbit.aim_y) * (1.0f - std::exp(-k_aim_height_rate * dt));
     }
 
-    auto pose = [&](float yaw, float elevation, float (&position)[3]) {
-        const float pitch = elevation / k_degrees, heading = yaw / k_degrees;
+    // The mode's distance range (func_80115358 clamps to +0xC..+0x10 of the
+    // block at +0x14), so an orbit entered while the game had pulled the
+    // camera in close returns to a normal distance, as Lighthouse orbits at
+    // the game's zoom distance rather than the live one.
+    const gpr range = static_cast<gpr>(MEM_W(component, 0x14));
+    if (rdram_pointer(range)) {
+        const float near_limit = load_float(rdram, range + 0xC), far_limit = load_float(rdram, range + 0x10);
+        if (std::isfinite(near_limit) && std::isfinite(far_limit) && near_limit > 1.0f && near_limit <= far_limit)
+            orbit.distance = std::clamp(orbit.distance, near_limit, far_limit);
+    }
+
+    orbit.yaw = wrap_degrees(orbit.yaw + orbit.pending_turn);
+    // Captured outside the limits (the game's own angle): only move inwards.
+    orbit.elevation = std::clamp(orbit.elevation + orbit.pending_pitch,
+        std::min(k_min_elevation, orbit.elevation), std::max(k_max_elevation, orbit.elevation));
+    orbit.pending_turn = orbit.pending_pitch = 0.0f;
+
+    float target[3];
+    {
+        const float pitch = orbit.elevation / k_degrees, heading = orbit.yaw / k_degrees;
         const float horizontal = orbit.distance * std::cos(pitch);
-        position[0] = focus[0] + horizontal * std::sin(heading);
-        position[1] = focus[1] + orbit.distance * std::sin(pitch);
-        position[2] = focus[2] + horizontal * std::cos(heading);
-    };
-    // The C-button turn's check (func_8011349C) tests the camera's path
-    // between two positions and returns nonzero when nothing is in the way.
-    auto clear_to = [&](float yaw, float elevation) {
-        float from[3], to[3];
-        pose(orbit.yaw, orbit.elevation, from);
-        pose(yaw, elevation, to);
-        bool clear = true;
+        target[0] = focus[0] + horizontal * std::sin(heading);
+        target[1] = focus[1] + orbit.distance * std::sin(pitch);
+        target[2] = focus[2] + horizontal * std::cos(heading);
+    }
+
+    // func_8011329C (Lighthouse's func_802BE60C) sweeps a 45-unit sphere from
+    // the position func_8011347C saved at the start of this frame (+0x28, last
+    // frame's orbit pose) to +0x74 and slides along what it hits. It honours
+    // the game's no-collision flag and returns nonzero when it moved the camera.
+    const gpr start_address = static_cast<gpr>(MEM_W(component, 0x28));
+    if (!rdram_pointer(start_address)) { exit_orbit(); return; }
+    float start[3];
+    load_vector(rdram, start_address, start);
+    store_vector(rdram, component + 0x74, target);
+    bool collided = false;
+    guest_call(ctx, [&](gpr) {
+        ctx->r4 = component;
+        func_8011329C(rdram, ctx);
+        collided = ctx->r2 != 0;
+    });
+
+    if (collided) {
+        float camera[3];
+        load_vector(rdram, component + 0x74, camera);
+        // Lighthouse's func_802BC84C: one probe per colliding frame, from the
+        // camera to Banjo's focus, then beside it (100 units either way) and
+        // above it. Five blocked probes in a row move the camera to a clear
+        // spot with func_801138F4, Tooie's func_802BC640.
+        float to_focus[3] = {focus[0] - camera[0], focus[1] - camera[1], focus[2] - camera[2]};
+        float length = std::sqrt(to_focus[0] * to_focus[0] + to_focus[1] * to_focus[1] + to_focus[2] * to_focus[2]);
+        float probe[3] = {focus[0], focus[1], focus[2]};
+        if (length > 0.001f) {
+            for (auto& value : to_focus) value /= length;
+            if (length > 1500.0f)
+                for (int i = 0; i < 3; ++i) probe[i] = camera[i] + to_focus[i] * 1500.0f;
+            const float side = orbit.occlusion_probe == 1 ? -100.0f : 100.0f;
+            switch (orbit.occlusion_probe) {
+            case 1: case 2: // 100 x the view direction, yawed 90 degrees either way.
+                probe[0] += -to_focus[2] * side;
+                probe[1] += to_focus[1] * 100.0f;
+                probe[2] += to_focus[0] * side;
+                break;
+            case 3: probe[1] += 100.0f; break;
+            default: break;
+            }
+        }
+        bool hidden = false;
         guest_call(ctx, [&](gpr out) {
-            store_vector(rdram, out, from);
-            store_vector(rdram, out + 0x10, to);
+            store_vector(rdram, out, camera);
+            store_vector(rdram, out + 0x10, probe);
             ctx->r4 = out; ctx->r5 = out + 0x10;
             func_8011349C(rdram, ctx);
-            clear = ctx->r2 != 0;
+            hidden = ctx->r2 == 0;
         });
-        return clear;
-    };
-
-    // Take this frame's turn and tilt unless the path there is blocked (a
-    // wall, or the floor when tilting down); then try each axis alone.
-    if (orbit.pending_turn != 0.0f || orbit.pending_pitch != 0.0f) {
-        const float turned = wrap_degrees(orbit.yaw + orbit.pending_turn);
-        // Captured outside the limits (the game's own angle): only move inwards.
-        const float tilted = std::clamp(orbit.elevation + orbit.pending_pitch,
-            std::min(k_min_elevation, orbit.elevation), std::max(k_max_elevation, orbit.elevation));
-        if (clear_to(turned, tilted)) {
-            orbit.yaw = turned;
-            orbit.elevation = tilted;
-        } else if (orbit.pending_turn != 0.0f && clear_to(turned, orbit.elevation)) {
-            orbit.yaw = turned;
-        } else if (orbit.pending_turn != 0.0f && tilted != orbit.elevation && clear_to(orbit.yaw, tilted)) {
-            orbit.elevation = tilted;
+        bool recovered = false;
+        if (!hidden) {
+            orbit.occlusion_probe = 0;
+        } else if (++orbit.occlusion_probe >= 5) {
+            orbit.occlusion_probe = 0;
+            guest_call(ctx, [&](gpr) {
+                ctx->r4 = component;
+                func_801138F4(rdram, ctx);
+                recovered = ctx->r2 != 0;
+            });
         }
-        orbit.pending_turn = orbit.pending_pitch = 0.0f;
+        if (!recovered) {
+            // Lighthouse's func_802C03BC (Tooie's func_80111C04): a slide that
+            // turned back against the intended move, this frame or the last
+            // colliding one, crossed through something; stay where we were.
+            const float wanted[3] = {target[0] - start[0], target[1] - start[1], target[2] - start[2]};
+            const float moved[3] = {camera[0] - start[0], camera[1] - start[1], camera[2] - start[2]};
+            const float wanted_length = std::sqrt(wanted[0] * wanted[0] + wanted[1] * wanted[1] + wanted[2] * wanted[2]);
+            const float moved_length = std::sqrt(moved[0] * moved[0] + moved[1] * moved[1] + moved[2] * moved[2]);
+            const float dot = wanted_length > 0.0f && moved_length > 0.0f
+                ? (wanted[0] * moved[0] + wanted[1] * moved[1] + wanted[2] * moved[2]) / (wanted_length * moved_length)
+                : 0.0f;
+            if (dot < 0.0f || orbit.crossover_dot < 0.0f) store_vector(rdram, component + 0x74, start);
+            orbit.crossover_dot = dot;
+        }
+        // Lighthouse's func_802C04B0: the orbit continues from where the
+        // camera really is, so pushing into a wall does not wind up the yaw.
+        load_vector(rdram, component + 0x74, camera);
+        const float dx = camera[0] - focus[0], dz = camera[2] - focus[2];
+        if (std::hypot(dx, dz) > 0.001f) orbit.yaw = wrap_degrees(std::atan2(dx, dz) * k_degrees);
     }
-    float position[3];
-    pose(orbit.yaw, orbit.elevation, position);
 
+    float position[3];
+    load_vector(rdram, component + 0x74, position);
     const float dx = position[0] - focus[0], dz = position[2] - focus[2];
     const float dy = position[1] - orbit.aim_y; // Look at the smoothed aim height.
     const float rotation[3] = {wrap_degrees(-std::atan2(dy, std::hypot(dx, dz)) * k_degrees),
                                wrap_degrees(std::atan2(dx, dz) * k_degrees), 0.0f};
 
-    // The view copies, and the camera's own state so the game resumes from here.
-    store_vector(rdram, ctx->r29 + 0x34, position);
-    store_vector(rdram, ctx->r29 + 0x28, rotation);
-    store_vector(rdram, component + 0x74, position);
+    // The camera's own state, which the view copies next and the game resumes from.
     store_vector(rdram, component + 0x80, rotation);
     store_float(rdram, yaw_controller + 0x10, orbit.yaw);
     store_float(rdram, yaw_controller + 0x14, orbit.yaw);
