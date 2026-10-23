@@ -747,6 +747,11 @@ ultramodern::renderer::WindowHandle open_devices(const std::filesystem::path& ro
 #if TOOIE_BASELINE_HOST
         | SDL_WINDOW_RESIZABLE
 #endif
+#ifndef _WIN32
+        // RT64 presents through SDL_Vulkan_CreateSurface on Linux, which SDL2
+        // refuses for windows created without this flag.
+        | SDL_WINDOW_VULKAN
+#endif
         );
     if (!window) throw std::runtime_error(SDL_GetError());
     if (required_display) {
