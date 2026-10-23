@@ -30,7 +30,8 @@ docker run --rm -it -v "$(pwd)":/workspace tooie-toolchain:latest linux/build.sh
   CMake + Ninja into `build/linux-player`. CMake cache variables are read from
   the `windows-player` preset at build time, so preset changes carry over.
 - Env: `TARGET=deck` (default: `-march=znver2`, `-DTOOIE_DECK_DEFAULTS=1`) or
-  `generic`; `CLEAN=1` moves old build dirs aside (needed after guest patch
+  `generic`; `SYMBOLS=1` keeps debug info for crash backtraces (use with
+  `BUILD=build/linux-player-debug` to keep the normal build); `CLEAN=1` moves old build dirs aside (needed after guest patch
   edits; guest prep refuses existing outputs); `JOBS`, `ROM`.
 - Output: `build/linux-player/baseline/player-bin/BanjoTooieScurvyDogPort`
   plus `recompcontrollerdb.txt`. Docker writes as root; `chown` afterwards.
@@ -72,7 +73,9 @@ Linux enablement:
   executable before opening the picker.
 - `tools/baseline/main.cpp`: `windows.h` guarded; `flock` ProfileLock for the
   engineering build. `devices.cpp`: no `objbase.h`, X11 macro `#undef`s after
-  `SDL_syswm.h`, SDL window handle, `app->setup(0)`. `minimum_host.cpp`:
+  `SDL_syswm.h`, SDL window handle, `app->setup(0)`, and the window is created
+  with `SDL_WINDOW_VULKAN` (without it real SDL2 refuses
+  `SDL_Vulkan_CreateSurface`, and RADV segfaults in `VulkanSwapChain::resize`). `minimum_host.cpp`:
   `localtime_r`/`gmtime_r`.
 
 Steam Deck features:
@@ -110,9 +113,19 @@ Steam Deck features:
   Vulkan): boots, reaches map loading, clean shutdown and saves; 16:10 output
   observed; adjacent-ROM startup; controller DB gap-filling with synthetic
   entries; repository checks.
-- Not verified: anything on a real Steam Deck (SteamOS glibc must be >= 2.38;
-  the binary needs it), real gamepad input with the XBLA layout, battery and
+- Steam Deck (SteamOS 3.8.28, glibc 2.41, RADV): the first build crashed on
+  the first frame (fixed by the Vulkan window flag); the fixed build is not
+  yet confirmed on the Deck.
+- Not verified: real gamepad input with the XBLA layout, battery and
   90 Hz pacing, extended gameplay.
+
+## Testing gotcha: SDL on the dev machine
+
+Arch ships `sdl2-compat` (SDL2 API on SDL3), which hides bugs that real SDL2
+exposes; the missing `SDL_WINDOW_VULKAN` flag above only crashed on the Deck.
+Test against real SDL2 by copying `libSDL2-2.0.so.0` out of the toolchain
+image and running with `LD_LIBRARY_PATH` pointing at it. On the Deck,
+`coredumpctl info -1` gives a symbolized backtrace for a `SYMBOLS=1` build.
 
 ## When pulling upstream
 

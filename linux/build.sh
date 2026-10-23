@@ -15,15 +15,18 @@
 # TARGET=deck (default) tunes for the Steam Deck's Zen 2 CPU and gives new
 # profiles Deck defaults (3x, display rate, 16:10, fullscreen).
 # TARGET=generic builds for any x86-64 CPU with the upstream defaults.
+# SYMBOLS=1 keeps debug info and symbols (for crash backtraces), and
+# BUILD=<dir> builds into another folder, e.g. build/linux-player-debug.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
 ROM=${ROM:-baserom.us.z64}
 JOBS=${JOBS:-$(nproc)}
-BUILD=build/linux-player
+BUILD=${BUILD:-build/linux-player}
 TARGET=${TARGET:-deck}
 # No FMA contraction: fused multiply-adds would round guest float math
 # differently from the N64 and the Windows build.
+if [[ ${SYMBOLS:-0} == 1 ]]; then BUILD_TYPE=RelWithDebInfo STRIP=""; else BUILD_TYPE=Release STRIP=" -s"; fi
 case $TARGET in
     deck) ARCH_FLAGS="-march=znver2 -mtune=znver2 -ffp-contract=off"; DEFAULTS="-DTOOIE_DECK_DEFAULTS=1" ;;
     generic) ARCH_FLAGS="-ffp-contract=off"; DEFAULTS="" ;;
@@ -87,11 +90,11 @@ EOF
 # libc++ like MSVC's STL aliases high_resolution_clock to steady_clock, which the
 # pinned timer patch requires. It is linked statically so the binary runs
 # without libc++ installed on the host.
-# Release (-O3, stripped) replaces the preset's RelWithDebInfo.
+# Release (-O3, stripped) replaces the preset's RelWithDebInfo unless SYMBOLS=1.
 cmake -S . -B "$BUILD" -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
     -DCMAKE_C_FLAGS="$ARCH_FLAGS" -DCMAKE_CXX_FLAGS="-stdlib=libc++ $ARCH_FLAGS $DEFAULTS" \
-    -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++ -static-libstdc++ -s" \
-    -DPython3_EXECUTABLE="$ROOT/.venv-codegen/bin/python" "${CACHE_ARGS[@]}" -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++ -static-libstdc++$STRIP" \
+    -DPython3_EXECUTABLE="$ROOT/.venv-codegen/bin/python" "${CACHE_ARGS[@]}" -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
 echo "== 6. Build the player"
 cmake --build "$BUILD" --target TooieBaseline -j "$JOBS" ${BUILD_ARGS:-}
