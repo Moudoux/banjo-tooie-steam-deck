@@ -370,6 +370,9 @@ inline constexpr char version[] = "@TOOIE_PLAYER_VERSION@";
 ]] @ONLY)
     target_include_directories(TooieBaseline PRIVATE "${_player_generated}")
     target_compile_definitions(TooieBaseline PRIVATE BASELINE_PLAYER=1)
+    # Analog orbit camera from the retired frontend, reached by the func_800A4878 raw hook.
+    target_sources(TooieBaseline PRIVATE src/camera_analog.cpp)
+    set_source_files_properties(src/camera_analog.cpp PROPERTIES COMPILE_DEFINITIONS TOOIE_NATIVE_HOST=1)
     if(WIN32)
     target_sources(TooieBaseline PRIVATE tools/baseline/player_startup.cpp)
     target_link_libraries(TooieBaseline PRIVATE user32 shell32 ole32 comdlg32)

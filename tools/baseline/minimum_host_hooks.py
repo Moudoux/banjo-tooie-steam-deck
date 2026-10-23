@@ -16,7 +16,19 @@ FRUSTUM_PAD_DEGREES='5.0f'
 def _pad(register):
     return ('{ union { uint32_t u; float f; } tooie_pad = { (uint32_t)ctx->%s }; '
             'tooie_pad.f += %s; ctx->%s = (gpr)(int32_t)tooie_pad.u; }' % (register, FRUSTUM_PAD_DEGREES, register))
-FRUSTUM_HOOKS=(('func_800CA218',0x800CA218,_pad('r5')),
+# Analog orbit camera, the retired frontend's func_800A4878 integration: after
+# the original input gate (v0 == 0 selects the C-left/C-right path), a nonzero
+# right-stick X feeds the original rotate routine proportionally and resumes at
+# the shared exit; otherwise the original instructions run unchanged.
+ANALOG_CAMERA_TEXT=('{ extern int tooie_camera_analog_apply(uint8_t*, recomp_context*); '
+    'const int tooie_camera_result = (ctx->r2 == 0) ? tooie_camera_analog_apply(rdram, ctx) : -1; '
+    'if (tooie_camera_result >= 0) { ctx->r2 = tooie_camera_result; goto L_800A4964; } }')
+# Orbit pose: before func_80110588 hands the position/rotation copies to the view.
+ORBIT_CAMERA_TEXT=('{ extern void tooie_camera_orbit_apply(uint8_t*, recomp_context*); '
+    'tooie_camera_orbit_apply(rdram, ctx); }')
+FRUSTUM_HOOKS=(('func_800A4878',0x800A4908,ANALOG_CAMERA_TEXT),
+               ('func_80110588',0x8011066C,ORBIT_CAMERA_TEXT),
+               ('func_800CA218',0x800CA218,_pad('r5')),
                ('func_800CA2A8',0x800CA2A8,_pad('r5')),
                ('func_800CA1B0',0x800CA200,_pad('r6')))
 

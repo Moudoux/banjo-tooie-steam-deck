@@ -177,7 +177,12 @@ bool background_input_enabled() {
     return !host().baseline && tooie::frontend::settings::get_bool("background_input_mode", true);
 }
 bool analog_camera_input_enabled() {
-    return !host().baseline && tooie::frontend::settings::get_bool("tooie_analog_camera_enabled", false);
+#ifdef TOOIE_DECK_DEFAULTS
+    constexpr bool player_default = true;
+#else
+    constexpr bool player_default = false;
+#endif
+    return tooie::frontend::settings::get_bool("tooie_analog_camera_enabled", host().baseline && player_default);
 }
 void sync_background_joystick_events(bool enabled) {
     if (!background_hint_initialized || last_background_hint != enabled) {
@@ -623,7 +628,7 @@ bool down(const BindingTable& table, Action action, const Uint8* keys, SDL_GameC
         if (analog_camera_enabled &&
             (action == Action::CUp || action == Action::CDown || action == Action::CLeft || action == Action::CRight) &&
             (binding.device == Device::AxisPositive || binding.device == Device::AxisNegative) &&
-            (binding.code == SDL_CONTROLLER_AXIS_RIGHTX || binding.code == SDL_CONTROLLER_AXIS_RIGHTY)) continue;
+            (binding.code == SDL_CONTROLLER_AXIS_RIGHTX || (binding.code == SDL_CONTROLLER_AXIS_RIGHTY && !host().baseline))) continue;
         switch (binding.device) {
         case Device::Keyboard:
             if (keys && binding.code < SDL_NUM_SCANCODES && keys[binding.code]) return true;
@@ -1493,7 +1498,7 @@ void handle_event(const SDL_Event& event) {
             if (layer == BindingLayer::Base && consumed_chord(binding)) continue;
             if (analog_camera_enabled && (binding.device == Device::AxisPositive || binding.device == Device::AxisNegative) &&
                 (action == Action::CUp || action == Action::CDown || action == Action::CLeft || action == Action::CRight) &&
-                (binding.code == SDL_CONTROLLER_AXIS_RIGHTX || binding.code == SDL_CONTROLLER_AXIS_RIGHTY)) continue;
+                (binding.code == SDL_CONTROLLER_AXIS_RIGHTX || (binding.code == SDL_CONTROLLER_AXIS_RIGHTY && !host().baseline))) continue;
             return true;
         }
         if (layer == BindingLayer::Modified && modifier_event &&
@@ -1764,6 +1769,19 @@ void tick(SDL_Window* window, bool gameplay, bool menu_open) {
         }
         rx = axis(controller, SDL_CONTROLLER_AXIS_RIGHTX, deadzone);
         ry = -axis(controller, SDL_CONTROLLER_AXIS_RIGHTY, deadzone);
+        if (host().baseline && controller) {
+            // Lighthouse free-look stick shaping (FreeLookCamera.cpp ReadStick): radial
+            // 0.15 deadzone, rescaled to 0..1. Only the analog camera reads rx/ry.
+            const float raw_x = std::clamp(SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTX) / 32767.0f, -1.0f, 1.0f);
+            const float raw_y = -std::clamp(SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTY) / 32767.0f, -1.0f, 1.0f);
+            const float magnitude = std::hypot(raw_x, raw_y);
+            constexpr float right_deadzone = 0.15f;
+            if (magnitude < right_deadzone) rx = ry = 0;
+            else {
+                const float scale = (std::min(magnitude, 1.0f) - right_deadzone) / (1.0f - right_deadzone) / magnitude;
+                rx = raw_x * scale; ry = raw_y * scale;
+            }
+        }
         if (suppress_camera) {
             if (rx == 0 && ry == 0) suppress_camera = false;
             else rx = ry = 0;
@@ -1816,8 +1834,11 @@ void tick(SDL_Window* window, bool gameplay, bool menu_open) {
 #endif
 }
 Snapshot snapshot() noexcept {
+    // The right stick is published for the player too; the analog camera reads it.
     if (host().baseline) return {static_cast<std::uint16_t>(published_buttons.load(std::memory_order_acquire)),
-        baseline_x.load(std::memory_order_acquire), baseline_y.load(std::memory_order_acquire), 0, 0,
+        baseline_x.load(std::memory_order_acquire), baseline_y.load(std::memory_order_acquire),
+        published_rx.load(std::memory_order_acquire) / 32767.0f,
+        published_ry.load(std::memory_order_acquire) / 32767.0f,
         published_enabled.load(std::memory_order_acquire)};
     return {static_cast<std::uint16_t>(published_buttons.load(std::memory_order_acquire)),
         published_x.load(std::memory_order_acquire) / 32767.0f,

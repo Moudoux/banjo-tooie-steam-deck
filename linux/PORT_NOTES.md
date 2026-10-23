@@ -130,6 +130,40 @@ Steam Deck features:
   changes are logged as `baseline map=0x... menu_rate_original=...`. A real
   fix would tag those draws with matrix groups in the guest.
 
+- **Analog camera** (Deck default on, invert X on): the retired frontend's
+  `src/camera_analog.cpp`, unchanged, linked into the player
+  (`cmake/Baseline.cmake`, built with `TOOIE_NATIVE_HOST=1` for that file).
+  A raw hook in `minimum_host_hooks.py` before `0x800A4908` in `func_800A4878`
+  (the original C-left/C-right gate) calls `tooie_camera_analog_apply`, which
+  feeds right-stick X proportionally into the original rotate routine
+  (`func_80114D98`, `func_801111D0`). Settings `tooie_analog_camera_enabled`
+  and `tooie_camera_invert_x` (menu checkboxes); with it on, only right-stick X
+  leaves the C-button bindings, so up/down still toggles camera views. No
+  free pitch: unlike Lighthouse's free-look, Tooie's camera is not taken over.
+  `baseline_input_host_test` (not built by default) now needs
+  `camera_analog.cpp` too.
+  The player's `tooie::input::snapshot()` used to hard-code the right stick
+  to zero, which made the first Deck build's analog camera dead; it now
+  publishes `published_rx`/`ry`.
+  The camera is a Lighthouse-style orbit (`FreeLookCamera.cpp`), owned in
+  native code while active: entered at a 0.30 stick (shaped like Lighthouse's
+  `ReadStick`, radial 0.15 deadzone), yaw changes by stick x 160 deg/s x dt,
+  distance and elevation are captured on entry, the aim height is smoothed at
+  rate 8, and it stays where it was left. A second raw hook before
+  `0x8011066C` in `func_80110588` (`tooie_camera_orbit_apply`) writes the pose
+  into the view copies (sp+0x34 position, sp+0x28 rotation) and the camera's
+  own state (+0x74, +0x80, yaw controller +0x10/+0x14, velocity +0x18 = 0), so
+  the game resumes from it. Tooie conventions: rotation (pitch, yaw, roll) in
+  degrees, yaw = atan2(dx, dz) of position minus focus (`func_80112550`),
+  pitch = 360 - elevation. Turn steps are refused when `func_8011349C` reports
+  the path blocked. The orbit ends on a game yaw transition (C buttons), a
+  camera mode change, or a frame without manual rotation (cutscene, menu,
+  view toggle). The camera component is relocated by the heap, so its
+  address changing in the same mode keeps the orbit. Measured with a virtual
+  pad: constant 84.7 deg/s from the first frame at 0.53 shaped stick, rotation
+  equal to yaw, zero motion after release, kept while walking. Unlike
+  Lighthouse, no collision pull-in while walking during an orbit.
+
 ## Verified vs not
 
 - Verified on the dev machine (Arch, Ryzen 9 3900X = Zen 2, RTX 4070 SUPER,
@@ -150,6 +184,14 @@ exposes; the missing `SDL_WINDOW_VULKAN` flag above only crashed on the Deck.
 Test against real SDL2 by copying `libSDL2-2.0.so.0` out of the toolchain
 image and running with `LD_LIBRARY_PATH` pointing at it. On the Deck,
 `coredumpctl info -1` gives a symbolized backtrace for a `SYMBOLS=1` build.
+
+## Testing input without a gamepad
+
+You are in the `input` group, so a script can create a virtual Xbox 360 pad
+through `/dev/uinput` (raw ioctls, no extra packages) and hold any stick.
+The game only accepts input while its window has focus; desktop test runs
+usually lack it, so a throwaway build that ignores focus is needed for such
+runs (never commit it). QA `--input-script` files can only press N64 inputs.
 
 ## When pulling upstream
 

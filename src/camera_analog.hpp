@@ -18,6 +18,10 @@ bool vertical_inverted() noexcept;
 // the original downstream command result after consuming this analog frame.
 extern "C" int tooie_camera_analog_apply(std::uint8_t* rdram, recomp_context* ctx);
 
+// Called in func_80110588 before the camera pose is handed to the view
+// (0x8011066C): while the right-stick orbit is active, it supplies the pose.
+extern "C" void tooie_camera_orbit_apply(std::uint8_t* rdram, recomp_context* ctx);
+
 // Called after Tooie's original bastick_getX/Y calls, inside bafpctrl's own
 // active-mode gate. A zero/disabled right axis preserves the original value.
 extern "C" float tooie_camera_first_person_axis(float original_value, int vertical) noexcept;

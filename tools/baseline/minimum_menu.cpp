@@ -96,6 +96,10 @@ void video(const Snapshot& snapshot) {
     if(ImGui::Combo("Gameplay aspect",&aspect,"16:9\0 21:9\0 32:9\0 43:18\0 16:10\0"))preference(Preference::NativeAspect,aspect);
     int cutscene=prefs.cutscene_aspect;
     if(ImGui::Combo("Cutscene aspect",&cutscene,"Original (4:3)\0Match gameplay\0"))preference(Preference::CutsceneAspect,cutscene);
+    bool analog=prefs.analog_camera!=0;
+    if(ImGui::Checkbox("Analog camera (right stick)",&analog))preference(Preference::AnalogCamera,int(analog));
+    bool invert=prefs.camera_invert_x!=0;
+    if(ImGui::Checkbox("Invert camera X",&invert))preference(Preference::CameraInvertX,int(invert));
     bool sync=prefs.vsync<0?render::effective_vsync():prefs.vsync!=0;
     if(ImGui::Checkbox("VSync",&sync))preference(Preference::VSync,int(sync));
     ImGui::Text("VSync: %s",status(render::vsync_status()));
