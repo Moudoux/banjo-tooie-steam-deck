@@ -19,9 +19,9 @@ struct Preferences {
     int vsync = -1; // Missing preserves the backend's current value.
     int fullscreen = 0;
     int quiet_talon_trot = 0;
-    int analog_camera = 0, camera_invert_x = 0;
+    int analog_camera = 0, camera_invert_x = 0, camera_invert_y = 0;
 };
-enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, AnalogCamera, CameraInvertX };
+enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, AnalogCamera, CameraInvertX, CameraInvertY };
 struct OutputRate { int option = 0, manual_hz = 60; };
 inline uint32_t pack_output_rate(OutputRate rate) noexcept {
     return (uint32_t(rate.option) << 16) | uint32_t(rate.manual_hz);

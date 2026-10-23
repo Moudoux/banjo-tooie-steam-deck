@@ -230,6 +230,8 @@ BindingTable defaults() {
         // either trigger crouches, either bumper centres the camera, Y looks
         // first-person, the right stick turns the camera (C-left/right, X axis
         // inverted) and either vertical push toggles camera views (C-down).
+        // With the analog camera on, the right stick orbits on both axes and
+        // the view toggle is on the right stick click instead.
         // L, unused by XBLA, stays on LS.
         put(table, Action::A, Device::Button, SDL_CONTROLLER_BUTTON_A);
         put(table, Action::B, Device::Button, SDL_CONTROLLER_BUTTON_X);
@@ -243,6 +245,7 @@ BindingTable defaults() {
         put(table, Action::CUp, Device::Button, SDL_CONTROLLER_BUTTON_Y);
         put(table, Action::CDown, Device::AxisPositive, SDL_CONTROLLER_AXIS_RIGHTY);
         put(table, Action::CDown, Device::AxisNegative, SDL_CONTROLLER_AXIS_RIGHTY);
+        put(table, Action::CDown, Device::Button, SDL_CONTROLLER_BUTTON_RIGHTSTICK);
         put(table, Action::CLeft, Device::AxisPositive, SDL_CONTROLLER_AXIS_RIGHTX);
         put(table, Action::CRight, Device::AxisNegative, SDL_CONTROLLER_AXIS_RIGHTX);
         put(table, Action::Menu, Device::Button, SDL_CONTROLLER_BUTTON_BACK);
@@ -629,7 +632,7 @@ bool down(const BindingTable& table, Action action, const Uint8* keys, SDL_GameC
         if (analog_camera_enabled &&
             (action == Action::CUp || action == Action::CDown || action == Action::CLeft || action == Action::CRight) &&
             (binding.device == Device::AxisPositive || binding.device == Device::AxisNegative) &&
-            (binding.code == SDL_CONTROLLER_AXIS_RIGHTX || (binding.code == SDL_CONTROLLER_AXIS_RIGHTY && !host().baseline))) continue;
+            (binding.code == SDL_CONTROLLER_AXIS_RIGHTX || binding.code == SDL_CONTROLLER_AXIS_RIGHTY)) continue;
         switch (binding.device) {
         case Device::Keyboard:
             if (keys && binding.code < SDL_NUM_SCANCODES && keys[binding.code]) return true;
@@ -1516,7 +1519,7 @@ void handle_event(const SDL_Event& event) {
             if (layer == BindingLayer::Base && consumed_chord(binding)) continue;
             if (analog_camera_enabled && (binding.device == Device::AxisPositive || binding.device == Device::AxisNegative) &&
                 (action == Action::CUp || action == Action::CDown || action == Action::CLeft || action == Action::CRight) &&
-                (binding.code == SDL_CONTROLLER_AXIS_RIGHTX || (binding.code == SDL_CONTROLLER_AXIS_RIGHTY && !host().baseline))) continue;
+                (binding.code == SDL_CONTROLLER_AXIS_RIGHTX || binding.code == SDL_CONTROLLER_AXIS_RIGHTY)) continue;
             return true;
         }
         if (layer == BindingLayer::Modified && modifier_event &&
@@ -1792,10 +1795,32 @@ void tick(SDL_Window* window, bool gameplay, bool menu_open) {
         rx = axis(controller, SDL_CONTROLLER_AXIS_RIGHTX, deadzone);
         ry = -axis(controller, SDL_CONTROLLER_AXIS_RIGHTY, deadzone);
         if (host().baseline && controller) {
-            // Lighthouse free-look stick shaping (FreeLookCamera.cpp ReadStick): radial
-            // 0.15 deadzone, rescaled to 0..1. Only the analog camera reads rx/ry.
-            const float raw_x = std::clamp(SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTX) / 32767.0f, -1.0f, 1.0f);
-            const float raw_y = -std::clamp(SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTY) / 32767.0f, -1.0f, 1.0f);
+            // Lighthouse's right stick as its free-look sees it. libultraship
+            // (ControllerStick::Process, default settings) first applies a 20%
+            // circular deadzone on its +-85 scale and bounds diagonals to the
+            // N64 octagon; controller_getRightStick then divides by 127, so a
+            // full push reads 0.67. ReadStick (FreeLookCamera.cpp) adds a radial
+            // 0.15 deadzone, rescaled. Only the analog camera reads rx/ry.
+            constexpr double axis_range = 85.0, lus_deadzone = 17.0;
+            const double sx = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTX) * axis_range / 32767.0;
+            const double sy = -SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTY) * axis_range / 32767.0;
+            double ux = std::fabs(sx), uy = std::fabs(sy);
+            double len = std::hypot(ux, uy);
+            if (len < lus_deadzone) len = 0;
+            else if (len > axis_range) len = axis_range / len;
+            else len = (len - lus_deadzone) * axis_range / (axis_range - lus_deadzone) / len;
+            ux *= len; uy *= len;
+            if (ux != 0.0 && uy != 0.0) {
+                const double slope = uy / ux;
+                double edge_x = axis_range / (slope + 16.0 / 69.0);
+                const double edge_y = std::min(edge_x * slope, axis_range / (1.0 / slope + 16.0 / 69.0));
+                edge_x = edge_y / slope;
+                const double scale = std::hypot(edge_x, edge_y) / axis_range;
+                ux *= scale; uy *= scale;
+            }
+            // libultraship stores the stick as int8_t (truncated).
+            const float raw_x = std::clamp(float(std::copysign(std::trunc(ux), sx)) / 127.0f, -1.0f, 1.0f);
+            const float raw_y = std::clamp(float(std::copysign(std::trunc(uy), sy)) / 127.0f, -1.0f, 1.0f);
             const float magnitude = std::hypot(raw_x, raw_y);
             constexpr float right_deadzone = 0.15f;
             if (magnitude < right_deadzone) rx = ry = 0;

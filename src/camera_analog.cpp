@@ -14,9 +14,10 @@
 
 // Right-stick orbit camera with the feel of Lighthouse's free-look
 // (src/port/Enhancements/Camera/FreeLookCamera.cpp): entered past a 0.30
-// stick, yaw changes linearly at 160 degrees per second, the camera keeps its
-// captured distance and elevation around the focus, and it stays where it was
-// left until the game takes the camera back. Tooie conventions, measured from
+// stick, yaw changes linearly at 160 and elevation at 100 degrees per second
+// (pushing up raises the camera, as there), the camera keeps its captured
+// distance around the focus, and it stays where it was left until the game
+// takes the camera back. Tooie conventions, measured from
 // the camera component: position at +0x74, rotation (pitch, yaw, roll in
 // degrees) at +0x80, yaw = atan2(dx, dz) of position minus focus, and pitch =
 // 360 - elevation. The yaw controller at +0x60 keeps target +0x10, current
@@ -24,6 +25,10 @@
 // a yaw transition of its own.
 namespace {
 constexpr float k_yaw_speed_degrees = 160.0f; // Lighthouse kYawSpeed
+constexpr float k_pitch_speed_degrees = 100.0f; // Lighthouse kPitchSpeed
+// Lighthouse kMinPitch/kMaxPitch (-85, 40), as elevation above the focus.
+constexpr float k_min_elevation = -40.0f;
+constexpr float k_max_elevation = 85.0f;
 constexpr float k_enter_threshold = 0.30f;    // Lighthouse kEnterThreshold
 constexpr float k_aim_height_rate = 8.0f;     // Lighthouse kAimHeightRate
 constexpr float k_degrees = 57.29577951308232f;
@@ -36,7 +41,8 @@ struct Orbit {
     bool active = false, entering = false;
     gpr component = 0;
     std::int32_t mode = 0;
-    float yaw = 0.0f, elevation = 0.0f, distance = 0.0f, aim_y = 0.0f, pending_turn = 0.0f;
+    float yaw = 0.0f, elevation = 0.0f, distance = 0.0f, aim_y = 0.0f, pending_turn = 0.0f,
+        pending_pitch = 0.0f;
     // The input hook runs once per camera frame while manual rotation is allowed.
     std::uint32_t input_frames = 0, seen_input_frames = 0;
     std::chrono::steady_clock::time_point last_input{};
@@ -73,7 +79,7 @@ void guest_call(recomp_context* ctx, Call&& call) {
 
 void exit_orbit() {
     orbit.active = orbit.entering = false;
-    orbit.pending_turn = 0.0f;
+    orbit.pending_turn = orbit.pending_pitch = 0.0f;
 }
 }
 
@@ -160,6 +166,8 @@ extern "C" int tooie_camera_analog_apply(std::uint8_t* rdram, recomp_context* ct
     tooie::input::get_right_analog(0, &right_x, &right_y);
     float horizontal = std::isfinite(right_x) ? right_x : 0.0f;
     if (tooie::camera::horizontal_inverted()) horizontal = -horizontal;
+    float vertical = std::isfinite(right_y) ? right_y : 0.0f;
+    if (tooie::camera::vertical_inverted()) vertical = -vertical;
 
     // Tooie's heap relocates the camera component; same mode means the same camera.
     if (orbit.active || orbit.entering) orbit.component = component;
@@ -173,6 +181,7 @@ extern "C" int tooie_camera_analog_apply(std::uint8_t* rdram, recomp_context* ct
     }
     if (orbit.active || orbit.entering) {
         orbit.pending_turn += horizontal * k_yaw_speed_degrees * dt;
+        orbit.pending_pitch += vertical * k_pitch_speed_degrees * dt;
     }
     // The original C-left/C-right handling still runs; a C turn ends the orbit.
     return -1;
@@ -234,22 +243,19 @@ extern "C" void tooie_camera_orbit_apply(std::uint8_t* rdram, recomp_context* ct
         orbit.aim_y += (focus[1] - orbit.aim_y) * (1.0f - std::exp(-k_aim_height_rate * dt));
     }
 
-    auto pose = [&](float yaw, float (&position)[3]) {
-        const float elevation = orbit.elevation / k_degrees, heading = yaw / k_degrees;
-        const float horizontal = orbit.distance * std::cos(elevation);
+    auto pose = [&](float yaw, float elevation, float (&position)[3]) {
+        const float pitch = elevation / k_degrees, heading = yaw / k_degrees;
+        const float horizontal = orbit.distance * std::cos(pitch);
         position[0] = focus[0] + horizontal * std::sin(heading);
-        position[1] = focus[1] + orbit.distance * std::sin(elevation);
+        position[1] = focus[1] + orbit.distance * std::sin(pitch);
         position[2] = focus[2] + horizontal * std::cos(heading);
     };
-
-    // Take this frame's turn unless the game's own wall check (func_8011349C,
-    // as used by the C-button turn) reports the camera's path blocked.
-    float position[3];
-    if (orbit.pending_turn != 0.0f) {
-        const float turned = wrap_degrees(orbit.yaw + orbit.pending_turn);
+    // The C-button turn's check (func_8011349C) tests the camera's path
+    // between two positions and returns nonzero when nothing is in the way.
+    auto clear_to = [&](float yaw, float elevation) {
         float from[3], to[3];
-        pose(orbit.yaw, from);
-        pose(turned, to);
+        pose(orbit.yaw, orbit.elevation, from);
+        pose(yaw, elevation, to);
         bool clear = true;
         guest_call(ctx, [&](gpr out) {
             store_vector(rdram, out, from);
@@ -258,10 +264,28 @@ extern "C" void tooie_camera_orbit_apply(std::uint8_t* rdram, recomp_context* ct
             func_8011349C(rdram, ctx);
             clear = ctx->r2 != 0;
         });
-        if (clear) orbit.yaw = turned;
-        orbit.pending_turn = 0.0f;
+        return clear;
+    };
+
+    // Take this frame's turn and tilt unless the path there is blocked (a
+    // wall, or the floor when tilting down); then try each axis alone.
+    if (orbit.pending_turn != 0.0f || orbit.pending_pitch != 0.0f) {
+        const float turned = wrap_degrees(orbit.yaw + orbit.pending_turn);
+        // Captured outside the limits (the game's own angle): only move inwards.
+        const float tilted = std::clamp(orbit.elevation + orbit.pending_pitch,
+            std::min(k_min_elevation, orbit.elevation), std::max(k_max_elevation, orbit.elevation));
+        if (clear_to(turned, tilted)) {
+            orbit.yaw = turned;
+            orbit.elevation = tilted;
+        } else if (orbit.pending_turn != 0.0f && clear_to(turned, orbit.elevation)) {
+            orbit.yaw = turned;
+        } else if (orbit.pending_turn != 0.0f && tilted != orbit.elevation && clear_to(orbit.yaw, tilted)) {
+            orbit.elevation = tilted;
+        }
+        orbit.pending_turn = orbit.pending_pitch = 0.0f;
     }
-    pose(orbit.yaw, position);
+    float position[3];
+    pose(orbit.yaw, orbit.elevation, position);
 
     const float dx = position[0] - focus[0], dz = position[2] - focus[2];
     const float dy = position[1] - orbit.aim_y; // Look at the smoothed aim height.
