@@ -76,15 +76,15 @@ Your profile, saves, settings and `player.log` are in
 
 | Button | N64 | Action |
 | --- | --- | --- |
-| Left stick | Stick | Move |
+| Left stick | Stick | Move; look around in first person |
 | A | A | Jump |
-| X | B | Attack, talk |
+| X | B | Attack |
+| B | B | Talk, read signs, cancel text |
 | LT / RT | Z | Crouch |
-| LB / RB | R | Centre camera |
-| Y | C-up | First person; crouch + Y spits eggs |
-| B | C-down | Camera view; crouch + B fires eggs backwards |
-| Right stick left / right | C-left / C-right | Turn camera |
-| Right stick down | C-down | Camera view |
+| LB / RB | R | Centre camera behind Banjo |
+| Y | C-up | First-person view |
+| Right stick left / right | C-right / C-left | Rotate camera (inverted X) |
+| Right stick up / down | C-down | Toggle camera views |
 | Left stick click | L | |
 | Start | Start | Pause |
 | View | | Settings menu |

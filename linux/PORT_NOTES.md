@@ -102,10 +102,11 @@ Steam Deck features:
   already mapped (Steam's `SDL_GAMECONTROLLERCONFIG` wins). Upstream's player
   never loaded this file.
 - **XBLA button layout** as the Deck default (`src/frontend_input_preference.cpp`
-  `defaults()`, `TOOIE_DECK_DEFAULTS`): A=A, X=B, LT/RT=Z, LB/RB=R, Y=C-up,
-  B=C-down, right stick X=C-left/right, right stick down=C-down, up unbound,
-  LS click=L, View=menu. Known gaps: talking is on X (XBLA B is contextual),
-  camera is stepped C-buttons not analog, no zoom-in.
+  `defaults()`, `TOOIE_DECK_DEFAULTS`), checked against the XBLA manual
+  table: A=A, X and B=N64 B, LT/RT=Z, LB/RB=R, Y=C-up, right stick X=C-left/
+  right (inverted at the owner's request), right stick up or down=C-down,
+  LS click=L, View=menu. The camera is stepped C-buttons, not XBLA's analog
+  camera.
 
 - **Frustum padding** (`tools/baseline/minimum_host_hooks.py`, `FRUSTUM_HOOKS`):
   Tooie keeps its culling planes in the camera struct (FOV `+0xE4`, aspect
