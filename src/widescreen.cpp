@@ -100,7 +100,13 @@ int live_widescreen_request() noexcept {
 
 uint32_t fit_aspect_bits(int width, int height) noexcept {
     if (width <= 0 || height <= 0) return 0;
-    const float scale = std::clamp(float(double(width) / height * (9.0 / 16.0)), 1.0f, 2.0f);
+#ifdef _WIN32
+    constexpr float narrowest = 1.0f;
+#else
+    // The Steam Deck panel is 16:10; projection scales below 16:9 the same way.
+    constexpr float narrowest = float((16.0 / 10.0) / (16.0 / 9.0));
+#endif
+    const float scale = std::clamp(float(double(width) / height * (9.0 / 16.0)), narrowest, 2.0f);
     uint32_t bits;
     static_assert(sizeof bits == sizeof scale);
     std::memcpy(&bits, &scale, sizeof bits);

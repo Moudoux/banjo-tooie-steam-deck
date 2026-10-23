@@ -228,7 +228,7 @@ void update_preference(Preference key, int value) {
     using namespace tooie::frontend;
     switch (key) {
     case Preference::Resolution:
-        if (value < 1 || value > 8) return;
+        if (value < 0 || value > 8) return;
         selected.resolution = value; settings::set_int("baseline_resolution", value);
         resolution.store(value, std::memory_order_release); break;
     case Preference::OutputRate:
@@ -512,6 +512,14 @@ void queue_event(const SDL_Event& event) {
     render_input.events.push_back(event);
 }
 }
+#ifdef TOOIE_DECK_DEFAULTS
+// Steam Deck defaults for settings a profile has not saved yet: 3x of 240 lines
+// suits the 800-line panel, output follows the display rate, and widescreen
+// fitted to the window fills the 16:10 screen.
+constexpr Preferences fresh{.resolution = 3, .output_rate = 2, .wide = 1, .native_aspect = fit_aspect, .fullscreen = 1};
+#else
+constexpr Preferences fresh{};
+#endif
 void initialize(SDL_Window* target, const std::filesystem::path& profile, bool allow_background_controller) {
     if (initialized || !target) throw std::runtime_error("Invalid baseline host initialization");
     window = target; window_id = SDL_GetWindowID(target);
@@ -520,17 +528,17 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     using namespace tooie::frontend;
     const double rumble_strength = settings::get_number("rumble_strength", 100.0);
     selected.rumble_strength = std::isfinite(rumble_strength) ? int(std::clamp(rumble_strength, 0.0, 100.0)) : 100;
-    selected.resolution = bounded(settings::get_int("baseline_resolution", 1), 1, 8, 1);
+    selected.resolution = bounded(settings::get_int("baseline_resolution", fresh.resolution), 0, 8, fresh.resolution);
     selected.texture_filter = bounded(settings::get_int("baseline_texture_filter", 0), 0, 1, 0);
     selected.output_filter = bounded(settings::get_int("baseline_output_filter", 0), 0, 2, 0);
-    selected.output_rate = bounded(settings::get_int("baseline_output_rate", 0), 0, 3, 0);
+    selected.output_rate = bounded(settings::get_int("baseline_output_rate", fresh.output_rate), 0, 3, fresh.output_rate);
     selected.manual_hz = bounded(settings::get_int("baseline_manual_hz", 60), 20, 360, 60);
-    selected.wide = bounded(settings::get_int("tooie_game_widescreen", -1), -1, 1, -1);
+    selected.wide = bounded(settings::get_int("tooie_game_widescreen", fresh.wide), -1, 1, fresh.wide);
     tooie::widescreen::set_live_widescreen_request(selected.wide);
-    selected.native_aspect = bounded(settings::get_int("tooie_native_aspect", 0), 0, fit_aspect, 0);
+    selected.native_aspect = bounded(settings::get_int("tooie_native_aspect", fresh.native_aspect), 0, fit_aspect, fresh.native_aspect);
     selected.cutscene_aspect = bounded(settings::get_int("tooie_cutscene_aspect", 0), 0, 1, 0);
     selected.vsync = bounded(settings::get_int("baseline_vsync", -1), -1, 1, -1);
-    selected.fullscreen = bounded(settings::get_int("baseline_fullscreen", 0), 0, 1, 0);
+    selected.fullscreen = bounded(settings::get_int("baseline_fullscreen", fresh.fullscreen), 0, 1, fresh.fullscreen);
 #if BASELINE_PLAYER
     selected.master_volume = std::clamp(settings::get_int("tooie_master_volume_percent", 100), 0, 100);
     selected.music_volume = std::clamp(settings::get_int("tooie_music_volume_percent", 100), 0, 100);

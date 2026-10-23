@@ -28,7 +28,8 @@ bool profile_override_active() noexcept;
 void set_live_aspect_bits(std::uint32_t bits) noexcept;
 void set_live_widescreen_request(int request) noexcept;
 int live_widescreen_request() noexcept;
-// Positive drawable dimensions; scale clamps to [1,2] (16:9..32:9).
+// Positive drawable dimensions; scale clamps to [1,2] (16:9..32:9), or [0.9,2]
+// (16:10..32:9) outside Windows.
 std::uint32_t fit_aspect_bits(int width, int height) noexcept;
 // Canonical transport: inactive0; startup bits0..1; atomic live aspect bits2..31.
 uint32_t latched_settings_word() noexcept;

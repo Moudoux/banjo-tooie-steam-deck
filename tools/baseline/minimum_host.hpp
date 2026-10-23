@@ -110,7 +110,7 @@ void request_quit() noexcept;
 void publish_ready(bool) noexcept;
 RenderInput take_render_input();
 int requested_vsync() noexcept;
-int requested_resolution() noexcept; // Graphics owner; range 1..8.
+int requested_resolution() noexcept; // Graphics owner; 0 fits the window, else 1..8.
 int requested_texture_filter() noexcept; // Graphics owner; 0 three-point, 1 bilinear.
 int requested_output_filter() noexcept; // Graphics owner; 0 pixel scaling, 1 nearest, 2 linear.
 int requested_cutscene_aspect() noexcept; // Guest frame/cutscene boundary.

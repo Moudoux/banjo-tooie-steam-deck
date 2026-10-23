@@ -58,12 +58,20 @@ bool update_rate(RT64::UserConfiguration& app_user,RT64::SharedQueueResources& s
     return true;
 }
 bool update_resolution(RT64::UserConfiguration& app_user,RT64::SharedQueueResources& shared,int scale) {
-    if(scale<1 || scale>8)throw std::runtime_error("Invalid resolution scale");
+    if(scale<0 || scale>8)throw std::runtime_error("Invalid resolution scale");
+    // Scale 0 lets RT64 pick the integer scale that covers the window height.
+    using Mode=RT64::UserConfiguration::Resolution;
+    const Mode mode=scale==0?Mode::WindowIntegerScale:Mode::Manual;
     std::lock_guard lock(shared.configurationMutex);
-    if(shared.userConfig.resolutionMultiplier==scale && app_user.resolutionMultiplier==scale)return false;
+    if(shared.userConfig.resolution==mode && app_user.resolution==mode &&
+       (scale==0 || (shared.userConfig.resolutionMultiplier==scale && app_user.resolutionMultiplier==scale)))return false;
     // RT64's workload owner rebuilds targets after this configuration change.
-    app_user.resolutionMultiplier=scale;
-    shared.userConfig.resolutionMultiplier=scale;
+    app_user.resolution=mode;
+    shared.userConfig.resolution=mode;
+    if(scale) {
+        app_user.resolutionMultiplier=scale;
+        shared.userConfig.resolutionMultiplier=scale;
+    }
     shared.userConfigChanged=true;
     shared.fbConfigChanged=true;
     shared.newConfigValidated=false;
@@ -152,7 +160,8 @@ Status reconcile_aspect(RT64::SharedQueueResources& shared,uint32_t word,uint32_
 }
 void configure_startup(RT64::Application& app) {
     const auto& prefs=latched_preferences();
-    app.userConfig.resolutionMultiplier=prefs.resolution;
+    if(prefs.resolution)app.userConfig.resolutionMultiplier=prefs.resolution;
+    else app.userConfig.resolution=RT64::UserConfiguration::Resolution::WindowIntegerScale;
 #if BASELINE_PLAYER
     // F4 player correspondence rows (rt64_matrix_trace.hpp) feed the issue-evidence rings; inert
     // unless the selected build includes the matrix-trace hook.
