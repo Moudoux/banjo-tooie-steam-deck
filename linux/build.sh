@@ -95,4 +95,6 @@ cmake -S . -B "$BUILD" -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=cl
 
 echo "== 6. Build the player"
 cmake --build "$BUILD" --target TooieBaseline -j "$JOBS" ${BUILD_ARGS:-}
+# Fallback controller mappings, read from beside the executable.
+cp recompcontrollerdb.txt "$BUILD/baseline/player-bin/"
 echo "Built $BUILD/baseline/player-bin/BanjoTooieScurvyDogPort (TARGET=$TARGET)"

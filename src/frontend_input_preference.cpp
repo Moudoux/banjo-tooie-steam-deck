@@ -218,6 +218,38 @@ BindingTable defaults() {
     put(table, Action::MoveLeft, Device::Keyboard, SDL_SCANCODE_A);
     put(table, Action::MoveRight, Device::Keyboard, SDL_SCANCODE_D);
     put(table, Action::Menu, Device::Keyboard, SDL_SCANCODE_ESCAPE);
+#ifdef TOOIE_DECK_DEFAULTS
+    if (host().baseline) {
+        // Xbox 360 (XBLA) layout: X attacks, either trigger crouches, either
+        // bumper centres the camera, Y looks first-person (and spits eggs while
+        // crouched), B fires eggs backwards while crouched. The right stick
+        // turns (C-left/right) and zooms out (C-down); up is left unbound so
+        // it never drops into first person. L, unused by XBLA, stays on LS.
+        put(table, Action::A, Device::Button, SDL_CONTROLLER_BUTTON_A);
+        put(table, Action::B, Device::Button, SDL_CONTROLLER_BUTTON_X);
+        put(table, Action::Start, Device::Button, SDL_CONTROLLER_BUTTON_START);
+        put(table, Action::Z, Device::AxisPositive, SDL_CONTROLLER_AXIS_TRIGGERLEFT);
+        put(table, Action::Z, Device::AxisPositive, SDL_CONTROLLER_AXIS_TRIGGERRIGHT, 1);
+        put(table, Action::R, Device::Button, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+        put(table, Action::R, Device::Button, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, 1);
+        put(table, Action::L, Device::Button, SDL_CONTROLLER_BUTTON_LEFTSTICK);
+        put(table, Action::CUp, Device::Button, SDL_CONTROLLER_BUTTON_Y);
+        put(table, Action::CDown, Device::Button, SDL_CONTROLLER_BUTTON_B);
+        put(table, Action::CDown, Device::AxisPositive, SDL_CONTROLLER_AXIS_RIGHTY);
+        put(table, Action::CLeft, Device::AxisNegative, SDL_CONTROLLER_AXIS_RIGHTX);
+        put(table, Action::CRight, Device::AxisPositive, SDL_CONTROLLER_AXIS_RIGHTX);
+        put(table, Action::Menu, Device::Button, SDL_CONTROLLER_BUTTON_BACK);
+        put(table, Action::DUp, Device::Button, SDL_CONTROLLER_BUTTON_DPAD_UP);
+        put(table, Action::DDown, Device::Button, SDL_CONTROLLER_BUTTON_DPAD_DOWN);
+        put(table, Action::DLeft, Device::Button, SDL_CONTROLLER_BUTTON_DPAD_LEFT);
+        put(table, Action::DRight, Device::Button, SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
+        put(table, Action::MoveUp, Device::AxisNegative, SDL_CONTROLLER_AXIS_LEFTY);
+        put(table, Action::MoveDown, Device::AxisPositive, SDL_CONTROLLER_AXIS_LEFTY);
+        put(table, Action::MoveLeft, Device::AxisNegative, SDL_CONTROLLER_AXIS_LEFTX);
+        put(table, Action::MoveRight, Device::AxisPositive, SDL_CONTROLLER_AXIS_LEFTX);
+        return table;
+    }
+#endif
     if (host().baseline) {
         put(table, Action::A, Device::Button, SDL_CONTROLLER_BUTTON_A);
         put(table, Action::B, Device::Button, SDL_CONTROLLER_BUTTON_B);
