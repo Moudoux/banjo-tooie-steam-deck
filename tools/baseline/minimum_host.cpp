@@ -5,6 +5,7 @@
 #include "frontend_config.hpp"
 #include "widescreen.hpp"
 #include "minimum_render.hpp"
+#include "platform_support.hpp"
 #if BASELINE_PLAYER
 #include "virtual_clock.hpp"
 #include "player_version.hpp"
@@ -16,11 +17,33 @@
 #include <chrono>
 #include <cstdio>
 #include <ctime>
+#include <fstream>
 #include <mutex>
 #include <stdexcept>
 
 namespace baseline::host {
 namespace {
+// recompcontrollerdb.txt beside the executable only fills gaps: a controller
+// already mapped by SDL, or by Steam through SDL_GAMECONTROLLERCONFIG, keeps
+// that mapping.
+void add_missing_controller_mappings() {
+    std::filesystem::path path;
+    try { path = tooie::platform::executable_path().parent_path() / "recompcontrollerdb.txt"; }
+    catch (const std::exception&) { return; }
+    std::ifstream input(path);
+    if (!input) return;
+    const std::string platform = std::string("platform:") + SDL_GetPlatform() + ",";
+    int added = 0;
+    for (std::string line; std::getline(input, line);) {
+        if (line.size() < 33 || line[0] == '#' || line[32] != ',') continue;
+        if (line.back() != ',') line += ',';
+        if (line.find("platform:") != std::string::npos && line.find(platform) == std::string::npos) continue;
+        char* existing = SDL_GameControllerMappingForGUID(SDL_JoystickGetGUIDFromString(line.substr(0, 32).c_str()));
+        if (existing) { SDL_free(existing); continue; }
+        if (SDL_GameControllerAddMapping(line.c_str()) == 1) ++added;
+    }
+    std::fprintf(stderr, "baseline controller mappings added=%d from %s\n", added, path.string().c_str());
+}
 SDL_Window* window = nullptr; // SDL owner, never dereferenced by Draw.
 Uint32 window_id = 0;
 bool focused = false, previously_ready = false, quarantine = false;
@@ -571,6 +594,7 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
 #endif
     if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0)
         std::fprintf(stderr, "baseline mapper keyboard-only: %s\n", SDL_GetError());
+    else add_missing_controller_mappings();
 #if BASELINE_PLAYER
     loaded_profiles = settings::get_string("tooie_input_profiles_v1", "");
 #endif
