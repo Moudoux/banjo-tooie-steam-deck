@@ -118,6 +118,38 @@ Steam Deck features:
   set; the transition-busy check (`func_800A8264`) and the original exit to
   the frontend (`gcfrontend` entrypoint 10) still run.
 
+- **Anti-aliasing** (Video menu, `baseline_msaa` / `baseline_supersampling`):
+  MSAA 2x/4x/8x and supersampling 2x/4x, applied live by the graphics owner
+  in `update_screen` (`tools/baseline/devices.cpp`). MSAA follows the retired
+  frontend: set the config, then `RT64::Application::updateMultisampling()`
+  outside the configuration lock (it waits for the queues). Only the
+  antialiasing fields are written into the shared config, because
+  `updateUserConfig` would copy the whole app config over the aspect fields
+  `reconcile_aspect` writes directly. Levels offered stop at the device's
+  common color/depth sample count and need programmable sample locations
+  (`render::max_msaa`, detected in `publish_renderer`). Supersampling renders
+  at scale x factor with RT64's `downsampleMultiplier` resolving to the
+  chosen scale (the retired frontend's mapping); it needs a fixed scale and
+  is capped so the internal scale stays at or below 8x.
+
+- **Draw distance and Disable LOD** (Video menu, `tooie_draw_distance` 1-6,
+  `tooie_disable_lod`; `src/draw_distance.cpp`, raw hooks
+  `GRAPHICS_HOOKS` in `tools/baseline/minimum_host_hooks.py`), after
+  Lighthouse's `GraphicsPatches.cpp`. `func_800DE498` (model render) culls a
+  model once its focus distance (sp+0xDC) reaches the draw distance at
+  `0x8012C82C` (set per actor by `func_800DF428` from `func_80101970`, reset
+  after every model by `func_800DE318`). A hook at `L_800DE68C`, reached once
+  per model, multiplies it by the setting (+0.1 past whole multiples, as
+  Lighthouse). With LOD disabled, a hook before `0x800DE628` skips the
+  small-and-far shrink (4000 units, size x 50), and the three LOD geo
+  commands (type 8 in the geo tables listed at `0x80123198`:
+  `func_800DD214`, `func_800DD2E8`, `func_800DD37C`, which draw their branch
+  for squared distance in (min^2, max^2]) see distance 1, picking the
+  nearest branch. Not covered: actors the game has not spawned or keeps
+  inactive far away, and level geometry culled by other means.
+  `baseline_input_host_test` (not built by default) would also need
+  `src/draw_distance.cpp`.
+
 - **No on-screen keyboard at launch** (`tools/baseline/devices.cpp`, before
   `SDL_Init`): sdl2-compat before `30ee26c` (2026-06-07) starts text input
   on each new window without suppressing the screen keyboard, and SDL3 shows

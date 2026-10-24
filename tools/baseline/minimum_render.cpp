@@ -2,6 +2,7 @@
 #include "minimum_menu.hpp"
 #include "gui/rt64_inspector.h"
 #include "hle/rt64_application.h"
+#include "render/rt64_render_target.h"
 #include "rhi/rt64_render_hooks.h"
 #include "plume_vulkan.h"
 #include "imgui/imgui.h"
@@ -27,6 +28,7 @@ struct Owners {
     SDL_Window* window; // Opaque backend handle; external mode performs no SDL-owner calls.
 };
 std::shared_ptr<const Owners> published;
+std::atomic<int> msaa_limit{0};
 std::unique_ptr<RT64::Inspector> inspector;
 bool failed=false,was_suppressed=false,actual_vsync=true;
 int last_vsync=-2;
@@ -151,7 +153,19 @@ void publish_renderer(RT64::Application& app,SDL_Window* window) {
     std::shared_ptr<const Owners> owners=std::make_shared<Owners>(Owners{&app,app.device.get(),app.swapChain.get(),
         app.presentGraphicsWorker.get(),app.chosenGraphicsAPI,window});
     std::atomic_store_explicit(&published,std::move(owners),std::memory_order_release);
+    // RT64 multisampling needs programmable sample locations and a sample count the
+    // color and depth formats share (RT64::Application::setup's own check).
+    int highest=0;
+    if(app.device->getCapabilities().sampleLocations) {
+        const auto common=app.device->getSampleCountsSupported(RT64::RenderTarget::colorBufferFormat(app.shaderLibrary->usesHDR))&
+            app.device->getSampleCountsSupported(RT64::RenderTarget::depthBufferFormat());
+        if(common&plume::RenderSampleCount::Bits::COUNT_2)highest=2;
+        if(common&plume::RenderSampleCount::Bits::COUNT_4)highest=4;
+        if(common&plume::RenderSampleCount::Bits::COUNT_8)highest=8;
+    }
+    msaa_limit.store(highest,std::memory_order_release);
 }
+int max_msaa() noexcept{return msaa_limit.load(std::memory_order_acquire);}
 Status vsync_status() noexcept{return sync_status;}
 Status aspect_status() noexcept{return config_status;}
 bool effective_vsync() noexcept{return actual_vsync;}

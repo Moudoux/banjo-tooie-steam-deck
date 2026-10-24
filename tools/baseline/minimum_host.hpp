@@ -20,8 +20,10 @@ struct Preferences {
     int fullscreen = 0;
     int quiet_talon_trot = 0;
     int analog_camera = 0, camera_invert_x = 0, camera_invert_y = 0;
+    int msaa = 0, supersampling = 1; // MSAA samples 0/2/4/8; supersampling 1/2/4.
+    int draw_distance = 1, disable_lod = 0; // Model draw-distance multiplier 1..6.
 };
-enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, AnalogCamera, CameraInvertX, CameraInvertY };
+enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, AnalogCamera, CameraInvertX, CameraInvertY, Msaa, Supersampling, DrawDistance, DisableLod };
 struct OutputRate { int option = 0, manual_hz = 60; };
 inline uint32_t pack_output_rate(OutputRate rate) noexcept {
     return (uint32_t(rate.option) << 16) | uint32_t(rate.manual_hz);
@@ -80,6 +82,8 @@ void publish_ready(bool) noexcept;
 RenderInput take_render_input();
 int requested_vsync() noexcept;
 int requested_resolution() noexcept; // Graphics owner; 0 fits the window, else 1..8.
+int requested_msaa() noexcept; // Graphics owner; MSAA samples 0, 2, 4 or 8.
+int requested_supersampling() noexcept; // Graphics owner; 1, 2 or 4.
 bool requested_quiet_talon_trot() noexcept; // Guest sound-call boundary.
 // Graphics owner only: consume the SDL owner's atomic requested pair.
 OutputRate requested_output_rate() noexcept;

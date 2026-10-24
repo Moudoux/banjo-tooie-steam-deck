@@ -85,6 +85,27 @@ void video(const Snapshot& snapshot) {
 #endif
     int resolution=prefs.resolution;
     if(ImGui::SliderInt("Resolution scale",&resolution,0,8,resolution?"%dx":"Auto (fit window)"))preference(Preference::Resolution,resolution);
+#if BASELINE_PLAYER
+    // MSAA levels the GPU supports (render::max_msaa); unsupported levels are not offered.
+    const int msaa_max=render::max_msaa();
+    if(msaa_max>=2) {
+        int msaa_index=prefs.msaa>=8?3:prefs.msaa>=4?2:prefs.msaa>=2?1:0;
+        const char* msaa_items=msaa_max>=8?"Off\0 2x\0 4x\0 8x\0":msaa_max>=4?"Off\0 2x\0 4x\0":"Off\0 2x\0";
+        if(ImGui::Combo("Anti-aliasing (MSAA)",&msaa_index,msaa_items))
+            preference(Preference::Msaa,msaa_index?1<<msaa_index:0);
+    } else ImGui::TextDisabled("Anti-aliasing (MSAA): not supported by this GPU");
+    int ss_index=prefs.supersampling>=4?2:prefs.supersampling>=2?1:0;
+    if(ImGui::Combo("Supersampling",&ss_index,"Off\0 2x\0 4x\0"))preference(Preference::Supersampling,1<<ss_index);
+    if(prefs.supersampling>1) {
+        const int factor=render::effective_supersampling(prefs.resolution,prefs.supersampling);
+        if(prefs.resolution==0)ImGui::TextDisabled("Supersampling needs a fixed resolution scale.");
+        else if(factor<prefs.supersampling)ImGui::TextDisabled("Limited to %dx: the internal scale stops at 8x.",factor);
+    }
+    int distance=prefs.draw_distance;
+    if(ImGui::SliderInt("Draw distance",&distance,1,6,distance>1?"%dx":"Original"))preference(Preference::DrawDistance,distance);
+    bool lod=prefs.disable_lod!=0;
+    if(ImGui::Checkbox("Disable LOD (always full-detail models)",&lod))preference(Preference::DisableLod,int(lod));
+#endif
     int rate=prefs.output_rate;
     if(ImGui::Combo("Output rate",&rate,"Default (Original)\0Original\0Display\0Manual\0"))preference(Preference::OutputRate,rate);
     if(rate==3) {
