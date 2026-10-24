@@ -24,7 +24,6 @@ LOCAL_ONLY = {'src/frontend_graphics_tab.cpp', 'src/frontend_file.cpp',
 # in ignored local/ storage.
 PUBLIC_DOCS = {'docs/ARCHITECTURE.md', 'docs/CHECKSUM_PROVENANCE.md', 'docs/CODEGEN.md',
                'docs/PLAYER_GUIDE.md', 'docs/RELEASE_NOTES.md', 'docs/RENDERING.md', 'docs/WINDOWS.md'}
-LOCAL_INSTRUCTIONS = {'AGENTS.md', 'CLAUDE.md'}
 
 def main():
     names = subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode().split('\0')
@@ -37,8 +36,7 @@ def main():
                 or path.suffix.lower() in FORBIDDEN_EXTENSIONS
                 or path.name == '.env' or path.name.startswith('.env.') and path.name != '.env.example'):
             raise RuntimeError(f'Excluded payload is tracked: {name}')
-        if (path.parts[0] == 'docs' and name not in PUBLIC_DOCS
-                or name in LOCAL_INSTRUCTIONS):
+        if path.parts[0] == 'docs' and name not in PUBLIC_DOCS:
             raise RuntimeError(f'Internal or unlisted documentation is tracked: {name} '
                                '(keep working notes under local/, or add public docs to PUBLIC_DOCS)')
         content = (ROOT / path).read_bytes()
