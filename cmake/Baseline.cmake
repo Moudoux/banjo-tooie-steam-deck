@@ -174,7 +174,7 @@ if(TOOIE_BASELINE_RT64_GENERIC_FIXES)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(_baseline_generic_tool "${CMAKE_SOURCE_DIR}/tools/prepare_rt64_matching.py")
     # pop_matrix_group_projection is required by the selected BK menu text (tooie-pop-projection-guard).
-    set(_baseline_generic_repairs owner_index_guard transform_upload_guard rotation_interpolation pop_matrix_group_projection projection_residual)
+    set(_baseline_generic_repairs owner_index_guard transform_upload_guard rotation_interpolation pop_matrix_group_projection projection_residual object_groups)
     foreach(_repair IN LISTS _baseline_generic_repairs)
         set(_recipe "${CMAKE_SOURCE_DIR}/patches/rt64/${_repair}.delta.json")
         if(_repair STREQUAL "owner_index_guard")
@@ -185,6 +185,9 @@ if(TOOIE_BASELINE_RT64_GENERIC_FIXES)
             set(_relative "src/gbi/rt64_gbi_extended.cpp")
         elseif(_repair STREQUAL "projection_residual")
             set(_relative "src/render/rt64_projection_processor.cpp")
+        elseif(_repair STREQUAL "object_groups")
+            # Host observer hook for the player's object matrix groups (src/object_interpolation.cpp).
+            set(_relative "src/hle/rt64_interpreter.cpp")
         else()
             set(_relative "src/common/rt64_math.cpp")
         endif()
@@ -561,8 +564,12 @@ inline constexpr char version[] = "@TOOIE_PLAYER_VERSION@";
     target_sources(TooieBaseline PRIVATE src/camera_analog.cpp)
     # Model draw distance and LOD settings, reached by func_800DE498 / LOD geo raw hooks.
     target_sources(TooieBaseline PRIVATE src/draw_distance.cpp)
-    # Menu-map actor matrix groups, reached by the func_8010A79C raw hooks.
-    target_sources(TooieBaseline PRIVATE src/menu_interpolation.cpp)
+    # Actor matrix groups (game select, and every actor when enabled), reached by
+    # the func_8010A79C raw hooks; the latter needs the object_groups RT64 repair.
+    target_sources(TooieBaseline PRIVATE src/menu_interpolation.cpp src/object_interpolation.cpp)
+    if(NOT TOOIE_BASELINE_RT64_GENERIC_FIXES)
+        message(FATAL_ERROR "The player's object matrix groups need TOOIE_BASELINE_RT64_GENERIC_FIXES")
+    endif()
     set_source_files_properties(src/camera_analog.cpp PROPERTIES COMPILE_DEFINITIONS TOOIE_NATIVE_HOST=1)
     if(_baseline_elf)
         # The Windows name below stays for upstream's packaging manifest.

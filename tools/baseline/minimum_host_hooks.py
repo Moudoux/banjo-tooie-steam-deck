@@ -101,11 +101,15 @@ BLASTER_LOOK_TEXT=('{ extern void tooie_blaster_look(uint8_t*, recomp_context*);
 # its turn input (a1 before 0x80804960 / 0x808049C4) is zeroed.
 def _native_call(name):
     return '{ extern void %s(uint8_t*, recomp_context*); %s(rdram, ctx); }' % (name, name)
-# Menu-map matrix groups (src/menu_interpolation.cpp): func_8010A79C, the actor draw
-# dispatcher, calls the template's draw at 0x8010A7E8 with the actor in a0 and
-# returns to 0x8010A7F0, which no branch reaches.
-MENU_GROUP_HOOKS=(('func_8010A79C',0x8010A7E8,_native_call('tooie_menu_group_begin')),
-                  ('func_8010A79C',0x8010A7F0,_native_call('tooie_menu_group_end')))
+# Actor matrix groups (src/object_interpolation.cpp, src/menu_interpolation.cpp):
+# func_8010A79C, the actor draw dispatcher, calls the template's draw at 0x8010A7E8
+# with the actor in a0 and returns to 0x8010A7F0, which no branch reaches.
+# func_800DE498 (model render) for draws outside any actor (the player): entry,
+# and its single return path at L_800DF310.
+ACTOR_DRAW_HOOKS=(('func_8010A79C',0x8010A7E8,_native_call('tooie_actor_draw_begin')),
+                  ('func_8010A79C',0x8010A7F0,_native_call('tooie_actor_draw_end')),
+                  ('func_800DE498',0x800DE498,_native_call('tooie_model_draw_begin')),
+                  ('func_800DE498',0x800DF310,_native_call('tooie_model_draw_end')))
 def _blaster_call(name, control_type):
     return ('{ extern void %s(uint8_t*, recomp_context*, int); %s(rdram, ctx, %d); }'
             % (name, name, control_type))
@@ -124,7 +128,7 @@ GRAPHICS_HOOKS=(('func_808002A4_bafpctrl',0x80800368,MOUSE_AIM_TEXT),
                 ('func_800DE498',0x800DE68C,DRAW_DISTANCE_TEXT),
                 ('func_800DD214',0x800DD298,LOD_GEO_TEXT),
                 ('func_800DD2E8',0x800DD32C,LOD_GEO_TEXT),
-                ('func_800DD37C',0x800DD3C0,LOD_GEO_TEXT))+MENU_GROUP_HOOKS
+                ('func_800DD37C',0x800DD3C0,LOD_GEO_TEXT))+ACTOR_DRAW_HOOKS
 
 def add_hooks(hooks,selected):
     assert type(selected) is bool

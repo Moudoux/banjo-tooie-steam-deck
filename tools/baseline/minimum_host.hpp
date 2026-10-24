@@ -43,8 +43,9 @@ struct Preferences {
     int upscale_2d = 1; // 0 Original, 1 scaled rects only, 2 all.
     int texture_lod = 1;
     int dither_noise = 100; // Percent of RT64's high-resolution dither noise.
+    int object_interpolation = 1; // Matrix groups for every actor and the player.
 };
-enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume, AnalogCamera, CameraInvertX, CameraInvertY, Msaa, Supersampling, DrawDistance, DisableLod, MouseAim, MouseSensitivity, MouseInvertY, CameraDistance, StartSkipsCutscenes, ColorFormat, Upscale2D, TextureLod, DitherNoise };
+enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume, AnalogCamera, CameraInvertX, CameraInvertY, Msaa, Supersampling, DrawDistance, DisableLod, MouseAim, MouseSensitivity, MouseInvertY, CameraDistance, StartSkipsCutscenes, ColorFormat, Upscale2D, TextureLod, DitherNoise, ObjectInterpolation };
 struct OutputRate { int option = 0, manual_hz = 60; };
 inline uint32_t pack_output_rate(OutputRate rate) noexcept {
     return (uint32_t(rate.option) << 16) | uint32_t(rate.manual_hz);
