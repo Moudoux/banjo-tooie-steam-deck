@@ -7,6 +7,7 @@
 #include "minimum_render.hpp"
 #include "platform_support.hpp"
 #include "camera_analog.hpp"
+#include "draw_distance.hpp"
 #if BASELINE_PLAYER
 #include "virtual_clock.hpp"
 #include "player_version.hpp"
@@ -53,7 +54,7 @@ bool reported_unready = false, initialized = false;
 uint32_t published_live_aspect = UINT32_MAX;
 std::atomic<bool> menu{false}, ready{false}, started{false};
 std::atomic<bool> sticky_close{false}, sticky_quit{false}, overflow{false};
-std::atomic<int> vsync{-1}, resolution{1}, cutscene_aspect{0}, texture_filter{0}, output_filter{0};
+std::atomic<int> vsync{-1}, resolution{1}, cutscene_aspect{0}, texture_filter{0}, output_filter{0}, msaa{0}, supersampling{1};
 std::atomic<bool> quiet_talon_trot{false}, talon_trot_toggle{false};
 std::atomic<int> master_volume{100}, music_volume{100};
 std::atomic<uint32_t> output_rate{pack_output_rate({})};
@@ -311,6 +312,22 @@ void update_preference(Preference key, int value) {
         if (value < 0 || value > 1) return;
         selected.camera_invert_x = value; settings::set_bool("tooie_camera_invert_x", value != 0);
         tooie::camera::set_horizontal_inverted(value != 0); break;
+    case Preference::Msaa:
+        if (value != 0 && value != 2 && value != 4 && value != 8) return;
+        selected.msaa = value; settings::set_int("baseline_msaa", value);
+        msaa.store(value, std::memory_order_release); break;
+    case Preference::Supersampling:
+        if (value != 1 && value != 2 && value != 4) return;
+        selected.supersampling = value; settings::set_int("baseline_supersampling", value);
+        supersampling.store(value, std::memory_order_release); break;
+    case Preference::DrawDistance:
+        if (value < 1 || value > 6) return;
+        selected.draw_distance = value; settings::set_int("tooie_draw_distance", value);
+        tooie::draw_distance::set_model_distance_scale(value); break;
+    case Preference::DisableLod:
+        if (value < 0 || value > 1) return;
+        selected.disable_lod = value; settings::set_bool("tooie_disable_lod", value != 0);
+        tooie::draw_distance::set_lod_disabled(value != 0); break;
     case Preference::CameraInvertY:
         if (value < 0 || value > 1) return;
         selected.camera_invert_y = value; settings::set_bool("tooie_camera_invert_y", value != 0);
@@ -599,6 +616,18 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     tooie::camera::set_analog_enabled(selected.analog_camera != 0);
     tooie::camera::set_horizontal_inverted(selected.camera_invert_x != 0);
     tooie::camera::set_vertical_inverted(selected.camera_invert_y != 0);
+    {
+        const int samples = settings::get_int("baseline_msaa", 0);
+        const int factor = settings::get_int("baseline_supersampling", 1);
+        selected.msaa = samples == 2 || samples == 4 || samples == 8 ? samples : 0;
+        selected.supersampling = factor == 2 || factor == 4 ? factor : 1;
+        msaa.store(selected.msaa, std::memory_order_release);
+        supersampling.store(selected.supersampling, std::memory_order_release);
+    }
+    selected.draw_distance = bounded(settings::get_int("tooie_draw_distance", 1), 1, 6, 1);
+    selected.disable_lod = settings::get_bool("tooie_disable_lod", false) ? 1 : 0;
+    tooie::draw_distance::set_model_distance_scale(selected.draw_distance);
+    tooie::draw_distance::set_lod_disabled(selected.disable_lod != 0);
     latched = selected; vsync.store(selected.vsync, std::memory_order_release);
     resolution.store(selected.resolution, std::memory_order_release);
     texture_filter.store(selected.texture_filter, std::memory_order_release);
@@ -643,6 +672,7 @@ void shutdown() noexcept {
     cutscene_aspect.store(0, std::memory_order_release);
     master_volume.store(100, std::memory_order_release);
     music_volume.store(100, std::memory_order_release);
+    msaa.store(0, std::memory_order_release); supersampling.store(1, std::memory_order_release);
     quiet_talon_trot.store(false, std::memory_order_release);
     talon_trot_toggle.store(false, std::memory_order_release);
     output_rate.store(pack_output_rate({}), std::memory_order_release);
@@ -822,6 +852,8 @@ int requested_resolution() noexcept { return resolution.load(std::memory_order_a
 int requested_texture_filter() noexcept { return texture_filter.load(std::memory_order_acquire); }
 int requested_output_filter() noexcept { return output_filter.load(std::memory_order_acquire); }
 int requested_cutscene_aspect() noexcept { return cutscene_aspect.load(std::memory_order_acquire); }
+int requested_msaa() noexcept { return msaa.load(std::memory_order_acquire); }
+int requested_supersampling() noexcept { return supersampling.load(std::memory_order_acquire); }
 bool requested_quiet_talon_trot() noexcept { return quiet_talon_trot.load(std::memory_order_acquire); }
 bool requested_talon_trot_toggle() noexcept { return talon_trot_toggle.load(std::memory_order_acquire); }
 int requested_music_volume() noexcept { return music_volume.load(std::memory_order_acquire); }

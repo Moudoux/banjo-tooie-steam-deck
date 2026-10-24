@@ -515,8 +515,14 @@ public:
 #if BASELINE_PLAYER
         record_graphics(issue_evidence::GraphicsRecord::ScreenBegin);
         const int resolution = host::requested_resolution();
-        if (host::render::update_resolution(app->userConfig, *app->sharedQueueResources, resolution)) {
-            std::fprintf(stderr, "baseline resolution config-applied scale=%d owner=gfx presented=unobserved\n", resolution);
+        const int supersampling = host::requested_supersampling();
+        if (host::render::update_resolution(app->userConfig, *app->sharedQueueResources, resolution, supersampling)) {
+            std::fprintf(stderr, "baseline resolution config-applied scale=%d supersampling=%d owner=gfx presented=unobserved\n",
+                resolution, host::render::effective_supersampling(resolution, supersampling));
+        }
+        const int msaa = host::requested_msaa();
+        if (host::render::update_msaa(*app, msaa)) {
+            std::fprintf(stderr, "baseline msaa config-applied requested=%d supported_max=%d\n", msaa, host::render::max_msaa());
         }
         const int texture_filter = host::requested_texture_filter(), output_filter = host::requested_output_filter();
         if (host::render::update_filters(app->userConfig, *app->sharedQueueResources, texture_filter, output_filter))

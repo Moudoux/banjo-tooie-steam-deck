@@ -6,6 +6,7 @@
 #endif
 #include "hle/rt64_application.h"
 #include "hle/rt64_shared_queue_resources.h"
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <stdexcept>
@@ -57,21 +58,34 @@ bool update_rate(RT64::UserConfiguration& app_user,RT64::SharedQueueResources& s
     shared.newConfigValidated=false;
     return true;
 }
-bool update_resolution(RT64::UserConfiguration& app_user,RT64::SharedQueueResources& shared,int scale) {
+int effective_supersampling(int scale,int supersampling) noexcept {
+    // Supersampling renders at scale x factor and resolves to the chosen scale, so it
+    // needs a fixed scale; the internal scale stays within the menu's 8x maximum.
+    if(scale<=0)return 1;
+    while(supersampling>1 && scale*supersampling>8)supersampling/=2;
+    return std::max(supersampling,1);
+}
+bool update_resolution(RT64::UserConfiguration& app_user,RT64::SharedQueueResources& shared,int scale,int supersampling) {
     if(scale<0 || scale>8)throw std::runtime_error("Invalid resolution scale");
+    if(supersampling!=1 && supersampling!=2 && supersampling!=4)throw std::runtime_error("Invalid supersampling factor");
     // Scale 0 lets RT64 pick the integer scale that covers the window height.
     using Mode=RT64::UserConfiguration::Resolution;
     const Mode mode=scale==0?Mode::WindowIntegerScale:Mode::Manual;
+    const int factor=effective_supersampling(scale,supersampling);
+    const int internal=scale*factor;
     std::lock_guard lock(shared.configurationMutex);
     if(shared.userConfig.resolution==mode && app_user.resolution==mode &&
-       (scale==0 || (shared.userConfig.resolutionMultiplier==scale && app_user.resolutionMultiplier==scale)))return false;
+       shared.userConfig.downsampleMultiplier==factor && app_user.downsampleMultiplier==factor &&
+       (scale==0 || (shared.userConfig.resolutionMultiplier==internal && app_user.resolutionMultiplier==internal)))return false;
     // RT64's workload owner rebuilds targets after this configuration change.
     app_user.resolution=mode;
     shared.userConfig.resolution=mode;
     if(scale) {
-        app_user.resolutionMultiplier=scale;
-        shared.userConfig.resolutionMultiplier=scale;
+        app_user.resolutionMultiplier=internal;
+        shared.userConfig.resolutionMultiplier=internal;
     }
+    app_user.downsampleMultiplier=factor;
+    shared.userConfig.downsampleMultiplier=factor;
     shared.userConfigChanged=true;
     shared.fbConfigChanged=true;
     shared.newConfigValidated=false;
@@ -92,6 +106,22 @@ bool update_filters(RT64::UserConfiguration& app_user,RT64::SharedQueueResources
     shared.userConfig.filtering=filtering;
     shared.userConfigChanged=true;
     shared.newConfigValidated=false;
+    return true;
+}
+bool update_msaa(RT64::Application& app,int samples) {
+    using AA=RT64::UserConfiguration::Antialiasing;
+    samples=std::min(samples,max_msaa());
+    const AA wanted=samples>=8?AA::MSAA8X:samples>=4?AA::MSAA4X:samples>=2?AA::MSAA2X:AA::None;
+    auto& shared=*app.sharedQueueResources;
+    {
+        std::lock_guard lock(shared.configurationMutex);
+        if(app.userConfig.antialiasing==wanted && shared.userConfig.antialiasing==wanted)return false;
+        shared.userConfig.antialiasing=app.userConfig.antialiasing=wanted;
+        shared.userConfigChanged=true;shared.fbConfigChanged=true;shared.newConfigValidated=false;
+    }
+    // Waits for the queues and rebuilds the multisampled shaders and targets (graphics
+    // owner, outside the configuration lock), as the retired frontend did.
+    app.updateMultisampling();
     return true;
 }
 void latch_startup(bool pillarbox_capable) {

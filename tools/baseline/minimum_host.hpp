@@ -32,8 +32,10 @@ struct Preferences {
     int music_volume = 100;
     int rumble_strength = 100;
     int analog_camera = 0, camera_invert_x = 0, camera_invert_y = 0;
+    int msaa = 0, supersampling = 1; // MSAA samples 0/2/4/8; supersampling 1/2/4.
+    int draw_distance = 1, disable_lod = 0; // Model draw-distance multiplier 1..6.
 };
-enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume, AnalogCamera, CameraInvertX, CameraInvertY };
+enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume, AnalogCamera, CameraInvertX, CameraInvertY, Msaa, Supersampling, DrawDistance, DisableLod };
 struct OutputRate { int option = 0, manual_hz = 60; };
 inline uint32_t pack_output_rate(OutputRate rate) noexcept {
     return (uint32_t(rate.option) << 16) | uint32_t(rate.manual_hz);
@@ -115,6 +117,8 @@ int requested_resolution() noexcept; // Graphics owner; 0 fits the window, else 
 int requested_texture_filter() noexcept; // Graphics owner; 0 three-point, 1 bilinear.
 int requested_output_filter() noexcept; // Graphics owner; 0 pixel scaling, 1 nearest, 2 linear.
 int requested_cutscene_aspect() noexcept; // Guest frame/cutscene boundary.
+int requested_msaa() noexcept; // Graphics owner; MSAA samples 0, 2, 4 or 8.
+int requested_supersampling() noexcept; // Graphics owner; 1, 2 or 4.
 bool requested_quiet_talon_trot() noexcept; // Guest sound-call boundary.
 bool requested_talon_trot_toggle() noexcept; // Guest input/state boundary.
 int requested_music_volume() noexcept; // Requested percent; guest music-update boundary.
