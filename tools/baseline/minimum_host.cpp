@@ -190,6 +190,18 @@ void update_preference(Preference key, int value) {
         if (value < 0 || value > 1) return;
         selected.disable_lod = value; settings::set_bool("tooie_disable_lod", value != 0);
         tooie::draw_distance::set_lod_disabled(value != 0); break;
+    case Preference::MouseAim:
+        if (value < 0 || value > 1) return;
+        selected.mouse_aim = value; settings::set_bool("tooie_mouse_aim", value != 0);
+        tooie::input::set_mouse_aim_enabled(value != 0); break;
+    case Preference::MouseSensitivity:
+        if (value < 1 || value > 100) return;
+        selected.mouse_sensitivity = value; settings::set_int("tooie_mouse_sensitivity", value);
+        tooie::camera::set_mouse_aim_sensitivity(value / 100.0f); break;
+    case Preference::MouseInvertY:
+        if (value < 0 || value > 1) return;
+        selected.mouse_invert_y = value; settings::set_bool("tooie_mouse_invert_y", value != 0);
+        tooie::camera::set_mouse_aim_inverted(value != 0); break;
     case Preference::CameraInvertY:
         if (value < 0 || value > 1) return;
         selected.camera_invert_y = value; settings::set_bool("tooie_camera_invert_y", value != 0);
@@ -300,6 +312,12 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile) {
     selected.disable_lod = settings::get_bool("tooie_disable_lod", false) ? 1 : 0;
     tooie::draw_distance::set_model_distance_scale(selected.draw_distance);
     tooie::draw_distance::set_lod_disabled(selected.disable_lod != 0);
+    selected.mouse_aim = settings::get_bool("tooie_mouse_aim", true) ? 1 : 0;
+    selected.mouse_sensitivity = bounded(settings::get_int("tooie_mouse_sensitivity", 6), 1, 100, 6);
+    selected.mouse_invert_y = settings::get_bool("tooie_mouse_invert_y", true) ? 1 : 0;
+    tooie::input::set_mouse_aim_enabled(selected.mouse_aim != 0);
+    tooie::camera::set_mouse_aim_sensitivity(selected.mouse_sensitivity / 100.0f);
+    tooie::camera::set_mouse_aim_inverted(selected.mouse_invert_y != 0);
     latched = selected; vsync.store(selected.vsync, std::memory_order_release);
     resolution.store(selected.resolution, std::memory_order_release);
     quiet_talon_trot.store(selected.quiet_talon_trot != 0, std::memory_order_release);

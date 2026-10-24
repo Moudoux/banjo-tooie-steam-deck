@@ -150,6 +150,34 @@ Steam Deck features:
   `baseline_input_host_test` (not built by default) would also need
   `src/draw_distance.cpp`.
 
+- **First-person mouse aiming, for Steam Input gyro-as-mouse** (Camera
+  settings, `tooie_mouse_aim` default on, `tooie_mouse_sensitivity` in
+  hundredths of a degree per count, default 0.06, `tooie_mouse_invert_y`
+  default on; defaults chosen on the Deck with Steam's gyro-as-mouse).
+  A raw hook before `0x80800368` in `func_808002A4_bafpctrl` (the
+  first-person controller: pitch/yaw -= stick x 90 x sensitivity x dt, then
+  the pitch clamp; f12 = pitch, f6 = yaw) calls `tooie_first_person_aim`
+  (`src/camera_analog.cpp`): it notes first-person control for the input
+  module and applies the mouse motion taken since the last frame (pitch +=
+  y, yaw -= x, matching the stick). That controller is not what normal
+  first person uses: C-up first person aims eggs through
+  `func_80800264_baeggaim` (the reticle follows the stick, `func_80800170`
+  turns the view near the screen edge, then pitch is clamped unless flag
+  0x3A locks it). Two more hooks there add the mouse turn: pitch before
+  `0x808002E8` (unlocked path, before the clamp, sp+0x24) and yaw at
+  `L_80800300` (every frame, sp+0x28). Relative-mode changes are logged as
+  `input mouse-aim relative=.. wanted=..`.
+  The cursor is hidden (`SDL_ShowCursor`) whenever the settings menu is
+  closed, so gyro-as-mouse motion outside first person shows nothing; ImGui
+  leaves it alone because of `ImGuiConfigFlags_NoMouseCursorChange`. The SDL owner
+  (`src/frontend_input_preference.cpp`) holds relative mouse mode only while
+  first-person control ran in the last 150 ms, game input is enabled and the
+  window is focused, and accumulates `SDL_MOUSEMOTION` xrel/yrel only then;
+  motion from before entering first person is dropped. On the Deck, keep
+  Steam Input on and set the gyro to output as mouse in the layout. A native
+  SDL gyro path (Steam Input off) was tried first and did not work on the
+  owner's Deck.
+
 - **No on-screen keyboard at launch** (`tools/baseline/devices.cpp`, before
   `SDL_Init`): sdl2-compat before `30ee26c` (2026-06-07) starts text input
   on each new window without suppressing the screen keyboard, and SDL3 shows
