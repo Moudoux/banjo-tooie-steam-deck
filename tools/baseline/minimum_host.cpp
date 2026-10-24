@@ -57,7 +57,7 @@ std::atomic<bool> sticky_close{false}, sticky_quit{false}, overflow{false};
 std::atomic<int> vsync{-1}, resolution{1}, cutscene_aspect{0}, texture_filter{0}, output_filter{0}, msaa{0}, supersampling{1};
 std::atomic<bool> quiet_talon_trot{false}, talon_trot_toggle{false}, start_skips_cutscenes{false};
 std::atomic<int> master_volume{100}, music_volume{100};
-std::atomic<uint32_t> output_rate{pack_output_rate({})};
+std::atomic<uint32_t> output_rate{pack_output_rate({})}, picture{pack_picture({})};
 Preferences latched, selected;
 std::string notice;
 std::mutex request_mutex, render_mutex;
@@ -221,6 +221,10 @@ void close_menu() {
 int bounded(int value, int lo, int hi, int fallback) {
     return value < lo || value > hi ? fallback : value;
 }
+void publish_picture() noexcept {
+    picture.store(pack_picture({selected.upscale_2d, selected.texture_lod,
+        selected.dither_noise}), std::memory_order_release);
+}
 #if BASELINE_PLAYER
 void set_fullscreen(bool enabled) {
     const int result = SDL_SetWindowFullscreen(window, enabled ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
@@ -377,6 +381,21 @@ void update_preference(Preference key, int value) {
         talon_trot_toggle.store(value != 0, std::memory_order_release);
 #endif
         break;
+    case Preference::ColorFormat:
+        if (value < 0 || value > 2) return;
+        selected.color_format = value; settings::set_int("baseline_color_format", value); break;
+    case Preference::Upscale2D:
+        if (value < 0 || value > 2) return;
+        selected.upscale_2d = value; settings::set_int("baseline_upscale_2d", value);
+        publish_picture(); break;
+    case Preference::TextureLod:
+        if (value < 0 || value > 1) return;
+        selected.texture_lod = value; settings::set_bool("baseline_texture_lod", value != 0);
+        publish_picture(); break;
+    case Preference::DitherNoise:
+        if (value < 0 || value > 100) return;
+        selected.dither_noise = value; settings::set_int("baseline_dither_noise", value);
+        publish_picture(); break;
     case Preference::VSync:
         if (value < 0 || value > 1) return;
         selected.vsync = value; settings::set_int("baseline_vsync", value);
@@ -603,7 +622,9 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     const double rumble_strength = settings::get_number("rumble_strength", 100.0);
     selected.rumble_strength = std::isfinite(rumble_strength) ? int(std::clamp(rumble_strength, 0.0, 100.0)) : 100;
     selected.resolution = bounded(settings::get_int("baseline_resolution", fresh.resolution), 0, 8, fresh.resolution);
-    selected.texture_filter = bounded(settings::get_int("baseline_texture_filter", 0), 0, 1, 0);
+    // A profile without upstream's texture filter keeps its earlier Linux three-point choice.
+    const int earlier_filter = settings::get_bool("baseline_three_point_filtering", true) ? 0 : 1;
+    selected.texture_filter = bounded(settings::get_int("baseline_texture_filter", earlier_filter), 0, 1, earlier_filter);
     selected.output_filter = bounded(settings::get_int("baseline_output_filter", 0), 0, 2, 0);
     selected.output_rate = bounded(settings::get_int("baseline_output_rate", fresh.output_rate), 0, 3, fresh.output_rate);
     selected.manual_hz = bounded(settings::get_int("baseline_manual_hz", 60), 20, 360, 60);
@@ -658,6 +679,11 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     tooie::camera::set_mouse_aim_inverted(selected.mouse_invert_y != 0);
     selected.start_skips_cutscenes = settings::get_bool("tooie_start_skips_cutscenes", true) ? 1 : 0;
     start_skips_cutscenes.store(selected.start_skips_cutscenes != 0, std::memory_order_release);
+    selected.color_format = bounded(settings::get_int("baseline_color_format", 0), 0, 2, 0);
+    selected.upscale_2d = bounded(settings::get_int("baseline_upscale_2d", 1), 0, 2, 1);
+    selected.texture_lod = settings::get_bool("baseline_texture_lod", true) ? 1 : 0;
+    selected.dither_noise = bounded(settings::get_int("baseline_dither_noise", 100), 0, 100, 100);
+    publish_picture();
     latched = selected; vsync.store(selected.vsync, std::memory_order_release);
     resolution.store(selected.resolution, std::memory_order_release);
     texture_filter.store(selected.texture_filter, std::memory_order_release);
@@ -707,6 +733,7 @@ void shutdown() noexcept {
     talon_trot_toggle.store(false, std::memory_order_release);
     start_skips_cutscenes.store(false, std::memory_order_release);
     output_rate.store(pack_output_rate({}), std::memory_order_release);
+    picture.store(pack_picture({}), std::memory_order_release);
 #if BASELINE_PLAYER
     loaded_profiles.clear();
     marker_seq = 0; marker_conflict_reported = false;
@@ -813,6 +840,7 @@ InputPublication tick(bool gameplay) {
     snapshot->controller_auto = tooie::input::controller_auto_selection();
     snapshot->profiles = tooie::input::controller_profiles(); snapshot->active_profile = tooie::input::active_controller_profile();
     snapshot->preferences = selected; snapshot->notice = notice;
+    snapshot->latched_color_format = latched.color_format;
 #if BASELINE_PLAYER
     issue_evidence::HostRecord evidence{};
     evidence.width = snapshot->pixel_width; evidence.height = snapshot->pixel_height;
@@ -891,6 +919,7 @@ int requested_music_volume() noexcept { return music_volume.load(std::memory_ord
 int requested_master_volume() noexcept { return master_volume.load(std::memory_order_acquire); }
 bool requested_start_skips_cutscenes() noexcept { return start_skips_cutscenes.load(std::memory_order_acquire); }
 OutputRate requested_output_rate() noexcept { return unpack_output_rate(output_rate.load(std::memory_order_acquire)); }
+Picture requested_picture() noexcept { return unpack_picture(picture.load(std::memory_order_acquire)); }
 }
 // Raw hook in the intro ticker (START_SKIP_TEXT in minimum_host_hooks.py).
 extern "C" int tooie_cutscene_start_skip(void) noexcept {

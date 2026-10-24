@@ -561,6 +561,8 @@ inline constexpr char version[] = "@TOOIE_PLAYER_VERSION@";
     target_sources(TooieBaseline PRIVATE src/camera_analog.cpp)
     # Model draw distance and LOD settings, reached by func_800DE498 / LOD geo raw hooks.
     target_sources(TooieBaseline PRIVATE src/draw_distance.cpp)
+    # Menu-map actor matrix groups, reached by the func_8010A79C raw hooks.
+    target_sources(TooieBaseline PRIVATE src/menu_interpolation.cpp)
     set_source_files_properties(src/camera_analog.cpp PROPERTIES COMPILE_DEFINITIONS TOOIE_NATIVE_HOST=1)
     if(_baseline_elf)
         # The Windows name below stays for upstream's packaging manifest.

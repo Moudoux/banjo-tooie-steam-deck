@@ -4,20 +4,20 @@
   "delta_revision": 1,
   "upstream": {
     "dependency": "rt64",
-    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "commit": "d9817c68ffd7328cd0af383af124971489366e18",
     "path": "src/gui/rt64_inspector.cpp",
-    "sha256": "8c98a0da6e4a1ea023afb5c2e7151be44fa4ee2e40749ada7c61e4eb52ef0324",
-    "lines": 273
+    "sha256": "92870cab3c50d8ee3e236eb61aba6bf57b993e06103c4b6bd7169a1f9f469479",
+    "lines": 330
   },
   "output": {
     "filename": "rt64_inspector.cpp",
-    "sha256": "80b99058bef734e843682f0ade5e408ac955f45b980ed31e68744f364b270fd4",
-    "lines": 276
+    "sha256": "84c7d8a16faf8125862562481eff2294151cff296ad59c414c96473dcde94dd7",
+    "lines": 333
   },
   "operations": [
     {
-      "original_start": 63,
-      "original_end": 64,
+      "original_start": 66,
+      "original_end": 67,
       "original_sha256": "920e49d06030103d902fa48f0d2c0c02e7fcab8d267d15e62b023d18efd39e90",
       "replacement_lines": [
         "    Inspector::Inspector(RenderDevice *device, const RenderSwapChain *swapChain, UserConfiguration::GraphicsAPI graphicsAPI, SDL_Window *sdlWindow)\n",
@@ -27,8 +27,8 @@
       ]
     },
     {
-      "original_start": 79,
-      "original_end": 80,
+      "original_start": 82,
+      "original_end": 83,
       "original_sha256": "0f0797c5ff74ce24216856b8a456409c62c9d1c94503f9af5aeb16aa90725fd0",
       "replacement_lines": [
         "            ImGui_ImplSDL2_InitForOther(sdlWindow, externalMouseDisplay);\n"

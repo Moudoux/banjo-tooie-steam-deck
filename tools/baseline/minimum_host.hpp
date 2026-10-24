@@ -37,8 +37,14 @@ struct Preferences {
     int draw_distance = 1, disable_lod = 0; // Model draw-distance multiplier 1..12.
     int mouse_aim = 1, mouse_sensitivity = 6, mouse_invert_y = 1; // Hundredths of a degree per count.
     int start_skips_cutscenes = 1;
+    // RT64 picture options. Color format (0 Standard, 1 High, 2 Automatic) applies at
+    // the next launch; the others apply live. Defaults keep the earlier output.
+    int color_format = 0;
+    int upscale_2d = 1; // 0 Original, 1 scaled rects only, 2 all.
+    int texture_lod = 1;
+    int dither_noise = 100; // Percent of RT64's high-resolution dither noise.
 };
-enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume, AnalogCamera, CameraInvertX, CameraInvertY, Msaa, Supersampling, DrawDistance, DisableLod, MouseAim, MouseSensitivity, MouseInvertY, CameraDistance, StartSkipsCutscenes };
+enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume, AnalogCamera, CameraInvertX, CameraInvertY, Msaa, Supersampling, DrawDistance, DisableLod, MouseAim, MouseSensitivity, MouseInvertY, CameraDistance, StartSkipsCutscenes, ColorFormat, Upscale2D, TextureLod, DitherNoise };
 struct OutputRate { int option = 0, manual_hz = 60; };
 inline uint32_t pack_output_rate(OutputRate rate) noexcept {
     return (uint32_t(rate.option) << 16) | uint32_t(rate.manual_hz);
@@ -55,6 +61,13 @@ inline bool offered_controller_labels(tooie::input::ControllerType type) noexcep
 inline std::string controller_binding_label(tooie::input::Binding binding, tooie::input::ControllerType type) {
     return offered_controller_labels(type) && type != tooie::input::ControllerType::Other
         ? tooie::input::binding_label_for_type(binding, type) : tooie::input::binding_label(binding);
+}
+struct Picture { int upscale_2d = 1, texture_lod = 1, dither_noise = 100; };
+inline uint32_t pack_picture(Picture picture) noexcept {
+    return uint32_t(picture.upscale_2d) | (uint32_t(picture.texture_lod) << 3) | (uint32_t(picture.dither_noise) << 8);
+}
+inline Picture unpack_picture(uint32_t picture) noexcept {
+    return {int(picture & 3u), int((picture >> 3) & 1u), int(picture >> 8)};
 }
 enum class RequestKind { Controller, Profile, ResetBindings, Capture, CancelCapture, Preference, ClearBinding, Modifier, DuplicateProfile, ControllerLabels, CreateDirectCProfile };
 struct Request {
@@ -89,6 +102,7 @@ struct Snapshot {
     tooie::input::Binding modifier{tooie::input::Device::Button, -1};
     tooie::input::ModifierSoloBehavior modifier_solo = tooie::input::ModifierSoloBehavior::PassThrough;
     Preferences preferences;
+    int latched_color_format = 0; // The renderer's color format until the next launch.
 };
 struct RenderInput {
     std::shared_ptr<const Snapshot> snapshot;
@@ -129,6 +143,7 @@ int requested_master_volume() noexcept; // Requested percent; audio sink chunk b
 bool requested_start_skips_cutscenes() noexcept; // Intro ticker raw hook.
 // Graphics owner only: consume the SDL owner's atomic requested pair.
 OutputRate requested_output_rate() noexcept;
+Picture requested_picture() noexcept; // Graphics owner.
 // Audio sink only: in-place master gain for one queued S16 chunk. 100 or more is
 // exact identity, so the default leaves samples bit-identical; lower values
 // truncate toward zero and never exceed the original magnitude.

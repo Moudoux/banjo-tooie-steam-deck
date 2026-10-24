@@ -4,7 +4,7 @@
   "delta_revision": 1,
   "upstream": {
     "dependency": "rt64",
-    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "commit": "d9817c68ffd7328cd0af383af124971489366e18",
     "path": "src/render/rt64_projection_processor.cpp",
     "sha256": "cf04cb4da1bc39ab60cb24c92c0668385632ab7c6894157e6857c93252a39de9",
     "lines": 163

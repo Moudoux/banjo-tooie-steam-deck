@@ -4,20 +4,20 @@
   "delta_revision": 1,
   "upstream": {
     "dependency": "rt64",
-    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "commit": "d9817c68ffd7328cd0af383af124971489366e18",
     "path": "src/imgui/imgui_impl_sdl2_custom.h",
-    "sha256": "4f6409d3793b86910fd7b84976661fb9bd0de246c895271a3c40be9084d602c1",
-    "lines": 43
+    "sha256": "b0bd23ab43a909dc719075319eb6533ebccf3c5cc30a19daa3bc9605d155fbd3",
+    "lines": 55
   },
   "output": {
     "filename": "imgui_impl_sdl2_custom.h",
-    "sha256": "1e4083f8167635bcd235b5b069f0cc328ebf73d5ad72f56813924f301414c063",
-    "lines": 44
+    "sha256": "d360229c5cfc0361727a02b7be0c5e41a6b575e4dbe0159cfe9217a9b3a3f18f",
+    "lines": 56
   },
   "operations": [
     {
-      "original_start": 38,
-      "original_end": 38,
+      "original_start": 39,
+      "original_end": 39,
       "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "replacement_lines": [
         "IMGUI_IMPL_API bool     ImGui_ImplSDL2_InitForOther(SDL_Window* window, bool external_mouse_display);\n"

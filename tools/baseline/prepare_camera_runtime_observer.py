@@ -7,7 +7,7 @@ from pathlib import Path
 
 PINS = {
     'gbi/rt64_gbi_rdp.cpp': '9eab7d0b8ba70f816c4cd873a535a50d01b4a0285d2726edf7256809299bae43',
-    'hle/rt64_rsp.cpp': 'dc2c8b8d4c4a273e321a80d508c55064280b940472082eaeffc73409ce814c0e',
+    'hle/rt64_rsp.cpp': '7dfdf40254d44d92c247d9c876bb8ca55995927ad534981bd48868bb44f1f695',
 }
 INCLUDE = '#include "camera_runtime_observer.hpp"\n'
 def sha(data): return hashlib.sha256(data).hexdigest()
