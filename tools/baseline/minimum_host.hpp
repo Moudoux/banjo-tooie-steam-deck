@@ -34,10 +34,11 @@ struct Preferences {
     int analog_camera = 0, camera_invert_x = 0, camera_invert_y = 0;
     int camera_distance = 100; // Orbit distance, percent of the game's camera distance (50..150).
     int msaa = 0, supersampling = 1; // MSAA samples 0/2/4/8; supersampling 1/2/4.
-    int draw_distance = 1, disable_lod = 0; // Model draw-distance multiplier 1..6.
+    int draw_distance = 1, disable_lod = 0; // Model draw-distance multiplier 1..12.
     int mouse_aim = 1, mouse_sensitivity = 6, mouse_invert_y = 1; // Hundredths of a degree per count.
+    int start_skips_cutscenes = 1;
 };
-enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume, AnalogCamera, CameraInvertX, CameraInvertY, Msaa, Supersampling, DrawDistance, DisableLod, MouseAim, MouseSensitivity, MouseInvertY, CameraDistance };
+enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume, AnalogCamera, CameraInvertX, CameraInvertY, Msaa, Supersampling, DrawDistance, DisableLod, MouseAim, MouseSensitivity, MouseInvertY, CameraDistance, StartSkipsCutscenes };
 struct OutputRate { int option = 0, manual_hz = 60; };
 inline uint32_t pack_output_rate(OutputRate rate) noexcept {
     return (uint32_t(rate.option) << 16) | uint32_t(rate.manual_hz);
@@ -125,6 +126,7 @@ bool requested_quiet_talon_trot() noexcept; // Guest sound-call boundary.
 bool requested_talon_trot_toggle() noexcept; // Guest input/state boundary.
 int requested_music_volume() noexcept; // Requested percent; guest music-update boundary.
 int requested_master_volume() noexcept; // Requested percent; audio sink chunk boundary.
+bool requested_start_skips_cutscenes() noexcept; // Intro ticker raw hook.
 // Graphics owner only: consume the SDL owner's atomic requested pair.
 OutputRate requested_output_rate() noexcept;
 // Audio sink only: in-place master gain for one queued S16 chunk. 100 or more is

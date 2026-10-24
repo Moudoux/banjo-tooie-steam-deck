@@ -158,6 +158,11 @@ void controls(const Snapshot& snapshot) {
     }
     ImGui::EndDisabled();
     note("Changes labels only, for this controller. SDL mappings and bindings stay the same.");
+#if BASELINE_PLAYER
+    bool skip = snapshot.preferences.start_skips_cutscenes != 0;
+    if (ImGui::Checkbox("Start skips story cutscenes", &skip))
+        preference(Preference::StartSkipsCutscenes, int(skip));
+#endif
     static int device = 0;
     ImGui::Combo("Binding type", &device, "Keyboard\0Controller\0");
     const bool capturable = device == 0 || has_controller;
@@ -346,7 +351,7 @@ void video(const Snapshot& snapshot) {
         else if(factor<prefs.supersampling)ImGui::TextDisabled("Limited to %dx: the internal scale stops at 8x.",factor);
     }
     int distance=prefs.draw_distance;
-    if(ImGui::SliderInt("Draw distance",&distance,1,6,distance>1?"%dx":"Original"))preference(Preference::DrawDistance,distance);
+    if(ImGui::SliderInt("Draw distance",&distance,1,12,distance>1?"%dx":"Original"))preference(Preference::DrawDistance,distance);
     bool lod=prefs.disable_lod!=0;
     if(ImGui::Checkbox("Disable LOD (always full-detail models)",&lod))preference(Preference::DisableLod,int(lod));
 #endif

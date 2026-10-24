@@ -55,7 +55,7 @@ uint32_t published_live_aspect = UINT32_MAX;
 std::atomic<bool> menu{false}, ready{false}, started{false};
 std::atomic<bool> sticky_close{false}, sticky_quit{false}, overflow{false};
 std::atomic<int> vsync{-1}, resolution{1}, cutscene_aspect{0}, texture_filter{0}, output_filter{0}, msaa{0}, supersampling{1};
-std::atomic<bool> quiet_talon_trot{false}, talon_trot_toggle{false};
+std::atomic<bool> quiet_talon_trot{false}, talon_trot_toggle{false}, start_skips_cutscenes{false};
 std::atomic<int> master_volume{100}, music_volume{100};
 std::atomic<uint32_t> output_rate{pack_output_rate({})};
 Preferences latched, selected;
@@ -321,7 +321,7 @@ void update_preference(Preference key, int value) {
         selected.supersampling = value; settings::set_int("baseline_supersampling", value);
         supersampling.store(value, std::memory_order_release); break;
     case Preference::DrawDistance:
-        if (value < 1 || value > 6) return;
+        if (value < 1 || value > 12) return;
         selected.draw_distance = value; settings::set_int("tooie_draw_distance", value);
         tooie::draw_distance::set_model_distance_scale(value); break;
     case Preference::DisableLod:
@@ -340,6 +340,10 @@ void update_preference(Preference key, int value) {
         if (value < 0 || value > 1) return;
         selected.mouse_invert_y = value; settings::set_bool("tooie_mouse_invert_y", value != 0);
         tooie::camera::set_mouse_aim_inverted(value != 0); break;
+    case Preference::StartSkipsCutscenes:
+        if (value < 0 || value > 1) return;
+        selected.start_skips_cutscenes = value; settings::set_bool("tooie_start_skips_cutscenes", value != 0);
+        start_skips_cutscenes.store(value != 0, std::memory_order_release); break;
     case Preference::CameraInvertY:
         if (value < 0 || value > 1) return;
         selected.camera_invert_y = value; settings::set_bool("tooie_camera_invert_y", value != 0);
@@ -642,7 +646,7 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
         msaa.store(selected.msaa, std::memory_order_release);
         supersampling.store(selected.supersampling, std::memory_order_release);
     }
-    selected.draw_distance = bounded(settings::get_int("tooie_draw_distance", 1), 1, 6, 1);
+    selected.draw_distance = bounded(settings::get_int("tooie_draw_distance", 1), 1, 12, 1);
     selected.disable_lod = settings::get_bool("tooie_disable_lod", false) ? 1 : 0;
     tooie::draw_distance::set_model_distance_scale(selected.draw_distance);
     tooie::draw_distance::set_lod_disabled(selected.disable_lod != 0);
@@ -652,6 +656,8 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     tooie::input::set_mouse_aim_enabled(selected.mouse_aim != 0);
     tooie::camera::set_mouse_aim_sensitivity(selected.mouse_sensitivity / 100.0f);
     tooie::camera::set_mouse_aim_inverted(selected.mouse_invert_y != 0);
+    selected.start_skips_cutscenes = settings::get_bool("tooie_start_skips_cutscenes", true) ? 1 : 0;
+    start_skips_cutscenes.store(selected.start_skips_cutscenes != 0, std::memory_order_release);
     latched = selected; vsync.store(selected.vsync, std::memory_order_release);
     resolution.store(selected.resolution, std::memory_order_release);
     texture_filter.store(selected.texture_filter, std::memory_order_release);
@@ -699,6 +705,7 @@ void shutdown() noexcept {
     msaa.store(0, std::memory_order_release); supersampling.store(1, std::memory_order_release);
     quiet_talon_trot.store(false, std::memory_order_release);
     talon_trot_toggle.store(false, std::memory_order_release);
+    start_skips_cutscenes.store(false, std::memory_order_release);
     output_rate.store(pack_output_rate({}), std::memory_order_release);
 #if BASELINE_PLAYER
     loaded_profiles.clear();
@@ -882,7 +889,12 @@ bool requested_quiet_talon_trot() noexcept { return quiet_talon_trot.load(std::m
 bool requested_talon_trot_toggle() noexcept { return talon_trot_toggle.load(std::memory_order_acquire); }
 int requested_music_volume() noexcept { return music_volume.load(std::memory_order_acquire); }
 int requested_master_volume() noexcept { return master_volume.load(std::memory_order_acquire); }
+bool requested_start_skips_cutscenes() noexcept { return start_skips_cutscenes.load(std::memory_order_acquire); }
 OutputRate requested_output_rate() noexcept { return unpack_output_rate(output_rate.load(std::memory_order_acquire)); }
+}
+// Raw hook in the intro ticker (START_SKIP_TEXT in minimum_host_hooks.py).
+extern "C" int tooie_cutscene_start_skip(void) noexcept {
+    return baseline::host::requested_start_skips_cutscenes() ? 1 : 0;
 }
 namespace tooie::input {
 const Host& host() noexcept {

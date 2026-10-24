@@ -17,8 +17,8 @@ ActorDistance configured_actor_distance() noexcept;
 ActorDistance latched_actor_distance() noexcept;
 float adjust_actor_distance(float original_distance) noexcept;
 
-// Player: live model draw-distance multiplier (1 = original, up to 6, as in
-// Lighthouse) and level-of-detail override, read by raw hooks in the model
+// Player: live model draw-distance multiplier (1 = original, up to 12; Lighthouse
+// stops at 6) and level-of-detail override, read by raw hooks in the model
 // renderer (func_800DE498) and its LOD geo commands.
 void set_model_distance_scale(int multiplier) noexcept;
 int model_distance_scale() noexcept;
