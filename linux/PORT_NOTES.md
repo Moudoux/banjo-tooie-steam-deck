@@ -247,9 +247,33 @@ Steam Deck features:
   game resumes from the pose. (It used to sit at `0x8011066C` and overwrite
   the copies, dropping both.) Tooie conventions: rotation (pitch, yaw, roll)
   in degrees, yaw = atan2(dx, dz) of position minus focus
-  (`func_80112550`), pitch = 360 - elevation. Distance: the one captured on
-  entry, clamped every frame to the mode's range (`func_80115358`: +0xC..
-  +0x10 of the block at +0x14), standing in for Lighthouse's zoom distance.
+  (`func_80112550`), pitch = 360 - elevation. Distance: eased (rate 4) from
+  the live distance on entry to the far end of the mode's range
+  (`func_80115358`: +0xC..+0x10 of the block at +0x14, set per view by
+  `func_800A3BA8`, so it follows the view toggle and the statue's 1.5x)
+  times the **Camera distance** setting (`tooie_camera_distance`, 50-150%,
+  default 100), standing in for Lighthouse's zoom distance. Tooie's follow
+  camera sits anywhere in that range, so the old capture-and-clamp often
+  orbited at the near end.
+  Flight: `bsbfly`/`bskazfly` select mode 3 (`ncbafly`), whose rule entry is
+  zero (no C-button turns), so the input hook admits mode 3 explicitly, the
+  yaw-transition exit is skipped there, and the orbit hands back to the
+  chase camera 0.6 s after the stick is released. The input hook is skipped
+  on some frames (a move's camera lock via `func_8009CC68`, camera zones,
+  flight), so the orbit only ends after 0.5 s without it (or on a mode
+  change, checked in the orbit hook); ending on the first missed frame made
+  it drop out and re-capture the game's pose. The stick is read in the orbit
+  hook, every camera frame, rather than accumulated by the input hook.
+  Time steps use the game's own frame delta (`D_8012C760`, `time_getDelta`,
+  as Lighthouse does), not wall-clock time between hook calls: the
+  recompiled game runs each frame in a burst and then waits for the display,
+  so wall-clock steps were uneven and the turn looked jagged.
+  Several camera components can be updated per frame (Mumbo next to his
+  Golden Goliath, split-up). The orbit belongs to the player the input hook
+  saw (s0 of `func_800A4878`); the orbit hook ignores other components and
+  only the input hook adopts a relocated one. It used to adopt any component
+  in the same mode, so a second camera took the input frame and ended the
+  orbit.
   Collision mirrors Lighthouse's `port_freeLookCamera_update`, using Tooie's
   counterpart of each BK routine (Tooie's own follow mode, `ncbapivot`, runs
   the same chain through `func_80111CC8`):
@@ -268,8 +292,15 @@ Steam Deck features:
     colliding frame, the camera stays at the start position.
   - `func_802C04B0`: the orbit yaw is re-read from the resolved position.
     Pitch is kept, as in Lighthouse.
-  The orbit ends on a game yaw transition (C buttons), a camera mode change,
-  or a frame without manual rotation (cutscene, menu, view toggle); a frame
+  The orbit ends on a player yaw transition (yaw controller +0x0C nonzero
+  with priority +0x0E = 2: C-left/C-right via `func_801111D0`, R centring
+  via `func_80111154`), a camera mode change, or 0.5 s without manual
+  rotation (cutscene, dialogue, view toggle). The pivot camera's own wall
+  avoidance (`func_80113978`, called every frame by `ncbapivot` and other
+  follow modes) starts transitions of the same kind at priority 1; those
+  used to end the orbit whenever Banjo walked near a wall. They are now
+  cancelled each orbit frame (+0x0C and +0x0E cleared, as `func_80112A84`
+  does on arrival), since the orbit has its own collision; a frame
   with +0x72 set (mode update skipped) leaves the camera alone. The camera
   component is relocated by the heap, so its address changing in the same
   mode keeps the orbit. Measured with a virtual pad, before the libultraship

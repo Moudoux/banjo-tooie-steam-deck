@@ -123,6 +123,11 @@ void video(const Snapshot& snapshot) {
     if(ImGui::Checkbox("Invert camera X",&invert))preference(Preference::CameraInvertX,int(invert));
     bool invert_y=prefs.camera_invert_y!=0;
     if(ImGui::Checkbox("Invert camera Y",&invert_y))preference(Preference::CameraInvertY,int(invert_y));
+    if(analog) {
+        int camera_distance=prefs.camera_distance;
+        if(ImGui::SliderInt("Camera distance",&camera_distance,50,150,"%d%%"))
+            preference(Preference::CameraDistance,camera_distance);
+    }
 #if BASELINE_PLAYER
     bool mouse=prefs.mouse_aim!=0;
     if(ImGui::Checkbox("Mouse / gyro aiming (first person)",&mouse))preference(Preference::MouseAim,int(mouse));

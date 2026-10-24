@@ -15,9 +15,12 @@
 // Right-stick orbit camera with the feel of Lighthouse's free-look
 // (src/port/Enhancements/Camera/FreeLookCamera.cpp): entered past a 0.30
 // stick, yaw changes linearly at 160 and elevation at 100 degrees per second
-// (pushing up raises the camera, as there), the distance is the one captured
-// on entry kept inside the mode's own range, and the camera stays where it
-// was left until the game takes the camera back. Collision follows
+// (pushing up raises the camera, as there), the distance eases to the far
+// end of the mode's own range (which follows the game's view toggle and the
+// statue's larger range) times the distance setting, and the camera stays
+// where it was left until the game takes the camera back. Flight (ncbafly), where the game allows no manual rotation, also
+// orbits; there the game's chase camera takes over again soon after the
+// stick is let go, since Banjo keeps turning. Collision follows
 // Lighthouse's free-look update: the pose is swept and slid from last frame's
 // position, a slide that crossed over is undone, a camera that keeps
 // colliding while Banjo is hidden is moved to a clear spot, and the orbit
@@ -26,8 +29,10 @@
 // the camera component: position at +0x74, rotation (pitch, yaw, roll in
 // degrees) at +0x80, yaw = atan2(dx, dz) of position minus focus, and pitch =
 // 360 - elevation. The yaw controller at +0x60 keeps target +0x10, current
-// +0x14 and spring velocity +0x18; its +0x0C is nonzero while the game runs
-// a yaw transition of its own.
+// +0x14 and spring velocity +0x18; +0x0C is the kind of yaw transition the
+// game is running (func_80112D90) and +0x0E its priority: 2 for the player's
+// C-left/C-right turns and R centring, 1 for the follow camera's own wall
+// avoidance (func_80113978), which the orbit cancels.
 namespace {
 constexpr float k_yaw_speed_degrees = 160.0f; // Lighthouse kYawSpeed
 constexpr float k_pitch_speed_degrees = 100.0f; // Lighthouse kPitchSpeed
@@ -37,26 +42,41 @@ constexpr float k_max_elevation = 85.0f;
 constexpr float k_enter_threshold = 0.30f;    // Lighthouse kEnterThreshold
 constexpr float k_aim_height_rate = 8.0f;     // Lighthouse kAimHeightRate
 constexpr float k_degrees = 57.29577951308232f;
+constexpr float k_distance_rate = 4.0f;       // Easing towards the orbit distance.
+constexpr float k_min_distance = 100.0f;
+constexpr float k_fly_release_seconds = 0.6f; // Released stick in flight: back to the chase camera.
+// The input hook is skipped on some frames (a move's camera lock, a camera
+// zone, flight); the orbit only ends after this long without it.
+constexpr float k_input_gap_seconds = 0.5f;
+constexpr std::int16_t k_player_turn_priority = 2;
+// D_8012C760, the game's frame delta (time_getDelta, as Lighthouse's free-look
+// uses). Wall-clock time between hook calls is uneven, since the recompiled
+// game runs a frame in a burst and then waits for the display, and turned
+// the camera in uneven steps.
+constexpr std::uint32_t k_game_delta = 0x8012C760u;
 constexpr std::uint32_t k_camera_mode_rule_table = 0x801247ACu;
+constexpr std::int32_t k_fly_mode = 3;        // ncbafly; its rule entry is zero.
 std::atomic_bool configured_analog_enabled{false};
 std::atomic_bool configured_horizontal_inverted{false};
 std::atomic_bool configured_vertical_inverted{false};
 std::atomic<float> configured_mouse_sensitivity{0.06f};
 std::atomic_bool configured_mouse_inverted{true};
+std::atomic<float> configured_distance_scale{1.0f};
 
 struct Orbit {
     bool active = false, entering = false;
-    gpr component = 0;
+    // The player whose camera this is: with Mumbo's statue or split-up, more
+    // than one camera component is updated each frame.
+    gpr component = 0, player = 0;
     std::int32_t mode = 0;
-    float yaw = 0.0f, elevation = 0.0f, distance = 0.0f, aim_y = 0.0f, pending_turn = 0.0f,
-        pending_pitch = 0.0f;
+    float yaw = 0.0f, elevation = 0.0f, distance = 0.0f, aim_y = 0.0f, released_seconds = 0.0f;
     // Lighthouse's crossover guard (func_802C03BC) and occlusion probe
     // (func_802BC84C) state; both only advance on frames that collided.
     float crossover_dot = 0.0f;
     int occlusion_probe = 0;
-    // The input hook runs once per camera frame while manual rotation is allowed.
+    // The input hook runs once per player frame while manual rotation is allowed.
     std::uint32_t input_frames = 0, seen_input_frames = 0;
-    std::chrono::steady_clock::time_point last_input{};
+    float input_gap_seconds = 0.0f;
 } orbit;
 
 float wrap_degrees(float angle) {
@@ -74,6 +94,22 @@ void store_vector(std::uint8_t* rdram, gpr address, const float (&value)[3]) {
 }
 void load_vector(std::uint8_t* rdram, gpr address, float (&value)[3]) {
     for (int i = 0; i < 3; ++i) value[i] = load_float(rdram, address + 4 * i);
+}
+float game_delta(std::uint8_t* rdram) {
+    const float dt = load_float(rdram, static_cast<gpr>(static_cast<std::int32_t>(k_game_delta)));
+    return std::isfinite(dt) && dt > 0.0f ? std::min(dt, 0.1f) : 0.0f;
+}
+// The right stick as the orbit uses it, shaped like Lighthouse's ReadStick
+// (radial 0.15 deadzone, rescaled) by the input module, with the inversions.
+void read_stick(float& horizontal, float& vertical) {
+    horizontal = vertical = 0.0f;
+#ifdef TOOIE_NATIVE_HOST
+    if (tooie::input::game_input_disabled()) return;
+    float right_x = 0.0f, right_y = 0.0f;
+    tooie::input::get_right_analog(0, &right_x, &right_y);
+    if (std::isfinite(right_x)) horizontal = configured_horizontal_inverted.load(std::memory_order_acquire) ? -right_x : right_x;
+    if (std::isfinite(right_y)) vertical = configured_vertical_inverted.load(std::memory_order_acquire) ? -right_y : right_y;
+#endif
 }
 bool rdram_pointer(gpr address) {
     const auto value = static_cast<std::uint32_t>(address);
@@ -97,7 +133,6 @@ void guest_call(recomp_context* ctx, Call&& call) {
 
 void exit_orbit() {
     orbit.active = orbit.entering = false;
-    orbit.pending_turn = orbit.pending_pitch = 0.0f;
 }
 }
 
@@ -131,6 +166,10 @@ void tooie::camera::set_mouse_aim_sensitivity(float degrees_per_count) noexcept 
 
 void tooie::camera::set_mouse_aim_inverted(bool inverted) noexcept {
     configured_mouse_inverted.store(inverted, std::memory_order_release);
+}
+
+void tooie::camera::set_orbit_distance_scale(float scale) noexcept {
+    configured_distance_scale.store(std::clamp(scale, 0.5f, 1.5f), std::memory_order_release);
 }
 
 #ifdef TOOIE_NATIVE_HOST
@@ -243,42 +282,33 @@ extern "C" int tooie_camera_analog_apply(std::uint8_t* rdram, recomp_context* ct
 
     // func_80110EFC, used by the original C-left/C-right paths, first admits
     // only components whose mode's table entry has a nonzero +0xC field.
+    // Flight has none (C-left/C-right do nothing there) but orbits anyway.
     const auto mode = static_cast<std::uint32_t>(MEM_W(component, 0x6C));
     const auto mode_rule_address = static_cast<gpr>(static_cast<std::int32_t>(
         k_camera_mode_rule_table + mode * 16u));
-    if (MEM_H(0, mode_rule_address) == 0) {
+    if (MEM_H(0, mode_rule_address) == 0 && static_cast<std::int32_t>(mode) != k_fly_mode) {
         return -1;
     }
+    const gpr player = ctx->r16; // func_800A4878's arg0, kept in s0.
 
-    // Manual rotation is allowed this camera frame.
+    // Manual rotation is allowed this frame. The stick itself is read by the
+    // orbit hook, once per camera frame.
     ++orbit.input_frames;
-    const auto now = std::chrono::steady_clock::now();
-    const float dt = orbit.last_input == std::chrono::steady_clock::time_point{} ? 0.0f
-        : std::min(std::chrono::duration<float>(now - orbit.last_input).count(), 0.1f);
-    orbit.last_input = now;
 
-    float right_x = 0.0f;
-    float right_y = 0.0f;
-    // Shaped like Lighthouse's ReadStick (radial 0.15 deadzone, rescaled).
-    tooie::input::get_right_analog(0, &right_x, &right_y);
-    float horizontal = std::isfinite(right_x) ? right_x : 0.0f;
-    if (tooie::camera::horizontal_inverted()) horizontal = -horizontal;
-    float vertical = std::isfinite(right_y) ? right_y : 0.0f;
-    if (tooie::camera::vertical_inverted()) vertical = -vertical;
-
-    // Tooie's heap relocates the camera component; same mode means the same camera.
+    // Tooie's heap relocates the camera component; the same player in the
+    // same mode means the same camera.
+    if ((orbit.active || orbit.entering) && orbit.player != player) exit_orbit();
     if (orbit.active || orbit.entering) orbit.component = component;
     if (orbit.active && orbit.mode != static_cast<std::int32_t>(mode)) {
         exit_orbit();
     }
-    if (!orbit.active && !orbit.entering && std::hypot(right_x, right_y) >= k_enter_threshold) {
+    float horizontal = 0.0f, vertical = 0.0f;
+    read_stick(horizontal, vertical);
+    if (!orbit.active && !orbit.entering && std::hypot(horizontal, vertical) >= k_enter_threshold) {
         orbit.entering = true;
         orbit.component = component;
+        orbit.player = player;
         orbit.mode = static_cast<std::int32_t>(mode);
-    }
-    if (orbit.active || orbit.entering) {
-        orbit.pending_turn += horizontal * k_yaw_speed_degrees * dt;
-        orbit.pending_pitch += vertical * k_pitch_speed_degrees * dt;
     }
     // The original C-left/C-right handling still runs; a C turn ends the orbit.
     return -1;
@@ -290,20 +320,30 @@ extern "C" void tooie_camera_orbit_apply(std::uint8_t* rdram, recomp_context* ct
     // the position (+0x74) and rotation (+0x80) are copied for the view, so
     // the game's shake and roll still apply on top of the orbit.
     const gpr component = ctx->r16;
+    if (!(orbit.active || orbit.entering)) {
+        orbit.seen_input_frames = orbit.input_frames;
+        return;
+    }
+    // Another player's camera (Mumbo beside his statue, the other half of a
+    // split-up), or this one relocated before the input hook has seen it:
+    // only the input hook decides which component is the orbit's.
+    if (component != orbit.component) return;
     const bool input_this_frame = orbit.input_frames != orbit.seen_input_frames;
     orbit.seen_input_frames = orbit.input_frames;
-    if (!(orbit.active || orbit.entering)) return;
-    if (component != orbit.component) {
-        // Relocated camera component (the input hook may run later this frame).
-        if (MEM_W(0x6C, component) != orbit.mode) return;
-        orbit.component = component;
-    }
 
     const gpr yaw_controller = static_cast<gpr>(MEM_W(component, 0x60));
-    const bool game_transition = MEM_H(0x0C, yaw_controller) != 0;
-    if (!input_this_frame || game_transition || !tooie::camera::analog_enabled()) {
-        // The game owns the camera again (C buttons, view toggle, mode change,
-        // cutscene or menu). Its state already holds the orbit's last pose.
+    if (!rdram_pointer(yaw_controller)) { exit_orbit(); return; }
+    // Only the player's own turns (C-left/C-right, R) hand the camera back.
+    const bool player_turn = MEM_H(0x0C, yaw_controller) != 0 &&
+        MEM_H(0x0E, yaw_controller) >= k_player_turn_priority;
+    const float dt = game_delta(rdram);
+    orbit.input_gap_seconds = input_this_frame ? 0.0f : orbit.input_gap_seconds + dt;
+    const bool input_lost = orbit.entering ? !input_this_frame : orbit.input_gap_seconds > k_input_gap_seconds;
+    if (input_lost || player_turn || MEM_W(component, 0x6C) != orbit.mode ||
+        !tooie::camera::analog_enabled()) {
+        // The game owns the camera again (C buttons, R, view toggle, mode
+        // change, cutscene or dialogue). Its state already holds the orbit's
+        // last pose.
         exit_orbit();
         return;
     }
@@ -318,13 +358,12 @@ extern "C" void tooie_camera_orbit_apply(std::uint8_t* rdram, recomp_context* ct
         load_vector(rdram, out, focus);
     });
 
-    float dt = 0.0f;
-    {
-        static std::chrono::steady_clock::time_point last{};
-        const auto now = std::chrono::steady_clock::now();
-        dt = last == std::chrono::steady_clock::time_point{} ? 0.0f
-            : std::min(std::chrono::duration<float>(now - last).count(), 0.1f);
-        last = now;
+    float horizontal = 0.0f, vertical = 0.0f;
+    read_stick(horizontal, vertical);
+    if (orbit.mode == k_fly_mode && !orbit.entering) {
+        const bool held = horizontal != 0.0f || vertical != 0.0f;
+        orbit.released_seconds = held ? 0.0f : orbit.released_seconds + dt;
+        if (orbit.released_seconds >= k_fly_release_seconds) { exit_orbit(); return; }
     }
 
     if (orbit.entering) {
@@ -339,6 +378,7 @@ extern "C" void tooie_camera_orbit_apply(std::uint8_t* rdram, recomp_context* ct
         orbit.aim_y = focus[1];
         orbit.crossover_dot = 0.0f;
         orbit.occlusion_probe = 0;
+        orbit.released_seconds = orbit.input_gap_seconds = 0.0f;
         orbit.entering = false;
         orbit.active = true;
     } else {
@@ -346,22 +386,27 @@ extern "C" void tooie_camera_orbit_apply(std::uint8_t* rdram, recomp_context* ct
         orbit.aim_y += (focus[1] - orbit.aim_y) * (1.0f - std::exp(-k_aim_height_rate * dt));
     }
 
-    // The mode's distance range (func_80115358 clamps to +0xC..+0x10 of the
-    // block at +0x14), so an orbit entered while the game had pulled the
-    // camera in close returns to a normal distance, as Lighthouse orbits at
-    // the game's zoom distance rather than the live one.
+    // Lighthouse orbits at the game's zoom distance, not the live one. Tooie's
+    // follow camera keeps anywhere inside the mode's range (func_80115358
+    // clamps to +0xC..+0x10 of the block at +0x14, set per view by
+    // func_800A3BA8 and scaled up for the statue) and trails at its far end,
+    // so that is the orbit's distance, times the distance setting. The live
+    // distance it was entered at (often the near end, or pulled in by a wall)
+    // eases out to it.
     const gpr range = static_cast<gpr>(MEM_W(component, 0x14));
     if (rdram_pointer(range)) {
         const float near_limit = load_float(rdram, range + 0xC), far_limit = load_float(rdram, range + 0x10);
-        if (std::isfinite(near_limit) && std::isfinite(far_limit) && near_limit > 1.0f && near_limit <= far_limit)
-            orbit.distance = std::clamp(orbit.distance, near_limit, far_limit);
+        if (std::isfinite(near_limit) && std::isfinite(far_limit) && near_limit > 1.0f && near_limit <= far_limit) {
+            const float wanted = std::max(k_min_distance,
+                far_limit * configured_distance_scale.load(std::memory_order_acquire));
+            orbit.distance += (wanted - orbit.distance) * (1.0f - std::exp(-k_distance_rate * dt));
+        }
     }
 
-    orbit.yaw = wrap_degrees(orbit.yaw + orbit.pending_turn);
+    orbit.yaw = wrap_degrees(orbit.yaw + horizontal * k_yaw_speed_degrees * dt);
     // Captured outside the limits (the game's own angle): only move inwards.
-    orbit.elevation = std::clamp(orbit.elevation + orbit.pending_pitch,
+    orbit.elevation = std::clamp(orbit.elevation + vertical * k_pitch_speed_degrees * dt,
         std::min(k_min_elevation, orbit.elevation), std::max(k_max_elevation, orbit.elevation));
-    orbit.pending_turn = orbit.pending_pitch = 0.0f;
 
     float target[3];
     {
@@ -465,4 +510,9 @@ extern "C" void tooie_camera_orbit_apply(std::uint8_t* rdram, recomp_context* ct
     store_float(rdram, yaw_controller + 0x10, orbit.yaw);
     store_float(rdram, yaw_controller + 0x14, orbit.yaw);
     store_float(rdram, yaw_controller + 0x18, 0.0f);
+    // The follow camera's wall avoidance would keep swinging the yaw, and its
+    // transition would outlive the orbit; the orbit has its own collision.
+    // Clearing kind and priority ends it, as func_80112A84 does on arrival.
+    MEM_H(0x0C, yaw_controller) = 0;
+    MEM_H(0x0E, yaw_controller) = 0;
 }

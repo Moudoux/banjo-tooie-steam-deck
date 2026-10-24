@@ -20,11 +20,12 @@ struct Preferences {
     int fullscreen = 0;
     int quiet_talon_trot = 0;
     int analog_camera = 0, camera_invert_x = 0, camera_invert_y = 0;
+    int camera_distance = 100; // Orbit distance, percent of the game's camera distance (50..150).
     int msaa = 0, supersampling = 1; // MSAA samples 0/2/4/8; supersampling 1/2/4.
     int draw_distance = 1, disable_lod = 0; // Model draw-distance multiplier 1..6.
     int mouse_aim = 1, mouse_sensitivity = 6, mouse_invert_y = 1; // Hundredths of a degree per count.
 };
-enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, AnalogCamera, CameraInvertX, CameraInvertY, Msaa, Supersampling, DrawDistance, DisableLod, MouseAim, MouseSensitivity, MouseInvertY };
+enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, AnalogCamera, CameraInvertX, CameraInvertY, CameraDistance, Msaa, Supersampling, DrawDistance, DisableLod, MouseAim, MouseSensitivity, MouseInvertY };
 struct OutputRate { int option = 0, manual_hz = 60; };
 inline uint32_t pack_output_rate(OutputRate rate) noexcept {
     return (uint32_t(rate.option) << 16) | uint32_t(rate.manual_hz);

@@ -206,6 +206,10 @@ void update_preference(Preference key, int value) {
         if (value < 0 || value > 1) return;
         selected.camera_invert_y = value; settings::set_bool("tooie_camera_invert_y", value != 0);
         tooie::camera::set_vertical_inverted(value != 0); break;
+    case Preference::CameraDistance:
+        if (value < 50 || value > 150) return;
+        selected.camera_distance = value; settings::set_int("tooie_camera_distance", value);
+        tooie::camera::set_orbit_distance_scale(value / 100.0f); break;
     case Preference::QuietTalonTrot:
         if (value < 0 || value > 1) return;
         selected.quiet_talon_trot = value;
@@ -300,6 +304,8 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile) {
     tooie::camera::set_analog_enabled(selected.analog_camera != 0);
     tooie::camera::set_horizontal_inverted(selected.camera_invert_x != 0);
     tooie::camera::set_vertical_inverted(selected.camera_invert_y != 0);
+    selected.camera_distance = bounded(settings::get_int("tooie_camera_distance", 100), 50, 150, 100);
+    tooie::camera::set_orbit_distance_scale(selected.camera_distance / 100.0f);
     {
         const int samples = settings::get_int("baseline_msaa", 0);
         const int factor = settings::get_int("baseline_supersampling", 1);
