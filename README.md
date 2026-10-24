@@ -1,11 +1,12 @@
-# Banjo-Tooie: Scurvy Dog Port (Linux / Steam Deck)
+# Banjo-Tooie: Steam Deck Port
 
-An unofficial Linux build of
+An unofficial native Linux port of Banjo-Tooie, tuned for the Steam Deck
+OLED. It is a fork of
 [Banjo-Tooie: Scurvy Dog Port](https://github.com/some-scurvy-dog/banjo-tooie-scurvy-dog-port),
-a PC port that statically recompiles Banjo-Tooie with
+a Windows PC port that statically recompiles Banjo-Tooie with
 [N64Recomp](https://github.com/N64Recomp/N64Recomp) and renders it with
-[RT64](https://github.com/rt64/rt64). This fork adds a native Linux player
-tuned for the Steam Deck OLED. It is an alpha, built from source only. The
+[RT64](https://github.com/rt64/rt64), and has since grown its own Deck
+features. It is an alpha, built from source only. The
 game is not included: you need your own NTSC-U 1.0 ROM.
 
 Not affiliated with the upstream project, BanjoRecomp, Rare or Nintendo.
@@ -57,12 +58,15 @@ Nothing ROM-derived may be shared: not the ROM, not `generated/`, `deps/`,
 
 ## Play
 
-Copy `BanjoTooieScurvyDogPort`, `recompcontrollerdb.txt` and your ROM (as
+Copy `BanjoTooieSteamDeckPort`, `recompcontrollerdb.txt` and your ROM (as
 `baserom.us.z64`) into one folder and run the game. The ROM is copied into
 your profile on first launch, after which the folder copy is no longer needed.
 
 Your profile, saves, settings and `player.log` are in
-`~/.local/share/BanjoTooieScurvyDogPort` (or `$XDG_DATA_HOME`).
+`~/.local/share/BanjoTooieSteamDeckPort` (or `$XDG_DATA_HOME`). A profile
+from before the rename, `~/.local/share/BanjoTooieScurvyDogPort`, is moved
+there on first launch with everything in it. If you added the game to Steam
+before the rename, point the shortcut at the new executable name.
 
 ### Steam Deck
 

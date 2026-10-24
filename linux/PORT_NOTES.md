@@ -1,7 +1,7 @@
 # Linux / Steam Deck port: handoff notes
 
-State of the Linux fork of Banjo-Tooie: Scurvy Dog Port, for whoever picks it
-up next. Upstream builds only for Windows; this fork builds a native Linux
+State of Banjo-Tooie: Steam Deck Port, the Linux fork of Banjo-Tooie: Scurvy
+Dog Port, for whoever picks it up next. Upstream builds only for Windows; this fork builds a native Linux
 player, tuned for the Steam Deck OLED.
 
 ## Repository layout
@@ -33,7 +33,7 @@ docker run --rm -it -v "$(pwd)":/workspace tooie-toolchain:latest linux/build.sh
   `generic`; `SYMBOLS=1` keeps debug info for crash backtraces (use with
   `BUILD=build/linux-player-debug` to keep the normal build); `CLEAN=1` moves old build dirs aside (needed after guest patch
   edits; guest prep refuses existing outputs); `JOBS`, `ROM`.
-- Output: `build/linux-player/baseline/player-bin/BanjoTooieScurvyDogPort`
+- Output: `build/linux-player/baseline/player-bin/BanjoTooieSteamDeckPort`
   plus `recompcontrollerdb.txt`. Docker writes as root; `chown` afterwards.
 - A clean build takes about 15 minutes on 24 cores and ~10 GB of disk (the
   Windows LLVM alone is 7 GB). No CI: the build needs the user's ROM and its
@@ -64,7 +64,7 @@ Linux enablement:
   link flags, DLL copies and the qualification gate behind `if(WIN32)`;
   selects `player_startup_posix.cpp` + `nfd` on Linux.
 - `tools/baseline/player_startup_posix.cpp` (new): POSIX twin of
-  `player_startup.cpp`. Profile in `$XDG_DATA_HOME/BanjoTooieScurvyDogPort`
+  `player_startup.cpp`. Profile in `$XDG_DATA_HOME/BanjoTooieSteamDeckPort`
   (default `~/.local/share`), `flock` on the profile marker,
   `renameat2(RENAME_NOREPLACE)`, SDL message boxes, RT64's nativefiledialog
   for the ROM picker. Duplicates ~100 lines of platform-neutral logic
@@ -79,6 +79,17 @@ Linux enablement:
   `localtime_r`/`gmtime_r`.
 
 Steam Deck features:
+- **Name: Banjo-Tooie: Steam Deck Port.** The Linux player's window title,
+  dialogs, product string and executable (`BanjoTooieSteamDeckPort`) use it;
+  the profile is `$XDG_DATA_HOME/BanjoTooieSteamDeckPort`. On normal play
+  `rename_profile` (`player_startup_posix.cpp`, called from `main.cpp`
+  before the Alpha 4 `migrate_profile`) moves a marked, unlocked
+  `BanjoTooieScurvyDogPort` folder whole with `renameat2(RENAME_NOREPLACE)`,
+  holding its marker lock; an existing new folder wins and the old one is
+  left alone. Upstream's Windows side (`player_startup.cpp`, the `.exe` name
+  in `release/player-windows-files.json`, `docs/`, `release/`) keeps the
+  Scurvy Dog name, to keep upstream merges simple.
+
 - **Deck defaults** (`TOOIE_DECK_DEFAULTS`, `minimum_host.cpp`): only for
   settings a profile has not saved: 3x resolution, output rate Display,
   widescreen On at 16:10, fullscreen.

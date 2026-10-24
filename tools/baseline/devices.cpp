@@ -727,7 +727,7 @@ ultramodern::renderer::WindowHandle open_devices(const std::filesystem::path& ro
     SDL_SetHintWithPriority(SDL_HINT_ENABLE_SCREEN_KEYBOARD, "0", SDL_HINT_DEFAULT);
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) throw std::runtime_error(SDL_GetError());
 #ifdef BASELINE_PLAYER
-    constexpr const char* window_title = "Banjo-Tooie: Scurvy Dog Port";
+    constexpr const char* window_title = "Banjo-Tooie: Steam Deck Port";
 #else
     constexpr const char* window_title = "Banjo-Tooie baseline";
 #endif

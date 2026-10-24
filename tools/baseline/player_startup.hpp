@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-// Banjo-Tooie: Scurvy Dog Port player startup (BASELINE_PLAYER only): owned profile,
+// Banjo-Tooie: Steam Deck Port player startup (BASELINE_PLAYER only): owned profile,
 // ROM picker, one-time copy of an older ordinary save, user log and readable
 // failures. The engineering command line is compiled unchanged without it.
 namespace baseline::player {
@@ -38,7 +38,7 @@ inline constexpr wchar_t save_name[] = L"bt.n64.us.1.0.bin";
 inline constexpr std::uintmax_t save_bytes = 2048;
 inline constexpr wchar_t import_record_name[] = L"save-import.txt";
 
-std::filesystem::path default_profile_root();  // %LOCALAPPDATA%\BanjoTooieScurvyDogPort
+std::filesystem::path default_profile_root();  // %LOCALAPPDATA%\BanjoTooieScurvyDogPort; Linux $XDG_DATA_HOME/BanjoTooieSteamDeckPort
 std::filesystem::path previous_profile_root(); // %LOCALAPPDATA%\BanjoTooieEncore (Alpha 4); only ever read.
 std::filesystem::path legacy_save_path();      // Earlier alpha default save; only ever read.
 
@@ -72,6 +72,13 @@ struct Migration {
     std::string note; // One log line, written once the profile log is open.
 };
 Migration migrate_profile(const std::filesystem::path& previous, const std::filesystem::path& destination);
+#ifndef _WIN32
+// Linux: the Scurvy Dog Port profile folder, renamed whole (same format) to
+// the Steam Deck Port folder before migrate_profile runs. Any existing
+// destination wins; a missing, unmarked, linked or in-use source is left alone.
+std::filesystem::path renamed_profile_root(); // $XDG_DATA_HOME/BanjoTooieScurvyDogPort
+Migration rename_profile(const std::filesystem::path& previous, const std::filesystem::path& destination);
+#endif
 
 enum class ImportResult { Imported, SourceMissing, WrongSize, DestinationNotEmpty };
 // Copies one ordinary save into a profile whose saves folder is absent or

@@ -180,7 +180,7 @@ std::string rom_problem(const std::filesystem::path& rom, std::u8string& game_id
     case recomp::RomValidationError::Good: return {};
     case recomp::RomValidationError::FailedToOpen: return "The ROM file could not be read.";
     case recomp::RomValidationError::NotARom: return "This file is not an N64 ROM.";
-    case recomp::RomValidationError::IncorrectVersion: return "This is a different version of Banjo-Tooie; Scurvy Dog Port needs the USA ROM.";
+    case recomp::RomValidationError::IncorrectVersion: return "This is a different version of Banjo-Tooie; Steam Deck Port needs the USA ROM.";
     case recomp::RomValidationError::IncorrectRom: return "This is not a Banjo-Tooie ROM.";
     default: return "This ROM is not supported.";
     }
@@ -229,7 +229,12 @@ int main(int argc, char** argv) {
         if (profile_root.empty()) {
             // Normal play only: copy the Alpha 4 default profile before its successor exists.
             profile_root = baseline::player::default_profile_root();
-            migration_note = baseline::player::migrate_profile(baseline::player::previous_profile_root(), profile_root).note;
+#ifndef _WIN32
+            // The Scurvy Dog Port folder moves first; then the Alpha 4 copy finds its destination taken.
+            const auto renamed = baseline::player::rename_profile(baseline::player::renamed_profile_root(), profile_root);
+            if (renamed.outcome == baseline::player::Migration::Migrated) migration_note = renamed.note + "\n";
+#endif
+            migration_note += baseline::player::migrate_profile(baseline::player::previous_profile_root(), profile_root).note;
         }
         const auto player_profile = baseline::player::Profile::acquire(profile_root);
         baseline::player::open_log(player_profile.root());
@@ -255,7 +260,7 @@ int main(int argc, char** argv) {
             .rom_hash = 0x00F70DE5F2D70EA2,
             .internal_name = "BANJO TOOIE",
 #ifdef BASELINE_PLAYER
-            .display_name = "Banjo-Tooie: Scurvy Dog Port",
+            .display_name = "Banjo-Tooie: Steam Deck Port",
 #else
             .display_name = "Banjo-Tooie baseline",
 #endif
@@ -401,7 +406,7 @@ int main(int argc, char** argv) {
     } catch (const std::exception& error) {
         std::fprintf(stderr, "baseline admission failed: %s\n", error.what());
 #ifdef BASELINE_PLAYER
-        baseline::player::show_error(std::string("Banjo-Tooie: Scurvy Dog Port could not start.\n\n") + error.what());
+        baseline::player::show_error(std::string("Banjo-Tooie: Steam Deck Port could not start.\n\n") + error.what());
 #endif
         baseline::close_devices();
         return 1;
