@@ -178,6 +178,33 @@ Steam Deck features:
   SDL gyro path (Steam Input off) was tried first and did not work on the
   owner's Deck.
 
+- **Twin-stick Breegull Blaster** (analog camera on). The right stick turns
+  and looks like the orbit: the same shaped stick, the game's frame delta,
+  Invert camera X/Y (up looks up, the opposite of the orbit, where up raises
+  the camera; the owner tried up-looks-down and preferred this),
+  turn 160 deg/s and, at the owner's request, look at the same 160 deg/s.
+  The left stick's X strafes instead of turning. The Blaster (`bsfirstp`)
+  uses neither `bafpctrl` nor `baeggaim`: `func_80804848_bsfirstp` feeds its
+  inputs through `func_808045FC` (+0x164 turn from stick X, +0x180 look,
+  +0x148 forward, +0x12C strafe from the C-left/C-right axis at +0x11C, -1
+  left), and turning ramps up (`func_80809AF8`), so adding the right stick
+  there (the first attempt) felt non-linear. The look angle (+0x20C of the
+  state at player +0x188, clamped to +0x1EC..+0x1E8) eases back to a target:
+  in control type 1 (+0xC) one set by the left stick's position
+  (`func_80806928`, 1/12 per frame), in type 0 the level angle +0x25C while
+  +0x254 is set (`func_808069BC`, 1/6 per frame). Raw hooks:
+  - `func_80809AF8` before `0x80809BB8`: right-stick turn added to the
+    frame's yaw delta (sp+0x28).
+  - `func_8080682C` before `0x80806890`: right-stick look added to +0x20C
+    before the clamp, and accumulated (clamped, reset after 0.5 s away).
+  - `func_80806928` before `0x80806998` (f2) and `func_808069BC` before
+    `0x808069D8` (f0): that accumulated look is added to the target, so the
+    view stays where the right stick left it.
+  - `func_80804848` before `0x80804938` / `L_8080499C`: `bastick_getX` added
+    to the strafe input (a1); before `0x80804960` / `0x808049C4`: the turn
+    input (a1) zeroed.
+  Hook edits need a `CLEAN=1` build.
+
 - **No on-screen keyboard at launch** (`tools/baseline/devices.cpp`, before
   `SDL_Init`): sdl2-compat before `30ee26c` (2026-06-07) starts text input
   on each new window without suppressing the screen keyboard, and SDL3 shows
