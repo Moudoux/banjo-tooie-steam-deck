@@ -567,6 +567,8 @@ inline constexpr char version[] = "@TOOIE_PLAYER_VERSION@";
     # Actor matrix groups (game select, and every actor when enabled), reached by
     # the func_8010A79C raw hooks; the latter needs the object_groups RT64 repair.
     target_sources(TooieBaseline PRIVATE src/menu_interpolation.cpp src/object_interpolation.cpp)
+    # Minimap, sampled by the bainput_update raw hook and drawn by the ImGui overlay.
+    target_sources(TooieBaseline PRIVATE src/level_minimap.cpp)
     if(NOT TOOIE_BASELINE_RT64_GENERIC_FIXES)
         message(FATAL_ERROR "The player's object matrix groups need TOOIE_BASELINE_RT64_GENERIC_FIXES")
     endif()

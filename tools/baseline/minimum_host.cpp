@@ -9,6 +9,7 @@
 #include "camera_analog.hpp"
 #include "draw_distance.hpp"
 #include "object_interpolation.hpp"
+#include "level_minimap.hpp"
 #if BASELINE_PLAYER
 #include "virtual_clock.hpp"
 #include "player_version.hpp"
@@ -135,16 +136,16 @@ bool log_controller_admission(const char* phase, unsigned seq) {
         std::fflush(stderr) == 0;
 }
 
-const char* f4_owner() {
+const char* key_owner(SDL_Scancode key) {
     using namespace tooie::input;
     for (unsigned action = 0; action <= unsigned(Action::Menu); ++action)
         for (unsigned slot = 0; slot < 2; ++slot)
-            if (get_binding(Action(action), Device::Keyboard, BindingLayer::Base, slot).code == SDL_SCANCODE_F4)
+            if (get_binding(Action(action), Device::Keyboard, BindingLayer::Base, slot).code == key)
                 return action_name(Action(action));
     return nullptr;
 }
 void mark_issue() {
-    if (const auto* owner = f4_owner()) {
+    if (const auto* owner = key_owner(SDL_SCANCODE_F4)) {
         notice = std::string("F4 is bound to ") + owner + "; issue marker disabled.";
         if (!marker_conflict_reported) {
             std::fprintf(stderr, "baseline issue-marker disabled: F4 is bound to %s\n", owner);
@@ -402,6 +403,10 @@ void update_preference(Preference key, int value) {
         if (value < 0 || value > 1) return;
         selected.object_interpolation = value; settings::set_bool("baseline_object_interpolation", value != 0);
         tooie::objects::set_enabled(value != 0); break;
+    case Preference::Minimap:
+        if (value < 0 || value > 1) return;
+        selected.minimap = value; settings::set_bool("baseline_minimap", value != 0);
+        tooie::level_minimap::set_enabled(value != 0); break;
     case Preference::VSync:
         if (value < 0 || value > 1) return;
         selected.vsync = value; settings::set_int("baseline_vsync", value);
@@ -692,6 +697,8 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     publish_picture();
     selected.object_interpolation = settings::get_bool("baseline_object_interpolation", true) ? 1 : 0;
     tooie::objects::set_enabled(selected.object_interpolation != 0);
+    selected.minimap = settings::get_bool("baseline_minimap", true) ? 1 : 0;
+    tooie::level_minimap::set_enabled(selected.minimap != 0);
     latched = selected; vsync.store(selected.vsync, std::memory_order_release);
     resolution.store(selected.resolution, std::memory_order_release);
     texture_filter.store(selected.texture_filter, std::memory_order_release);
@@ -769,6 +776,11 @@ void handle_event(const SDL_Event& event) {
     if (event.type == SDL_KEYDOWN && !event.key.repeat && event.key.keysym.scancode == SDL_SCANCODE_F4 &&
         !(event.key.keysym.mod & (KMOD_SHIFT | KMOD_ALT | KMOD_CTRL | KMOD_GUI)) && focused &&
         !tooie::input::input_suppressed()) mark_issue();
+    // F5 toggles the minimap, unless a game action is bound to it.
+    if (event.type == SDL_KEYDOWN && !event.key.repeat && event.key.keysym.scancode == SDL_SCANCODE_F5 &&
+        !(event.key.keysym.mod & (KMOD_SHIFT | KMOD_ALT | KMOD_CTRL | KMOD_GUI)) && focused &&
+        !tooie::input::input_suppressed() && !key_owner(SDL_SCANCODE_F5))
+        update_preference(Preference::Minimap, selected.minimap ? 0 : 1);
 #endif
     tooie::input::handle_event(event);
 #if BASELINE_PLAYER

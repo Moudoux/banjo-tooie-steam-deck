@@ -238,6 +238,30 @@ Steam Deck features:
   nearest branch. Not covered: actors the game has not spawned or keeps
   inactive far away, and level geometry culled by other means (fog is
   unchanged).
+
+- **Minimap** (Video menu "Minimap (bottom left, F5)", or F5 in game unless a
+  game action is bound to F5; `baseline_minimap`, default on; `src/level_minimap.cpp`, raw hook `MINIMAP_HOOKS` at `bainput_update`
+  entry `0x8009819C`). A top-down map of the level's collision floors,
+  3000 units around the player, rotated so the camera looks up the map, with
+  an arrow for the player's facing. Upstream's `src/minimap.cpp` is a
+  breadcrumb radar for the retired frontend and is not used. The hook runs on
+  the guest thread for the controlled character (player table `0x80135490`,
+  index `0x801354DC`; position `+0xE4`, yaw `+0xF8`; camera `0x8012D500`,
+  which looks along -(sin, cos) of its yaw at `+0x1C`) and copies the
+  geometry when the map (`0x80132DC2`) or a collision source changes, since
+  the heap moves models; the overlay draws only that copy. Sources, all in
+  Banjo-Kazooie's model format: the two level layers at `0x801285B0`
+  (0x2C bytes each, opaque then water; collision `+0x00`, live vertex list
+  `+0x10 + 4 * u8 +0x29`, used when `+0x2A` is set, as `func_800BEE40`
+  queries them), and the live map sections (`+0x77` count, `+0x68` array of
+  0x58 bytes, bit 30 of `+0x4C`; model = asset `+0x40` from the asset cache at
+  `0x8012B800`, offset by the vec3 at `+0x00`, as
+  `gcmapsects_entrypoint_21`). Floors (normal Y > 0.3) are drawn low to high,
+  those more than 300 units above the player faded and first, so stacked
+  rooms show the player's level; walls near the player's height are lines;
+  ceilings are left out. The map hides when the player has not been updated
+  for 300 ms (menus, cutscenes, loads, pause). Verified locally in Spiral
+  Mountain; sectioned maps are not verified.
   `baseline_input_host_test` (not built by default) would also need
   `src/draw_distance.cpp`.
 

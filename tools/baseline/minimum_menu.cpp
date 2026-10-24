@@ -2,6 +2,9 @@
 #include "guest/minimum-host/first_person_aim_abi.h"
 #include "minimum_render.hpp"
 #include "imgui/imgui.h"
+#if BASELINE_PLAYER
+#include "level_minimap.hpp"
+#endif
 #include <algorithm>
 #include <string>
 
@@ -365,6 +368,8 @@ void video(const Snapshot& snapshot) {
     if(color!=snapshot.latched_color_format)ImGui::TextDisabled("Color precision changes on the next launch.");
     bool objects=prefs.object_interpolation!=0;
     if(ImGui::Checkbox("Interpolate all objects",&objects))preference(Preference::ObjectInterpolation,int(objects));
+    bool minimap=prefs.minimap!=0;
+    if(ImGui::Checkbox("Minimap (bottom left, F5)",&minimap))preference(Preference::Minimap,int(minimap));
 #endif
     int rate=prefs.output_rate;
     if(ImGui::Combo("Output rate",&rate,"Default (Original)\0Original\0Display\0Manual\0"))preference(Preference::OutputRate,rate);
@@ -441,6 +446,9 @@ void audio(const Snapshot& snapshot) {
 #endif
 }
 void draw_menu(const Snapshot& snapshot) {
+#if BASELINE_PLAYER
+    tooie::level_minimap::render();
+#endif
     if(!snapshot.toast.empty()) {
         const auto* viewport=ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x+12.f,viewport->WorkPos.y+viewport->WorkSize.y-12.f),ImGuiCond_Always,ImVec2(0,1));
