@@ -86,6 +86,7 @@ Your profile, saves, settings and `player.log` are in
 | Y | C-up | First-person view |
 | Right stick | | Orbit the camera (Lighthouse-style, inverted X; up raises it) |
 | Right stick click | C-down | Toggle camera views |
+| D-pad | C-buttons | C-up / C-down / C-left / C-right (hold LT or RT + right = Wonderwing) |
 | Left stick click | L | |
 | Start | Start | Pause |
 | View | | Settings menu |
