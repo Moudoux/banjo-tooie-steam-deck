@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="linux/steam-artwork/logo.png" alt="Banjo-Tooie: Steam Deck Port logo" width="640">
+</p>
+
 # Banjo-Tooie: Steam Deck Port
 
 An unofficial native Linux port of Banjo-Tooie, tuned for the Steam Deck
