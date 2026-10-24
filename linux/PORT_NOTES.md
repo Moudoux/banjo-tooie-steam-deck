@@ -12,8 +12,10 @@ player, tuned for the Steam Deck OLED.
   `git fetch upstream && git rebase upstream/main`.
 - Commits use the GitHub noreply address set in this repo's git config; the
   owner's real email is private and GitHub rejects pushes that expose it.
-- `tools/check_repository.py` must keep passing. It rejects tracked
-  `AGENTS.md`/`CLAUDE.md` and undeclared `docs/` files, so these notes live here.
+- `tools/check_repository.py` must keep passing. It rejects undeclared `docs/`
+  files, so these notes live here. Upstream's version also rejected tracked
+  `AGENTS.md`/`CLAUDE.md`; this fork allows them and keeps agent instructions in
+  `AGENTS.md` (`CLAUDE.md` imports it).
 
 ## Build
 
@@ -464,5 +466,7 @@ runs (never commit it). QA `--input-script` files can only press N64 inputs.
   If upstream changes guest code, its new image hash replaces ours: re-apply
   the 16:10 edit, build with `CLEAN=1`, review the guest diff (mask addresses
   in `boot.c`, compare per function) and re-pin. Never re-pin without review.
+- `tools/check_repository.py` differs from upstream (it allows `AGENTS.md` and
+  `CLAUDE.md`); keep that when upstream changes the file.
 - If upstream changes `windows-player` preset options, `build.sh` follows
   automatically; new Windows-only CMake code may need another `if(WIN32)`.
