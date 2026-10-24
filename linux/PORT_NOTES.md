@@ -240,6 +240,41 @@ Steam Deck features:
   inactive far away, and level geometry culled by other means (fog is
   unchanged).
 
+- **Heap: low-memory cleanup and a bigger pool.** Extended draw distance draws
+  the props of many more cubes, and their models fill the game's heap in dense
+  levels (Glitter Gulch Mine at 6x quit the player within seconds of entering).
+  - *Cleanup* (`tools/baseline/adapters.cpp`, `baseline_overlay_boundary_refusal`
+    at `0x800A9DA8`): when `heap_alloc` finds no free block it calls
+    `func_800A9D90`, which unloads overlays idle for 3+ frames
+    (`func_8008160C(2)`, then `ovl_unload`) and frees caches. Upstream refused
+    this boundary and quit (`normal-overlay-refusal ... heap-pressure-cleanup`).
+    It is now admitted on main after the level's bulk load, unless tidy's defrag
+    is busy (`0x80126CBC`) or an ALT body/wrapper is running (they check list
+    positions). Each unload goes through the existing external-prefree check
+    and unpublication; an unload during a fresh load's allocation updates the
+    pending frame's list count. Logged as `baseline heap-pressure-cleanup`.
+    Confirmed on the Deck (2026-10-25): 123 cleanups in one session, play
+    continued, until the pool itself ran out (`heap-exhaustion` at
+    `0x8001A6C0`), which the bigger pool addresses.
+  - *Bigger pool* (raw hook `HEAP_HOOKS` in `minimum_host_hooks.py`, before
+    `0x8001A8CC` in `heap_setup`; `tooie_heap_extend` in `adapters.cpp`): the
+    pool is the `0x2C8800` bytes below `0x80400000` (`func_8001E7E8`: top from
+    `func_8001E7E0`, size from `func_8001E830`), so the game never touches the
+    upper 4 MB that the runtime, RT64 and host code already map. The hook adds
+    `0x400000` to the size before `heap_setup` stores it (`0x8007BF00`); every
+    heap end derives from that word, so the pool keeps its start
+    (`0x80137800`, which the pre-loader witness checks) and ends at
+    `0x80800000`. Top-side allocations made at boot (VI buffers at
+    `0x80078F70`, the free-list link at `0x801595F4`) move up by the same
+    amount; the post-core2 witness adds `heap_extension` to those words.
+    Overlays never reach the `0x80800000` "not loaded" value: the pool's last
+    block is a fixed dummy below it. Logged as `baseline heap-extended`.
+    Verified on the dev machine (2026-10-25): boot witnesses pass with the
+    moved buffers, and a scripted run into Spiral Mountain at 12x renders and
+    quits cleanly. Confirmed on the Deck by the owner (2026-10-25): the route
+    and settings (6x, LOD off) that ran out in map `0xD6` now play past the
+    old failure point with zero cleanups and quit normally.
+
 - **Minimap** (Video menu "Minimap (bottom left, F5)", or F5 in game unless a
   game action is bound to F5; `baseline_minimap`, default on; `src/level_minimap.cpp`, raw hook `MINIMAP_HOOKS` at `bainput_update`
   entry `0x8009819C`). A top-down map of the level's collision floors,

@@ -115,6 +115,12 @@ ACTOR_DRAW_HOOKS=(('func_8010A79C',0x8010A7E8,_native_call('tooie_actor_draw_beg
 # collision, and levitation (src/levitate.cpp) lifts the player while L is held.
 PLAYER_UPDATE_HOOKS=(('bainput_update',0x8009819C,
     _native_call('tooie_level_minimap_observe')+' '+_native_call('tooie_levitate_update')),)
+# Heap size: the original pool is the 0x2C8800 bytes below 0x80400000 (4 MB, no
+# Expansion Pak), and extended draw distance fills it in dense levels until
+# func_8001A6C0 reports exhaustion. heap_setup stores func_8001E830's size at
+# 0x8001A8D8; every heap end derives from that word, so growing it before the
+# store extends the pool up to 0x80800000 without moving its start.
+HEAP_HOOKS=(('heap_setup',0x8001A8CC,_native_call('tooie_heap_extend')),)
 def _blaster_call(name, control_type):
     return ('{ extern void %s(uint8_t*, recomp_context*, int); %s(rdram, ctx, %d); }'
             % (name, name, control_type))
@@ -133,7 +139,7 @@ GRAPHICS_HOOKS=(('func_808002A4_bafpctrl',0x80800368,MOUSE_AIM_TEXT),
                 ('func_800E42C0',0x800E42D4,DRAW_DISTANCE_TEXT),
                 ('func_800DD214',0x800DD298,LOD_GEO_TEXT),
                 ('func_800DD2E8',0x800DD32C,LOD_GEO_TEXT),
-                ('func_800DD37C',0x800DD3C0,LOD_GEO_TEXT))+ACTOR_DRAW_HOOKS+PLAYER_UPDATE_HOOKS
+                ('func_800DD37C',0x800DD3C0,LOD_GEO_TEXT))+ACTOR_DRAW_HOOKS+PLAYER_UPDATE_HOOKS+HEAP_HOOKS
 
 def add_hooks(hooks,selected):
     assert type(selected) is bool

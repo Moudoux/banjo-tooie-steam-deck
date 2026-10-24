@@ -1206,6 +1206,22 @@ extern "C" void baseline_observe_and_publish_core2(uint8_t* rdram, recomp_contex
         vi_worker_returns.load(std::memory_order_acquire), word(0x8007C700), word(0x8003F760), word(0x8003F764), uint32_t(ctx->r2), uint32_t(ctx->r31));
     std::fflush(stderr);
 }
+#if BASELINE_CAMERA_IDENTITY && TOOIE_MINIMUM_HOST_SELECTED
+// Player heap: the pool keeps its start and grows into the unused upper 4 MB, ending at
+// 0x80800000 like the RDRAM the runtime and RT64 map. Top-side allocations move up with it.
+constexpr uint32_t heap_extension = 0x400000;
+extern "C" void tooie_heap_extend(uint8_t* rdram, recomp_context* ctx) {
+    if (uint32_t(ctx->r2) != 0x2C8800 || uint32_t(MEM_W(0, int32_t(0x8007E990))) != 0x80137800 ||
+        uint32_t(MEM_W(0, int32_t(0x8007E998))) != 0x80400000)
+        rejected_body("heap extension original size/start/top");
+    ctx->r2 = int32_t(0x2C8800 + heap_extension);
+    std::fprintf(stderr, "baseline heap-extended start=80137800 size=%08x end=%08x\n",
+        0x2C8800 + heap_extension, 0x80137800 + 0x2C8800 + heap_extension);
+    std::fflush(stderr);
+}
+#else
+constexpr uint32_t heap_extension = 0;
+#endif
 // Original heap/bookkeeping/core2 leaf returned; observe before80012314 and80012318.
 extern "C" void baseline_observe_before_scheduler_init(uint8_t* rdram, recomp_context* ctx) {
     const auto thread = ultramodern::this_thread();
@@ -1214,10 +1230,10 @@ extern "C" void baseline_observe_before_scheduler_init(uint8_t* rdram, recomp_co
         ctx->mips3_float_mode != 0 || ctx->f_odd != &ctx->f0.u32h ||
         pio_copies != 2 || pio_offset != 0x50E0 || pio_destination != 0x80126730)
         rejected_body("post-core2 main context/status/FR0/PIO admission");
-    constexpr uint32_t witnesses[][2] = {{0x8007BF00, 0x002C8800}, {0x8003F750, 0x00076880},
-        {0x80078F70, 0x803DE220}, {0x80078F74, 0x803BC450}, {0x80078F78, 0x803AB540},
-        {0x80078F80, 0x803DE240}, {0x80078F84, 0x803BC480}, {0x80078F88, 0x803AB540},
-        {0x8007BCC0, 0x80137830}, {0x8007BCC4, 0x80137840}, {0x80137814, 0x801595F0}, {0x801595F4, 0x803AB530},
+    constexpr uint32_t witnesses[][2] = {{0x8007BF00, 0x002C8800 + heap_extension}, {0x8003F750, 0x00076880},
+        {0x80078F70, 0x803DE220 + heap_extension}, {0x80078F74, 0x803BC450 + heap_extension}, {0x80078F78, 0x803AB540 + heap_extension},
+        {0x80078F80, 0x803DE240 + heap_extension}, {0x80078F84, 0x803BC480 + heap_extension}, {0x80078F88, 0x803AB540 + heap_extension},
+        {0x8007BCC0, 0x80137830}, {0x8007BCC4, 0x80137840}, {0x80137814, 0x801595F0}, {0x801595F4, 0x803AB530 + heap_extension},
         {0x80043788, 0x01020304}, {0x800459D8, 0x01020304}, {0x8004378C, 0x05060708}, {0x800459DC, 0x05060708},
         {0x80124A8C, 0x80011000}, {0x80124A80, 0x8000E800}, {0x80126730, 0x01E899B0},
         {0x80117C60, 0}, {0x80117C64, 0}, {0x80126CB8, 0}, {0x800413A0, 0x003FFF01},
@@ -1936,6 +1952,22 @@ extern "C" void baseline_overlay_boundary_refusal(uint8_t* rdram, recomp_context
     }
 #endif
     auto* pending = PendingOverlay::top;
+    // An allocation found no free block; the original cleanup unloads idle overlays (age >= 3)
+    // through ovl_unload, whose prefree hook unpublishes each one. Running ALT bodies and the
+    // wrapper check list positions, and tidy's defrag owns the list while busy, so both still refuse.
+    if (pc == 0x800A9DA8 && bulk_completed && bulk_current == -1 && !MEM_W(0, int32_t(0x80126CBC)) &&
+        uint32_t(ultramodern::this_thread()) == 0x80045788 && osGetThreadId(rdram, ultramodern::this_thread()) == 6) {
+        bool alternate_running = false;
+        for (auto* frame = pending; frame; frame = frame->previous)
+            alternate_running |= frame->alternate && frame->phase != PendingOverlay::Phase::awaiting;
+        if (!alternate_running) {
+            static unsigned cleanups = 0;
+            std::fprintf(stderr, "baseline heap-pressure-cleanup size=%08x count=%u pending=%d cleanups=%u\n",
+                uint32_t(ctx->r4), uint32_t(MEM_W(0, int32_t(0x80117C60))), pending != nullptr, ++cleanups);
+            std::fflush(stderr);
+            return;
+        }
+    }
     if (pc == 0x800819E4 && pending && pending->alternate && pending->phase == PendingOverlay::Phase::wrapper &&
         uint32_t(ultramodern::this_thread()) == 0x80045788 && osGetThreadId(rdram, ultramodern::this_thread()) == 6 &&
         uint32_t(ctx->r4) == pending->h && uint32_t(ctx->r5) == 1) return;
@@ -2030,8 +2062,12 @@ extern "C" void baseline_alternate_before_free(uint8_t* rdram, recomp_context* c
             uint16_t(MEM_H(0, int32_t(tail + 0x30))) != index)
             rejected_body("external prefree original swap-tail shape");
         for (auto* frame = pending; frame; frame = frame->previous)
-            if (frame->alternate || size_t(overlay_ids[frame->id]) == ordinal)
+            if ((frame->alternate && frame->phase != PendingOverlay::Phase::awaiting) ||
+                size_t(overlay_ids[frame->id]) == ordinal)
                 rejected_body("external unload within active carrier section/ALT");
+        // Heap-pressure cleanup inside a fresh load's allocation runs before the new header is
+        // listed, so it lands at the shrunken count; a later unload that moves it fails the ALT check.
+        if (pending && pending->phase == PendingOverlay::Phase::awaiting) pending->count = count;
         unpublish_overlay(ordinal, text);
 #if BASELINE_SUCCESS_TRACE
         std::fprintf(stderr, "baseline external-prefree thread=%08x id=%u H=%08x text=%08x count=%u index=%u tail=%08x public_removed=1 free_pending=1\n",
