@@ -13,6 +13,8 @@ bool vertical_inverted() noexcept;
 // First-person mouse aim (and Steam Input gyro-as-mouse): degrees per count, Y inversion.
 void set_mouse_aim_sensitivity(float degrees_per_count) noexcept;
 void set_mouse_aim_inverted(bool inverted) noexcept;
+// Right-stick orbit distance as a share of the game's own (far) camera distance.
+void set_orbit_distance_scale(float scale) noexcept;
 }
 
 // Called only from the pinned, already-gated camera path in func_800A4878.
