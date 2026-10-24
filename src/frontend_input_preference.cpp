@@ -231,7 +231,10 @@ BindingTable defaults() {
         // first-person, the right stick turns the camera (C-left/right, X axis
         // inverted) and either vertical push toggles camera views (C-down).
         // With the analog camera on, the right stick orbits on both axes and
-        // the view toggle is on the right stick click instead.
+        // the view toggle is on the right stick click instead. The D-pad is
+        // the four C-buttons, so every C action (Z + C-right Wonderwing, egg
+        // aiming, C-left/right turns) stays reachable with the stick orbiting;
+        // Tooie reads no N64 D-pad input through its button API.
         // L, unused by XBLA, stays on LS.
         put(table, Action::A, Device::Button, SDL_CONTROLLER_BUTTON_A);
         put(table, Action::B, Device::Button, SDL_CONTROLLER_BUTTON_X);
@@ -248,11 +251,11 @@ BindingTable defaults() {
         put(table, Action::CDown, Device::Button, SDL_CONTROLLER_BUTTON_RIGHTSTICK);
         put(table, Action::CLeft, Device::AxisPositive, SDL_CONTROLLER_AXIS_RIGHTX);
         put(table, Action::CRight, Device::AxisNegative, SDL_CONTROLLER_AXIS_RIGHTX);
+        put(table, Action::CUp, Device::Button, SDL_CONTROLLER_BUTTON_DPAD_UP, 1);
+        put(table, Action::CDown, Device::Button, SDL_CONTROLLER_BUTTON_DPAD_DOWN, 1);
+        put(table, Action::CLeft, Device::Button, SDL_CONTROLLER_BUTTON_DPAD_LEFT);
+        put(table, Action::CRight, Device::Button, SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
         put(table, Action::Menu, Device::Button, SDL_CONTROLLER_BUTTON_BACK);
-        put(table, Action::DUp, Device::Button, SDL_CONTROLLER_BUTTON_DPAD_UP);
-        put(table, Action::DDown, Device::Button, SDL_CONTROLLER_BUTTON_DPAD_DOWN);
-        put(table, Action::DLeft, Device::Button, SDL_CONTROLLER_BUTTON_DPAD_LEFT);
-        put(table, Action::DRight, Device::Button, SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
         put(table, Action::MoveUp, Device::AxisNegative, SDL_CONTROLLER_AXIS_LEFTY);
         put(table, Action::MoveDown, Device::AxisPositive, SDL_CONTROLLER_AXIS_LEFTY);
         put(table, Action::MoveLeft, Device::AxisNegative, SDL_CONTROLLER_AXIS_LEFTX);

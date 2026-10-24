@@ -104,7 +104,7 @@ Steam Deck features:
 - **XBLA button layout** as the Deck default (`src/frontend_input_preference.cpp`
   `defaults()`, `TOOIE_DECK_DEFAULTS`), checked against the XBLA manual
   table: A=A, X and B=N64 B, LT/RT=Z, LB/RB=R, Y=C-up, right stick X=C-left/
-  right (inverted at the owner's request), right stick up or down and RS click=C-down,
+  right (inverted at the owner's request), right stick up or down and RS click=C-down, D-pad=C-buttons (no N64 D-pad: Tooie reads none),
   LS click=L, View=menu. The camera is stepped C-buttons, not XBLA's analog
   camera. XBLA's Talon Trot chord: while two controller inputs bound to Z
   are held (LT + RT), `z_chord_down` adds C-left, but only once the previous
