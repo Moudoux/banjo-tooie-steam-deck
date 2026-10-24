@@ -182,7 +182,7 @@ Steam Deck features:
   and looks like the orbit: the same shaped stick, the game's frame delta,
   Invert camera X/Y (up looks up, the opposite of the orbit, where up raises
   the camera; the owner tried up-looks-down and preferred this),
-  turn 160 deg/s and, at the owner's request, look at the same 160 deg/s.
+  turn 200 deg/s and look 160 deg/s (the owner's tuning).
   The left stick's X strafes instead of turning. The Blaster (`bsfirstp`)
   uses neither `bafpctrl` nor `baeggaim`: `func_80804848_bsfirstp` feeds its
   inputs through `func_808045FC` (+0x164 turn from stick X, +0x180 look,

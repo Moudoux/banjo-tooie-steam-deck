@@ -250,8 +250,9 @@ namespace {
 // stays where the right stick left it. Reset when the Blaster is re-entered.
 float blaster_look_offset = 0.0f;
 std::chrono::steady_clock::time_point blaster_last_look{};
-// Turn and look at the same rate, as the user asked for the Blaster.
+// The owner's tuning: look at the orbit's turn rate, turn a quarter faster.
 constexpr float k_blaster_look_speed_degrees = k_yaw_speed_degrees;
+constexpr float k_blaster_turn_speed_degrees = 1.25f * k_yaw_speed_degrees;
 
 float register_float(gpr value) { return std::bit_cast<float>(static_cast<std::uint32_t>(value)); }
 gpr float_register(float value) { return static_cast<gpr>(std::bit_cast<std::int32_t>(value)); }
@@ -286,9 +287,9 @@ extern "C" void tooie_blaster_turn(std::uint8_t* rdram, recomp_context* ctx) {
     read_stick(horizontal, vertical);
     if (horizontal == 0.0f) return;
     // Facing yaw turns the same way as the orbit's camera yaw (the view is
-    // facing + 180), at the orbit's rate.
+    // facing + 180).
     const gpr delta = ctx->r29 + 0x28;
-    store_float(rdram, delta, load_float(rdram, delta) + horizontal * k_yaw_speed_degrees * game_delta(rdram));
+    store_float(rdram, delta, load_float(rdram, delta) + horizontal * k_blaster_turn_speed_degrees * game_delta(rdram));
 }
 
 extern "C" void tooie_blaster_look(std::uint8_t* rdram, recomp_context* ctx) {
