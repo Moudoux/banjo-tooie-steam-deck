@@ -118,6 +118,30 @@ Steam Deck features:
   set; the transition-busy check (`func_800A8264`) and the original exit to
   the frontend (`gcfrontend` entrypoint 10) still run.
 
+- **Start skips story cutscenes** (Controls menu,
+  `tooie_start_skips_cutscenes`, default on; `START_SKIP_TEXT`). The same
+  ticker runs the story cutscene chains in its map table at `D_808008C4`
+  (intro `0xA1`-`0xAC`, the Jingaling chain from `0x18E`, the Bottles chain
+  from `0x194`, the ending `0x191`/`0x196`, startup `0x18B`). The game
+  already skips to a chain's end on a fresh Z (`func_80016B30(0, 1)`, button
+  index 1 = `BUTTON_Z` in `include/buttons.h`). A raw hook before
+  `0x80800684` also accepts a fresh Start (index 0 of controller 0's table at
+  `0x800799E0`); `func_80800530_chintroticker` still looks the map up and
+  exits. Cutscenes played inside a level (glcut camera scenes started by
+  actors such as Jamjars or world doors) have no skip in the game and are
+  unchanged.
+
+- **Rumble** (Controls menu, `rumble_strength` 0-100, default 100). The
+  player's `osPfsInit` adapter (`tools/baseline/adapters.cpp`) still leaves
+  memory paks absent, but returns `PFS_ERR_DEVICE` for channel 0, which is
+  what `func_800184E8` takes as a Rumble Pak: it then calls `osMotorInit` and
+  marks the motor present (`0x8007B2D0` + channel x `0x84`). Start/stop
+  (`func_80017FC0` / `func_80018028`) reach librecomp's `__osMotorAccess`
+  and ultramodern's `set_rumble`, which the host's input callbacks
+  (`devices.cpp`) now route to the shared mapper's `set_rumble`. The mapper
+  applies it to the selected controller with `SDL_GameControllerRumble`
+  (refreshed every 500 ms) at the configured strength.
+
 - **Anti-aliasing** (Video menu, `baseline_msaa` / `baseline_supersampling`):
   MSAA 2x/4x/8x and supersampling 2x/4x, applied live by the graphics owner
   in `update_screen` (`tools/baseline/devices.cpp`). MSAA follows the retired
@@ -132,7 +156,7 @@ Steam Deck features:
   chosen scale (the retired frontend's mapping); it needs a fixed scale and
   is capped so the internal scale stays at or below 8x.
 
-- **Draw distance and Disable LOD** (Video menu, `tooie_draw_distance` 1-6,
+- **Draw distance and Disable LOD** (Video menu, `tooie_draw_distance` 1-12,
   `tooie_disable_lod`; `src/draw_distance.cpp`, raw hooks
   `GRAPHICS_HOOKS` in `tools/baseline/minimum_host_hooks.py`), after
   Lighthouse's `GraphicsPatches.cpp`. `func_800DE498` (model render) culls a
@@ -140,7 +164,7 @@ Steam Deck features:
   `0x8012C82C` (set per actor by `func_800DF428` from `func_80101970`, reset
   after every model by `func_800DE318`). A hook at `L_800DE68C`, reached once
   per model, multiplies it by the setting (+0.1 past whole multiples, as
-  Lighthouse). With LOD disabled, a hook before `0x800DE628` skips the
+  Lighthouse, which stops at 6x; this player goes to 12x). With LOD disabled, a hook before `0x800DE628` skips the
   small-and-far shrink (4000 units, size x 50), and the three LOD geo
   commands (type 8 in the geo tables listed at `0x80123198`:
   `func_800DD214`, `func_800DD2E8`, `func_800DD37C`, which draw their branch

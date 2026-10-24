@@ -33,7 +33,15 @@ ORBIT_CAMERA_TEXT=('{ extern void tooie_camera_orbit_apply(uint8_t*, recomp_cont
 # start of the intro. Treat it as set; the transition check and frontend exit
 # still run.
 INTRO_SKIP_TEXT='ctx->r2 = 1;'
+# Start skips story cutscenes: in the cutscene chains (intro, Jingaling,
+# Bottles, ending; the ticker's map table) the ticker skips to the chain's end
+# when func_80016B30(0, BUTTON_Z) reports a fresh press. Count a fresh Start
+# (BUTTON_START, index 0 of controller 0's table at 0x800799E0) as well; the
+# ticker's own table lookup and exit still decide what happens.
+START_SKIP_TEXT=('{ extern int tooie_cutscene_start_skip(void); '
+    'if (ctx->r2 != 1 && MEM_W(0x9E0, (gpr)(int32_t)0x80079000) == 1 && tooie_cutscene_start_skip()) ctx->r2 = 1; }')
 FRUSTUM_HOOKS=(('func_808005AC_chintroticker',0x80800644,INTRO_SKIP_TEXT),
+               ('func_808005AC_chintroticker',0x80800684,START_SKIP_TEXT),
                ('func_800A4878',0x800A4908,ANALOG_CAMERA_TEXT),
                ('func_80110588',0x8011061C,ORBIT_CAMERA_TEXT),
                ('func_800CA218',0x800CA218,_pad('r5')),

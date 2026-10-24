@@ -44,7 +44,7 @@ float adjust_actor_distance(float original_distance) noexcept {
 }
 
 void set_model_distance_scale(int multiplier) noexcept {
-    model_scale.store(multiplier < 1 ? 1 : multiplier > 6 ? 6 : multiplier, std::memory_order_release);
+    model_scale.store(multiplier < 1 ? 1 : multiplier > 12 ? 12 : multiplier, std::memory_order_release);
 }
 
 int model_distance_scale() noexcept {

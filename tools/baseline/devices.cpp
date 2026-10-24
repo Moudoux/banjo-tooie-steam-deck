@@ -903,7 +903,12 @@ void close_devices() {
 }
 ultramodern::renderer::callbacks_t renderer_callbacks() { return {create_renderer, nullptr}; }
 ultramodern::audio_callbacks_t audio_callbacks() { return {queue_samples, frames_remaining, set_frequency}; }
+#if TOOIE_BASELINE_HOST
+// Guest osMotorStart/osMotorStop reach the shared mapper's rumble on the selected controller.
+ultramodern::input::callbacks_t input_callbacks() { return {poll_input, keyboard_input, tooie::input::set_rumble, keyboard_device}; }
+#else
 ultramodern::input::callbacks_t input_callbacks() { return {poll_input, keyboard_input, nullptr, keyboard_device}; }
+#endif
 
 // Standard start owns admission and joining; this pumps the window and requests bounded quit.
 void vi_complete() {

@@ -2266,7 +2266,16 @@ extern "C" void osPfsInit_recomp(uint8_t* rdram, recomp_context* ctx) {
         uint32_t(ctx->r6) != pfs_absence_calls || uint32_t(ctx->r4) != 0x80079B78 || uint32_t(ctx->r5) != 0x8007B2EC + 0x84 * pfs_absence_calls)
         rejected_body("input-prefix ordered main no-pak request admission");
     osPfsInitPak_recomp(rdram, ctx);
-    std::fprintf(stderr, "baseline input-prefix no-pak channel=%u native_no_pak_policy=1\n", pfs_absence_calls++);
+#ifdef BASELINE_PLAYER
+    // Player: a Rumble Pak on controller 1. func_800184E8 calls osMotorInit
+    // for a channel only when osPfsInit returns PFS_ERR_ID_FATAL or
+    // PFS_ERR_DEVICE, as a real Rumble Pak does; the motor then reaches
+    // ultramodern's set_rumble. Memory-pak access stays absent.
+    if (pfs_absence_calls == 0) ctx->r2 = 11; // PFS_ERR_DEVICE
+#endif
+    std::fprintf(stderr, "baseline input-prefix no-pak channel=%u native_no_pak_policy=1 rumble=%d\n",
+        pfs_absence_calls, int(ctx->r2 == 11));
+    ++pfs_absence_calls;
     std::fflush(stderr);
 }
 #elif defined(BASELINE_IMPORT_osPfsInit_recomp)

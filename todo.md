@@ -44,9 +44,10 @@ Trot toggle, MSAA as an option.
 
 ## Quality of life
 
-- [ ] **Cutscene skipping.** Lighthouse has "Start skips intro / misc
-  cutscenes" and skips for the Jiggy dance and similar. Intro-scene skip code
-  exists in `src/cutscene_tools.cpp` but isn't used by the player.
+- [x] **Cutscene skipping.** Start now skips the story cutscene chains (the
+  game's own Z skip). In-level cutscenes have no skip in the game; skipping
+  those (and the Jiggy dance, as Lighthouse does) would need per-scene work.
+- [x] **Rumble.** Rumble Pak reported on controller 1; strength in Controls.
 - [ ] **Fast-forward.** F6 is listed as unavailable in this player
   (`docs/PLAYER_GUIDE.md`); the input side already exists
   (`set_fast_forward_held` in `src/frontend_input_preference.cpp`).
