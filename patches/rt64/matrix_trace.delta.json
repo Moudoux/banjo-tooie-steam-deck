@@ -4,7 +4,7 @@
   "delta_revision": 1,
   "upstream": {
     "dependency": "rt64",
-    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "commit": "d9817c68ffd7328cd0af383af124971489366e18",
     "path": "src/hle/rt64_workload_queue.cpp",
     "sha256": "6e53030e8899c42347b51e67879fcb9679ad487ac067c192612c432d85bca4a4",
     "lines": 1224

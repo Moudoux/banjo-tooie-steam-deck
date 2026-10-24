@@ -457,7 +457,7 @@ The project maintains these source changes against pinned upstream versions.
 
 **RT64**
 
-- RT64 is pinned at `6f1c2d99…`.
+- RT64 is pinned at `d9817c68…`.
 - `TOOIE_BASELINE_RT64_GENERIC_FIXES` applies five recipes from `patches/rt64/`: `owner_index_guard`, `transform_upload_guard`, `rotation_interpolation`, `pop_matrix_group_projection` and `projection_residual`. The last selects only projection-preservation operations 4/5: source combined-matrix preservation and mapped decomposition residuals, without product camera heuristics. CPU matrix/depth qualification does not establish visual acceptance.
 - The minimum host replaces RT64's SDL backend and Inspector sources from `minimum_host_*` recipes.
 

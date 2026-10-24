@@ -4,7 +4,7 @@
   "delta_revision": 1,
   "upstream": {
     "dependency": "rt64",
-    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "commit": "d9817c68ffd7328cd0af383af124971489366e18",
     "path": "src/hle/rt64_rigid_body.cpp",
     "sha256": "b04a8571c9b2f5882ce41c501c95b9b30486e7cb11dcd999c60d1f4552155ac0",
     "lines": 138

@@ -4,7 +4,7 @@
   "delta_revision": 1,
   "upstream": {
     "dependency": "rt64",
-    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "commit": "d9817c68ffd7328cd0af383af124971489366e18",
     "path": "src/common/rt64_math.cpp",
     "sha256": "d32abc9572001870b4144ffa49e832589858de0830dbb0d008761ad15a76364b",
     "lines": 492

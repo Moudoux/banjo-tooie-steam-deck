@@ -111,6 +111,17 @@ void video(const Snapshot& snapshot) {
     if(ImGui::SliderInt("Draw distance",&distance,1,12,distance>1?"%dx":"Original"))preference(Preference::DrawDistance,distance);
     bool lod=prefs.disable_lod!=0;
     if(ImGui::Checkbox("Disable LOD (always full-detail models)",&lod))preference(Preference::DisableLod,int(lod));
+    bool texture_lod=prefs.texture_lod!=0;
+    if(ImGui::Checkbox("Sharp distant textures (scale texture LOD)",&texture_lod))preference(Preference::TextureLod,int(texture_lod));
+    bool three_point=prefs.three_point_filtering!=0;
+    if(ImGui::Checkbox("N64 three-point texture filtering",&three_point))preference(Preference::ThreePointFiltering,int(three_point));
+    int upscale=prefs.upscale_2d;
+    if(ImGui::Combo("2D upscaling",&upscale,"Off (original)\0Scaled 2D only\0All 2D\0"))preference(Preference::Upscale2D,upscale);
+    int noise=prefs.dither_noise;
+    if(ImGui::SliderInt("Dither noise",&noise,0,100,noise?"%d%%":"Off"))preference(Preference::DitherNoise,noise);
+    int color=prefs.color_format;
+    if(ImGui::Combo("Color precision",&color,"Standard\0High (less banding)\0Automatic\0"))preference(Preference::ColorFormat,color);
+    if(color!=snapshot.latched_color_format)ImGui::TextDisabled("Color precision changes on the next launch.");
 #endif
     int rate=prefs.output_rate;
     if(ImGui::Combo("Output rate",&rate,"Default (Original)\0Original\0Display\0Manual\0"))preference(Preference::OutputRate,rate);

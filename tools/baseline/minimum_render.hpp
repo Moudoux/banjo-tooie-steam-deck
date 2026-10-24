@@ -15,6 +15,7 @@ bool update_resolution(RT64::UserConfiguration&,RT64::SharedQueueResources&,int 
 int effective_supersampling(int scale,int supersampling) noexcept;
 bool update_msaa(RT64::Application&,int samples); // Graphics owner.
 int max_msaa() noexcept; // Highest MSAA sample count the device supports; 0 if none.
+bool update_picture(RT64::Application&,Picture); // Graphics owner, before each display list.
 void latch_startup(bool pillarbox_capable);
 Status reconcile_aspect(RT64::SharedQueueResources&,uint32_t settings,uint32_t publication);
 Status vsync_status() noexcept;

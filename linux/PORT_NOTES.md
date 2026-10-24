@@ -56,6 +56,30 @@ docker run --rm -it -v "$(pwd)":/workspace tooie-toolchain:latest linux/build.sh
 - **Skipped on Linux:** raw-archive qualification (step 5) and packaging; both
   parse PE/MSVC maps. Gated by `if(... AND WIN32)` in `cmake/Baseline.cmake`.
 
+## RT64 pin
+
+RT64 is pinned at `d9817c68` (upstream `main`, 2026-10-23), up from
+upstream's `6f1c2d99`. It brings configurable present wait (Automatic turns it
+off for NVIDIA on Linux, where it capped output at about 2/3 of the target;
+on for AMD, so the Deck is unchanged), `gEXSetScissorAspect`, fill-rect
+coverage and draw-area fixes, and ImGui 1.93 WIP.
+- Every `patches/rt64/*.delta.json` recipe was moved to the new pin by
+  relocating its exact original spans; none of their replacement text
+  changed except the minimum host's SDL backend
+  (`minimum_host_imgui_impl_sdl2_custom_cpp`, revision 2), rewritten for the
+  new backend with the same external-mouse/display behaviour.
+- Pins that follow RT64 files: `tools/prepare_rt64_matching.py` `PIN`,
+  `dependencies.lock.json` (commit, imgui and implot submodules),
+  `cmake/Rt64DxcOverlay.cmake` (CMakeLists hash; the upstream change is
+  Apple-only), `tools/baseline/prepare_camera_runtime_observer.py`
+  (`rt64_rsp.cpp`; its hunks are unchanged), `docs/ARCHITECTURE.md` and
+  `patches/rt64/PROVENANCE.md`.
+- ImGui now creates and updates the font atlas inside `RenderDrawData`, and
+  its Vulkan backend submits to and waits on the shared `VkQueue` there, so
+  `minimum_render.cpp` draws the menu under that queue's mutex (RT64 calls
+  the draw hook while recording, before it takes the mutex to submit).
+  `ImGui_ImplVulkan_CreateFontsTexture` no longer exists.
+
 ## Source changes (all keep the Windows build unchanged)
 
 Linux enablement:
@@ -167,6 +191,28 @@ Steam Deck features:
   chosen scale (the retired frontend's mapping); it needs a fixed scale and
   is capped so the internal scale stays at or below 8x.
 
+- **Picture options** (Video menu): RT64 settings the player used to leave
+  at fixed values. Defaults keep the earlier output.
+  - Color precision (`baseline_color_format`: 0 Standard, 1 High, 2
+    Automatic, default Standard) sets `internalColorFormat` in
+    `configure_startup`, overriding `devices.cpp`'s Standard; RT64 picks its
+    target formats in `setup`, so it applies at the next launch. High cuts
+    banding in fog and gradients; Automatic is High on GPUs with over 512 MB
+    of device memory (the Deck qualifies). The MSAA levels offered are
+    re-derived for the chosen format.
+  - 2D upscaling (`baseline_upscale_2d`: Original, scaled only, all; default
+    scaled only), N64 three-point filtering (`baseline_three_point_filtering`,
+    default on) and texture LOD scaling (`baseline_texture_lod`, default on,
+    which the player already forced on) apply live: RT64's state reads them
+    from the application copies on the graphics thread as it builds each
+    workload, so `update_picture` (`minimum_presentation.cpp`) writes them
+    from `send_dl` and mirrors them into the shared configuration.
+  - Dither noise (`baseline_dither_noise`, 0-100%, default 100): RT64's
+    high-resolution dither noise strength. RT64 clears its extended state
+    after every workload, so `send_dl` sets it before each display list.
+  The live values travel to the graphics owner as one packed atomic
+  (`Picture` in `minimum_host.hpp`).
+
 - **Draw distance and Disable LOD** (Video menu, `tooie_draw_distance` 1-12,
   `tooie_disable_lod`; `src/draw_distance.cpp`, raw hooks
   `GRAPHICS_HOOKS` in `tools/baseline/minimum_host_hooks.py`), after
@@ -259,15 +305,34 @@ Steam Deck features:
   its pins are unchanged. Found via Lighthouse (HarbourMasters' Banjo-Kazooie
   port), which pads its frustum the same way.
 
-- **Menu maps at the original rate** (`tools/baseline/devices.cpp`,
-  `update_screen`): untagged menu models (startup logos, save-select picture
-  frames) jitter under RT64's automatic interpolation (`G_EX_ID_AUTO`). The
-  renderer reads the current map (u16 at `0x80132DC2`, returned by
-  `func_800EA05C`) each frame and presents maps `0x18B` (startup intro) and
-  `0x158` (game select) at Original while Display/Manual is selected; the
-  saved preference is untouched and gameplay keeps the chosen rate. Map
-  changes are logged as `baseline map=0x... menu_rate_original=...`. A real
-  fix would tag those draws with matrix groups in the guest.
+- **Startup intro at the original rate** (`tools/baseline/devices.cpp`,
+  `update_screen`): the intro's untagged logo cards jitter under RT64's
+  automatic interpolation (`G_EX_ID_AUTO`). The renderer reads the current
+  map (u16 at `0x80132DC2`, returned by `func_800EA05C`) each frame and
+  presents map `0x18B` at Original while Display/Manual is selected; the
+  saved preference is untouched. Map changes are logged as
+  `baseline map=0x... menu_rate_original=...`. Game select (`0x158`) used to
+  be forced too; it now has matrix groups (below) and keeps the chosen rate.
+
+- **Game select matrix groups** (`src/menu_interpolation.cpp`, raw hooks
+  `MENU_GROUP_HOOKS` in `minimum_host_hooks.py`). Its picture frames and
+  frame contents are actors with descriptor selectors `0x80C`-`0x813`
+  (`D_80132ED0[slot] + 0x14`; live slots in the bitmap at `0x80135450`),
+  drawn with no group, and several share a model, so RT64's automatic
+  matching paired them wrongly between frames. `func_8010A79C`, the actor
+  draw dispatcher, calls the template's draw at `0x8010A7E8` (actor in a0)
+  and returns to `0x8010A7F0`; hooks there wrap each draw on map `0x158` in
+  `gEXEnable` + `gEXMatrixGroupDecomposed` (id `0xD1000000 | selector << 8 |
+  slot`, outside the guest owners' ranges) and `gEXPopMatrixGroup`, written
+  at the display-list cursor (`*0x80127658`, `func_800A7180`) inside the
+  current pool (`D_8007BCD0[D_8007BEDA]`, `0x8FC0` bytes, in the heap's
+  expanded RDRAM above 8 MiB), at most 1 KiB per frame, skipped while
+  `D_8007BCE8[0]` redirects output. The hand (`0x862`) keeps its own owner.
+  Measured on the dev machine at 60 Hz output, 4 s of game select captured
+  from the window: frame-to-frame change max 2.59 -> 0.48, p95 0.92 -> 0.39,
+  with the spikes on interpolated frames gone. The same groups on the intro
+  measured no clear difference (its motion is mostly the camera), so the
+  intro keeps the Original override.
 
 - **Analog camera** (Deck default on, invert X on): the retired frontend's
   `src/camera_analog.cpp`, unchanged, linked into the player
@@ -380,6 +445,14 @@ Steam Deck features:
   runs after the Vulkan window flag fix, and the frustum padding removed the
   green edge pop-in while turning the camera; the menu-map rate override
   stopped the logo and picture-frame jitter with gameplay still at 90 Hz.
+- RT64 `d9817c68` on the dev machine (scripted input, `SDL_VIDEODRIVER=x11`
+  for window capture): boots, menu renders through the new ImGui font path,
+  intro, game select, a new game into Spiral Mountain, pause menu and
+  dialogue; the 16:10 HUD showed no clipped or misplaced element there, so
+  no scissor/viewport alignment commands were added. Picture options apply
+  (logged as `baseline picture config-applied`); clean shutdown.
+- Steam Deck, confirmed by the owner after the RT64 update: the build runs,
+  game select, the picture options and the settings menu work.
 - Not verified: real gamepad input with the XBLA layout, battery and
   90 Hz pacing, extended gameplay.
 

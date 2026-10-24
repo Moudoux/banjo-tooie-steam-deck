@@ -12,7 +12,7 @@ import sys
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-PIN = "6f1c2d99a4ea571c139f449c326fd176ba8f3496"
+PIN = "d9817c68ffd7328cd0af383af124971489366e18"
 
 
 def sha256(data: bytes) -> str:

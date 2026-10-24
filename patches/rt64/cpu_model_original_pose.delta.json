@@ -4,15 +4,15 @@
   "delta_revision": 2,
   "upstream": {
     "dependency": "rt64",
-    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "commit": "d9817c68ffd7328cd0af383af124971489366e18",
     "path": "src/hle/rt64_rsp.cpp",
-    "sha256": "dc2c8b8d4c4a273e321a80d508c55064280b940472082eaeffc73409ce814c0e",
-    "lines": 1312
+    "sha256": "7dfdf40254d44d92c247d9c876bb8ca55995927ad534981bd48868bb44f1f695",
+    "lines": 1314
   },
   "output": {
     "filename": "rt64_rsp.cpp",
-    "sha256": "155e2b3170d97e71cc2a5e05c511339e73a63d83c5ccc98049abbf2d1182fa4e",
-    "lines": 1324
+    "sha256": "5405fa5b280bb753c66a4b320f1d169f21004c8beef30998940a9a4552010e0c",
+    "lines": 1326
   },
   "operations": [
     {

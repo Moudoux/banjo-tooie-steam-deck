@@ -26,7 +26,7 @@ endif()
 
 set(_rt64_cmake_input "${TOOIE_RT64_ROOT}/CMakeLists.txt")
 file(SHA256 "${_rt64_cmake_input}" _rt64_cmake_hash)
-if(NOT _rt64_cmake_hash STREQUAL "4d6cb49be103302c019405794995aac6b526b759f257f4786a7a2a00d4de3fa2")
+if(NOT _rt64_cmake_hash STREQUAL "90f16596f19314da5a0b2654f8be937ff948e1a61e3c205b7660ba365e87b29e")
     message(FATAL_ERROR "Pinned RT64 CMakeLists.txt changed; review DXC overlay")
 endif()
 file(READ "${_rt64_cmake_input}" _rt64_cmake)

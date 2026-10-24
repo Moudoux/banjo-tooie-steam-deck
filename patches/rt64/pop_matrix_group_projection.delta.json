@@ -4,15 +4,15 @@
   "delta_revision": 1,
   "upstream": {
     "dependency": "rt64",
-    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "commit": "d9817c68ffd7328cd0af383af124971489366e18",
     "path": "src/gbi/rt64_gbi_extended.cpp",
-    "sha256": "54eeb28949d180270c6abd9fa0c28531a8ab3098c0bd824c99c7849225e74792",
-    "lines": 445
+    "sha256": "9ab0c1cd8765da42c5eaa642a18eed603ca8eabf1e95caca7359afac019cb6ee",
+    "lines": 451
   },
   "output": {
     "filename": "rt64_gbi_extended.cpp",
-    "sha256": "7f8d1c491b4c606e0c3eb651ab01112a6cdde434844f51948d9f5431805d2e60",
-    "lines": 445
+    "sha256": "4a4bf6e2d87b6a02b3d1d6b9d50588f85d1ca03f91d4c995cf68083f92a18744",
+    "lines": 451
   },
   "operations": [
     {

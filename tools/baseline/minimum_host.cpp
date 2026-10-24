@@ -46,7 +46,7 @@ std::atomic<bool> menu{false}, ready{false}, started{false};
 std::atomic<bool> sticky_close{false}, sticky_quit{false}, overflow{false};
 std::atomic<int> vsync{-1}, resolution{1}, msaa{0}, supersampling{1};
 std::atomic<bool> quiet_talon_trot{false}, start_skips_cutscenes{false};
-std::atomic<uint32_t> output_rate{pack_output_rate({})};
+std::atomic<uint32_t> output_rate{pack_output_rate({})}, picture{pack_picture({})};
 Preferences latched, selected;
 std::string notice;
 std::mutex request_mutex, render_mutex;
@@ -126,6 +126,10 @@ void close_menu() {
 }
 int bounded(int value, int lo, int hi, int fallback) {
     return value < lo || value > hi ? fallback : value;
+}
+void publish_picture() noexcept {
+    picture.store(pack_picture({selected.upscale_2d, selected.three_point_filtering, selected.texture_lod,
+        selected.dither_noise}), std::memory_order_release);
 }
 #if BASELINE_PLAYER
 void set_fullscreen(bool enabled) {
@@ -225,6 +229,25 @@ void update_preference(Preference key, int value) {
         quiet_talon_trot.store(value != 0, std::memory_order_release);
 #endif
         break;
+    case Preference::ColorFormat:
+        if (value < 0 || value > 2) return;
+        selected.color_format = value; settings::set_int("baseline_color_format", value); break;
+    case Preference::Upscale2D:
+        if (value < 0 || value > 2) return;
+        selected.upscale_2d = value; settings::set_int("baseline_upscale_2d", value);
+        publish_picture(); break;
+    case Preference::ThreePointFiltering:
+        if (value < 0 || value > 1) return;
+        selected.three_point_filtering = value; settings::set_bool("baseline_three_point_filtering", value != 0);
+        publish_picture(); break;
+    case Preference::TextureLod:
+        if (value < 0 || value > 1) return;
+        selected.texture_lod = value; settings::set_bool("baseline_texture_lod", value != 0);
+        publish_picture(); break;
+    case Preference::DitherNoise:
+        if (value < 0 || value > 100) return;
+        selected.dither_noise = value; settings::set_int("baseline_dither_noise", value);
+        publish_picture(); break;
     case Preference::VSync:
         if (value < 0 || value > 1) return;
         selected.vsync = value; settings::set_int("baseline_vsync", value);
@@ -335,6 +358,12 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile) {
     selected.rumble_strength = int(std::clamp(settings::get_number("rumble_strength", 100.0), 0.0, 100.0) + 0.5);
     selected.start_skips_cutscenes = settings::get_bool("tooie_start_skips_cutscenes", true) ? 1 : 0;
     start_skips_cutscenes.store(selected.start_skips_cutscenes != 0, std::memory_order_release);
+    selected.color_format = bounded(settings::get_int("baseline_color_format", 0), 0, 2, 0);
+    selected.upscale_2d = bounded(settings::get_int("baseline_upscale_2d", 1), 0, 2, 1);
+    selected.three_point_filtering = settings::get_bool("baseline_three_point_filtering", true) ? 1 : 0;
+    selected.texture_lod = settings::get_bool("baseline_texture_lod", true) ? 1 : 0;
+    selected.dither_noise = bounded(settings::get_int("baseline_dither_noise", 100), 0, 100, 100);
+    publish_picture();
     latched = selected; vsync.store(selected.vsync, std::memory_order_release);
     resolution.store(selected.resolution, std::memory_order_release);
     quiet_talon_trot.store(selected.quiet_talon_trot != 0, std::memory_order_release);
@@ -358,6 +387,7 @@ void shutdown() noexcept {
     quiet_talon_trot.store(false, std::memory_order_release);
     start_skips_cutscenes.store(false, std::memory_order_release);
     output_rate.store(pack_output_rate({}), std::memory_order_release);
+    picture.store(pack_picture({}), std::memory_order_release);
 #if BASELINE_PLAYER
     marker_seq = 0; marker_conflict_reported = false;
     marker_toast.clear(); marker_until = {};
@@ -418,6 +448,7 @@ InputPublication tick(bool gameplay) {
     snapshot->capture = tooie::input::capture_status(); snapshot->controllers = tooie::input::controllers();
     snapshot->profiles = tooie::input::controller_profiles(); snapshot->active_profile = tooie::input::active_controller_profile();
     snapshot->preferences = selected; snapshot->notice = notice;
+    snapshot->latched_color_format = latched.color_format;
 #if BASELINE_PLAYER
     if (std::chrono::steady_clock::now() < marker_until) snapshot->toast = marker_toast;
 #endif
@@ -462,6 +493,7 @@ int requested_supersampling() noexcept { return supersampling.load(std::memory_o
 bool requested_quiet_talon_trot() noexcept { return quiet_talon_trot.load(std::memory_order_acquire); }
 bool requested_start_skips_cutscenes() noexcept { return start_skips_cutscenes.load(std::memory_order_acquire); }
 OutputRate requested_output_rate() noexcept { return unpack_output_rate(output_rate.load(std::memory_order_acquire)); }
+Picture requested_picture() noexcept { return unpack_picture(picture.load(std::memory_order_acquire)); }
 }
 // Raw hook in the intro ticker (START_SKIP_TEXT in minimum_host_hooks.py).
 extern "C" int tooie_cutscene_start_skip(void) noexcept {

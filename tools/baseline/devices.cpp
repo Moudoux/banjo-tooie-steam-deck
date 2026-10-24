@@ -400,6 +400,13 @@ public:
         if (!valid() || !task) fail("Display list on invalid renderer");
 #ifdef BASELINE_PLAYER
         apply_texture_packs(*app->textureCache);
+        const auto picture = host::requested_picture();
+        try {
+            if (host::render::update_picture(*app, picture)) {
+                std::fprintf(stderr, "baseline picture config-applied upscale_2d=%d three_point=%d texture_lod=%d dither_noise=%d\n",
+                    picture.upscale_2d, picture.three_point_filtering, picture.texture_lod, picture.dither_noise);
+            }
+        } catch (const std::exception& error) { fail(error.what()); }
 #endif
         const bool armed = first_dl_armed.load(std::memory_order_acquire);
         if (armed && task_ordinal < 3) ++task_ordinal;
@@ -454,12 +461,12 @@ public:
             std::fprintf(stderr, "baseline msaa config-applied requested=%d supported_max=%d\n", msaa, host::render::max_msaa());
         }
         const auto requested = host::requested_output_rate();
-        // Untagged menu models (intro logos, save-select frames) mismatch under RT64's
-        // automatic interpolation and jitter, so menu maps present at the original rate.
-        // Current map: the u16 that func_800EA05C returns from 0x80132DC2.
+        // The startup intro's untagged logo cards mismatch under RT64's automatic
+        // interpolation and jitter, so the intro presents at the original rate. Game
+        // select's actors have matrix groups (src/menu_interpolation.cpp) and follow
+        // the chosen rate. Current map: the u16 that func_800EA05C returns from 0x80132DC2.
         const uint32_t map = *reinterpret_cast<const uint16_t*>(guest_rdram + ((0x80132DC2u ^ 2u) - 0x80000000u));
-        const bool menu_map = map == 0x158 || map == 0x18B;
-        const bool force_original = menu_map && requested.option >= 2;
+        const bool force_original = map == 0x18B && requested.option >= 2;
         if (map != observed_map || force_original != menu_rate_forced) {
             std::fprintf(stderr, "baseline map=0x%03X menu_rate_original=%d\n", map, int(force_original));
             observed_map = map; menu_rate_forced = force_original;

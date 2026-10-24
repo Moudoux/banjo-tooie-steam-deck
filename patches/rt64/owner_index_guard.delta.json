@@ -4,7 +4,7 @@
   "delta_revision": 2,
   "upstream": {
     "dependency": "rt64",
-    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "commit": "d9817c68ffd7328cd0af383af124971489366e18",
     "path": "src/hle/rt64_game_frame.cpp",
     "sha256": "a9527bfcdb06b876a45f06a181ca76b6cf7869d01e2c06a0c81ed9f96f1dd87a",
     "lines": 1042

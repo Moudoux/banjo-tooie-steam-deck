@@ -63,6 +63,11 @@ void apply_gamepad(const Snapshot& snapshot) {
     analog(ImGuiKey_GamepadLStickLeft,-x);analog(ImGuiKey_GamepadLStickRight,x);
     analog(ImGuiKey_GamepadLStickUp,-y);analog(ImGuiKey_GamepadLStickDown,y);
 }
+std::mutex* queue_mutex(const Owners& owners) {
+    const auto* swap=static_cast<const plume::VulkanSwapChain*>(owners.swap_chain);
+    if(!swap->commandQueue || !swap->commandQueue->queue)return nullptr;
+    return swap->commandQueue->queue->mutex.get();
+}
 bool initialize_once(const Owners& owners) {
     if(failed)return false;
     if(inspector)return true;
@@ -72,30 +77,17 @@ bool initialize_once(const Owners& owners) {
         io.ConfigFlags|=ImGuiConfigFlags_NavEnableKeyboard|ImGuiConfigFlags_NavEnableGamepad|ImGuiConfigFlags_NoMouseCursorChange;
         if(!io.Fonts->AddFontDefault()){fail_once("font creation failed");return false;}
         if(owners.api==RT64::UserConfiguration::GraphicsAPI::Vulkan) {
-            const auto* swap=static_cast<const plume::VulkanSwapChain*>(owners.swap_chain);
-            if(!swap->commandQueue || !swap->commandQueue->queue || !swap->commandQueue->queue->mutex) {
-                fail_once("font queue unavailable");return false;
-            }
-            // Lock the shared physical VkQueue, not only the logical worker queue.
-            std::lock_guard lock(*swap->commandQueue->queue->mutex);
-            if(!ImGui_ImplVulkan_CreateFontsTexture() || !io.Fonts->TexID) {
-                fail_once("font texture unavailable");return false;
-            }
+            if(!queue_mutex(owners)){fail_once("font queue unavailable");return false;}
         }
         else {
-#ifdef _WIN32
-            // Keep the selected D3D12 backend's own device/font creation path.
-            ImGui_ImplDX12_NewFrame();
-            if(!io.Fonts->TexID){fail_once("font texture unavailable");return false;}
-#else
+#ifndef _WIN32
             fail_once("graphics API unavailable");return false;
 #endif
         }
-        std::fputs("baseline menu initialized on public Draw; font available\n",stderr);
+        // The backends create and update the font atlas texture inside RenderDrawData.
+        std::fputs("baseline menu initialized on public Draw; font upload deferred to draw\n",stderr);
         return true;
     } catch(const std::exception& error) {fail_once(error.what());return false;}
-    // Existing backend Vulkan error reporting remains authoritative; TexID is
-    // not a proof of arbitrary allocation/device-loss recovery or GPU completion.
 }
 void draw(plume::RenderCommandList* list,plume::RenderFramebuffer* framebuffer) {
     const auto owners=std::atomic_load_explicit(&published,std::memory_order_acquire);
@@ -130,7 +122,12 @@ void draw(plume::RenderCommandList* list,plume::RenderFramebuffer* framebuffer) 
     inspector->newFrame(owners->worker);
     draw_menu(snapshot);
     inspector->endFrame();
-    inspector->draw(list);
+    if(owners->api==RT64::UserConfiguration::GraphicsAPI::Vulkan) {
+        // Font atlas uploads submit to and wait on the shared physical VkQueue.
+        std::lock_guard lock(*queue_mutex(*owners));
+        inspector->draw(list);
+    }
+    else inspector->draw(list);
     publish_ready(true);
 }
 void deinit() {

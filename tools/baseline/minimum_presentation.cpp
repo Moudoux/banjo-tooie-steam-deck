@@ -3,6 +3,7 @@
 #include "widescreen.hpp"
 #include "hle/rt64_application.h"
 #include "hle/rt64_shared_queue_resources.h"
+#include "hle/rt64_state.h"
 #include <algorithm>
 #include <atomic>
 #include <mutex>
@@ -11,6 +12,7 @@
 namespace baseline::host::render {
 namespace {
 std::atomic<uint32_t> settings{0},publication{0};
+int applied_dither_noise=100; // Graphics owner; RT64's own default strength.
 bool rt64_rate(RT64::UserConfiguration& user,const ultramodern::renderer::GraphicsConfig& config) {
     if(config.rr_manual_value<20 || config.rr_manual_value>360)return false;
     using Rate=RT64::UserConfiguration::RefreshRate;
@@ -86,6 +88,32 @@ bool update_msaa(RT64::Application& app,int samples) {
     app.updateMultisampling();
     return true;
 }
+bool update_picture(RT64::Application& app,Picture picture) {
+    using Upscale=RT64::UserConfiguration::Upscale2D;
+    if(picture.upscale_2d<0 || picture.upscale_2d>2 || picture.dither_noise<0 || picture.dither_noise>100)
+        throw std::runtime_error("Invalid picture configuration");
+    const Upscale upscale=Upscale(picture.upscale_2d);
+    const bool three_point=picture.three_point_filtering!=0,lod=picture.texture_lod!=0;
+    // RT64's state reads these from the application copies on this (graphics owner) thread
+    // as it builds each workload, so they apply from the next display list.
+    // RT64 clears its extended state after every workload, so the noise is set before
+    // each display list; only a new value is reported.
+    app.state->setDitherNoiseStrength(float(picture.dither_noise)/100.0f);
+    const bool noise_changed=picture.dither_noise!=applied_dither_noise;
+    applied_dither_noise=picture.dither_noise;
+    if(app.userConfig.upscale2D==upscale && app.userConfig.threePointFiltering==three_point &&
+       app.enhancementConfig.textureLOD.scale==lod)return noise_changed;
+    {
+        auto& shared=*app.sharedQueueResources;
+        std::lock_guard lock(shared.configurationMutex);
+        shared.userConfig.upscale2D=app.userConfig.upscale2D=upscale;
+        shared.userConfig.threePointFiltering=app.userConfig.threePointFiltering=three_point;
+        shared.userConfigChanged=true;shared.newConfigValidated=false;
+    }
+    app.enhancementConfig.textureLOD.scale=lod;
+    app.updateEnhancementConfig();
+    return true;
+}
 void latch_startup(bool pillarbox_capable) {
     if(settings.load(std::memory_order_acquire))throw std::runtime_error("Baseline supports one game per process");
     const auto& prefs=latched_preferences();
@@ -137,7 +165,11 @@ void configure_startup(RT64::Application& app) {
 #if BASELINE_PLAYER
     // Player presentation stays independent of the engineering RenderMode and output rate.
     app.enhancementConfig.presentation.mode=RT64::EnhancementConfiguration::Presentation::Mode::PresentEarly;
-    app.enhancementConfig.textureLOD.scale=true; // Mip choice follows rendered resolution.
+    app.enhancementConfig.textureLOD.scale=prefs.texture_lod!=0; // Mip choice follows rendered resolution.
+    // RT64 picks its render target formats once, during setup.
+    app.userConfig.internalColorFormat=RT64::UserConfiguration::InternalColorFormat(prefs.color_format);
+    app.userConfig.upscale2D=RT64::UserConfiguration::Upscale2D(prefs.upscale_2d);
+    app.userConfig.threePointFiltering=prefs.three_point_filtering!=0;
     ultramodern::renderer::GraphicsConfig config{};
     preference_rate(config,prefs.output_rate,prefs.manual_hz);
     if(!rt64_rate(app.userConfig,config))throw std::runtime_error("Invalid startup output rate");

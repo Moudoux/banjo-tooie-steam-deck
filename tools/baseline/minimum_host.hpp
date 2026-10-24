@@ -26,14 +26,28 @@ struct Preferences {
     int mouse_aim = 1, mouse_sensitivity = 6, mouse_invert_y = 1; // Hundredths of a degree per count.
     int rumble_strength = 100; // Percent; 0 turns rumble off.
     int start_skips_cutscenes = 1;
+    // RT64 picture options. Color format (0 Standard, 1 High, 2 Automatic) applies at
+    // the next launch; the others apply live. Defaults keep the earlier output.
+    int color_format = 0;
+    int upscale_2d = 1; // 0 Original, 1 scaled rects only, 2 all.
+    int three_point_filtering = 1, texture_lod = 1;
+    int dither_noise = 100; // Percent of RT64's high-resolution dither noise.
 };
-enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, AnalogCamera, CameraInvertX, CameraInvertY, CameraDistance, Msaa, Supersampling, DrawDistance, DisableLod, MouseAim, MouseSensitivity, MouseInvertY, RumbleStrength, StartSkipsCutscenes };
+enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, AnalogCamera, CameraInvertX, CameraInvertY, CameraDistance, Msaa, Supersampling, DrawDistance, DisableLod, MouseAim, MouseSensitivity, MouseInvertY, RumbleStrength, StartSkipsCutscenes, ColorFormat, Upscale2D, ThreePointFiltering, TextureLod, DitherNoise };
 struct OutputRate { int option = 0, manual_hz = 60; };
 inline uint32_t pack_output_rate(OutputRate rate) noexcept {
     return (uint32_t(rate.option) << 16) | uint32_t(rate.manual_hz);
 }
 inline OutputRate unpack_output_rate(uint32_t rate) noexcept {
     return {int(rate >> 16), int(rate & 0xffffu)};
+}
+struct Picture { int upscale_2d = 1, three_point_filtering = 1, texture_lod = 1, dither_noise = 100; };
+inline uint32_t pack_picture(Picture picture) noexcept {
+    return uint32_t(picture.upscale_2d) | (uint32_t(picture.three_point_filtering) << 2) |
+        (uint32_t(picture.texture_lod) << 3) | (uint32_t(picture.dither_noise) << 8);
+}
+inline Picture unpack_picture(uint32_t picture) noexcept {
+    return {int(picture & 3u), int((picture >> 2) & 1u), int((picture >> 3) & 1u), int(picture >> 8)};
 }
 enum class RequestKind { Controller, Profile, ResetBindings, Capture, CancelCapture, Preference };
 struct Request {
@@ -60,6 +74,7 @@ struct Snapshot {
     std::string active_profile, notice, toast;
     std::array<BindingRow, 19> bindings;
     Preferences preferences;
+    int latched_color_format = 0; // The renderer's color format until the next launch.
 };
 struct RenderInput {
     std::shared_ptr<const Snapshot> snapshot;
@@ -92,4 +107,5 @@ bool requested_quiet_talon_trot() noexcept; // Guest sound-call boundary.
 bool requested_start_skips_cutscenes() noexcept; // Intro ticker raw hook.
 // Graphics owner only: consume the SDL owner's atomic requested pair.
 OutputRate requested_output_rate() noexcept;
+Picture requested_picture() noexcept; // Graphics owner.
 }
