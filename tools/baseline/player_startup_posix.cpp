@@ -46,11 +46,12 @@ struct Ascii {
 constexpr Ascii marker_file{marker_name};
 constexpr Ascii save_file{save_name};
 constexpr Ascii record_file{import_record_name};
-constexpr char product_folder[] = "BanjoTooieScurvyDogPort";
+constexpr char product_folder[] = "BanjoTooieSteamDeckPort";
+constexpr char renamed_folder[] = "BanjoTooieScurvyDogPort"; // Before the Steam Deck Port name; moved whole.
 constexpr char previous_folder[] = "BanjoTooieEncore"; // Alpha 4 default name; only ever read.
 // The earlier frontend's Linux profile, $HOME/.config/BanjoTooieRecompiled (src/profile_location.cpp).
 constexpr char legacy_folder[] = "BanjoTooieRecompiled";
-constexpr char title[] = "Banjo-Tooie: Scurvy Dog Port";
+constexpr char title[] = "Banjo-Tooie: Steam Deck Port";
 // The runtime's stored ROM, <profile>/<game_id>.z64; the largest file a migration copies.
 constexpr char rom_name[] = "bt.n64.us.1.0.z64";
 constexpr off_t copy_limit = off_t(64) << 20;
@@ -62,7 +63,7 @@ struct NoAnswer {}; // The consent dialog closed or could not open; nothing is r
 [[noreturn]] void fail(const std::string& text) { throw Failure(text); }
 std::string os_error(int error) { return " (" + std::error_code(error, std::generic_category()).message() + ")"; }
 std::string in_use(const fs::path& root) {
-    return "Another copy of Banjo-Tooie: Scurvy Dog Port is already using " + utf8(root) +
+    return "Another copy of Banjo-Tooie: Steam Deck Port is already using " + utf8(root) +
         ". Close it, then start the game again.";
 }
 bool on_main_thread() { return ::syscall(SYS_gettid) == ::getpid(); }
@@ -397,7 +398,7 @@ int message_box(const std::string& text, Uint32 kind, std::initializer_list<Butt
 
 bool ask_import(const fs::path& source) {
     const auto text = "Saved progress from an earlier Banjo-Tooie: Recompiled alpha was found:\n" + utf8(source) +
-        "\n\nCopy it into your new Banjo-Tooie: Scurvy Dog Port profile?\n\nThe original file is left unchanged. "
+        "\n\nCopy it into your new Banjo-Tooie: Steam Deck Port profile?\n\nThe original file is left unchanged. "
         "Settings and practice states are not copied. You will not be asked again.";
     const int answer = message_box(text, SDL_MESSAGEBOX_INFORMATION,
         {{1, "Yes", SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT}, {0, "No", 0}});
@@ -419,6 +420,7 @@ fs::path default_profile_root() {
     ensure_private_directories(data);
     return data / product_folder;
 }
+fs::path renamed_profile_root() { return data_home() / renamed_folder; }
 fs::path previous_profile_root() { return data_home() / previous_folder; }
 fs::path legacy_save_path() { return home() / ".config" / legacy_folder / "saves" / save_file.c_str(); }
 
@@ -482,7 +484,7 @@ Profile Profile::acquire(const fs::path& requested) {
         fail("The folder " + utf8(root) + " has a profile marker this version does not recognize. Nothing was changed.");
     case Marker::Absent: {
         if (!directory_empty(folder.value, root))
-            fail("The folder " + utf8(root) + " already contains files that are not a Banjo-Tooie: Scurvy Dog Port profile. "
+            fail("The folder " + utf8(root) + " already contains files that are not a Banjo-Tooie: Steam Deck Port profile. "
                 "Move them elsewhere or choose another folder. Nothing was changed.");
         bool published = false;
         try { published = publish_new(folder.value, marker_file.c_str(), marker_bytes); }
@@ -502,9 +504,67 @@ Profile Profile::acquire(const fs::path& requested) {
     auto storage = fs::path("/proc/self/fd") / std::to_string(folder.value);
     struct stat anchored{};
     if (::stat(storage.c_str(), &anchored) || !same_inode(anchored, held_stat))
-        fail("This system does not provide /proc/self/fd, which Banjo-Tooie: Scurvy Dog Port needs to keep using "
+        fail("This system does not provide /proc/self/fd, which Banjo-Tooie: Steam Deck Port needs to keep using "
             "the profile folder it opened. Nothing was started.");
     return Profile(root, folder.release(), std::move(storage));
+}
+
+Migration rename_profile(const fs::path& previous, const fs::path& destination) {
+    const auto [old_parent_path, old_name] = place(previous);
+    const auto [new_parent_path, new_name] = place(destination);
+    const auto old_root = old_parent_path / old_name, new_root = new_parent_path / new_name;
+    const auto kept = "Nothing was moved, and your progress in " + utf8(old_root) + " is unchanged.";
+    Fd new_parent(::open(new_parent_path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+    if (!new_parent) {
+        const int error = errno;
+        fail("The folder " + utf8(new_parent_path) + " could not be opened" + os_error(error) + ". " + kept);
+    }
+    // Any existing destination wins; nothing is merged into it.
+    struct stat existing{};
+    if (::fstatat(new_parent.value, new_name.c_str(), &existing, AT_SYMLINK_NOFOLLOW) == 0)
+        return {Migration::DestinationExists, "player profile rename: none; " + utf8(new_root) + " exists"};
+    if (errno != ENOENT) {
+        const int error = errno;
+        fail("The profile folder " + utf8(new_root) + " could not be inspected" + os_error(error) + ". " + kept);
+    }
+    Fd old_parent(::open(old_parent_path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+    if (!old_parent) {
+        const int error = errno;
+        if (error == ENOENT || error == ENOTDIR)
+            return {Migration::SourceMissing, "player profile rename: none; no " + utf8(old_root)};
+        fail("The earlier profile " + utf8(old_root) + " could not be opened" + os_error(error) + ". " + kept);
+    }
+    const Migration unrecognized{Migration::SourceUnrecognized,
+        "player profile rename: none; " + utf8(old_root) + " is not a recognized profile and was left unchanged"};
+    Fd old_folder(::openat(old_parent.value, old_name.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+    if (!old_folder) {
+        const int error = errno;
+        if (error == ENOENT) return {Migration::SourceMissing, "player profile rename: none; no " + utf8(old_root)};
+        if (error == ELOOP || error == ENOTDIR) return unrecognized;
+        fail("The earlier profile " + utf8(old_root) + " could not be opened" + os_error(error) + ". " + kept);
+    }
+    // Exclusive and held across the rename, so a copy still running from the old folder refuses the move.
+    if (::flock(old_folder.value, LOCK_EX | LOCK_NB)) {
+        const int error = errno;
+        if (error == EWOULDBLOCK) fail(in_use(old_root) + " " + kept);
+        fail("The earlier profile " + utf8(old_root) + " could not be locked" + os_error(error) + ". " + kept);
+    }
+    if (read_marker(old_folder.value, old_root) != Marker::Matches) return unrecognized;
+    struct stat held_stat{}, named{};
+    if (::fstat(old_folder.value, &held_stat) ||
+        ::fstatat(old_parent.value, old_name.c_str(), &named, AT_SYMLINK_NOFOLLOW) || !same_inode(held_stat, named))
+        fail("The earlier profile " + utf8(old_root) + " changed while it was being opened. " + kept);
+    // No replace: a destination that appeared meanwhile wins.
+    if (::syscall(SYS_renameat2, old_parent.value, old_name.c_str(), new_parent.value, new_name.c_str(), RENAME_NOREPLACE)) {
+        const int error = errno;
+        if (error == EEXIST || error == ENOTEMPTY)
+            return {Migration::DestinationExists, "player profile rename: none; " + utf8(new_root) + " appeared meanwhile"};
+        fail("Your profile " + utf8(old_root) + " could not be renamed to " + utf8(new_root) + os_error(error) + ". " + kept);
+    }
+    if (::fsync(new_parent.value) || ::fsync(old_parent.value))
+        fail("Your profile was moved to " + utf8(new_root) + ", but the move could not be flushed to disk. "
+            "Start the game again; your progress is in " + utf8(new_root) + ".");
+    return {Migration::Migrated, "player profile rename: moved " + utf8(old_root) + " to " + utf8(new_root)};
 }
 
 Migration migrate_profile(const fs::path& previous, const fs::path& destination) {
@@ -642,7 +702,7 @@ ImportResult import_save(const fs::path& source, const fs::path& root) {
     if (::fstat(input.value, &after) || !unchanged(before, after) ||
         ::fstatat(parent.value, source_name.c_str(), &named, AT_SYMLINK_NOFOLLOW) || !unchanged(before, named))
         fail("The earlier save " + utf8(source) + " changed while it was being copied. Close Banjo-Tooie: Recompiled, "
-            "then start Scurvy Dog Port again. Nothing was copied.");
+            "then start Steam Deck Port again. Nothing was copied.");
     bool created = false;
     if (!saves) {
         if (::mkdirat(profile.value, "saves", 0700) == 0) created = true;

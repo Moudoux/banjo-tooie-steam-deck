@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Linux build of the Scurvy Dog Port player, run inside the tooie-toolchain image:
+# Linux build of the Banjo-Tooie: Steam Deck Port player, run inside the tooie-toolchain image:
 #
 #   docker build -t tooie-toolchain:latest .
 #   docker run --rm -it -v "$(pwd)":/workspace tooie-toolchain:latest linux/build.sh
@@ -100,4 +100,4 @@ echo "== 6. Build the player"
 cmake --build "$BUILD" --target TooieBaseline -j "$JOBS" ${BUILD_ARGS:-}
 # Fallback controller mappings, read from beside the executable.
 cp recompcontrollerdb.txt "$BUILD/baseline/player-bin/"
-echo "Built $BUILD/baseline/player-bin/BanjoTooieScurvyDogPort (TARGET=$TARGET)"
+echo "Built $BUILD/baseline/player-bin/BanjoTooieSteamDeckPort (TARGET=$TARGET)"

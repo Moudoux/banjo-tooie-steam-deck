@@ -365,7 +365,7 @@ if(TOOIE_BASELINE_RENDERER_CANDIDATE_OUTPUT)
 else()
     set(_baseline_executable_dir "${CMAKE_BINARY_DIR}/baseline/bin")
 endif()
-option(TOOIE_BASELINE_PLAYER "Banjo-Tooie: Scurvy Dog Port player startup instead of the engineering command line" OFF)
+option(TOOIE_BASELINE_PLAYER "Banjo-Tooie: Steam Deck Port player startup instead of the engineering command line" OFF)
 if(TOOIE_BASELINE_PLAYER)
     # A player build never replaces an engineering executable in the same tree.
     set(_baseline_executable_dir "${CMAKE_BINARY_DIR}/baseline/player-bin")
@@ -544,7 +544,7 @@ if(TOOIE_BASELINE_PLAYER)
     file(CONFIGURE OUTPUT "${_player_generated}/player_version.hpp" CONTENT [[
 #pragma once
 namespace baseline::player::build {
-inline constexpr char product[] = "Banjo-Tooie: Scurvy Dog Port";
+inline constexpr char product[] = "Banjo-Tooie: Steam Deck Port";
 inline constexpr char version[] = "@TOOIE_PLAYER_VERSION@";
 }
 ]] @ONLY)
@@ -563,7 +563,8 @@ inline constexpr char version[] = "@TOOIE_PLAYER_VERSION@";
     target_sources(TooieBaseline PRIVATE src/draw_distance.cpp)
     set_source_files_properties(src/camera_analog.cpp PROPERTIES COMPILE_DEFINITIONS TOOIE_NATIVE_HOST=1)
     if(_baseline_elf)
-        set_target_properties(TooieBaseline PROPERTIES OUTPUT_NAME BanjoTooieScurvyDogPort)
+        # The Windows name below stays for upstream's packaging manifest.
+        set_target_properties(TooieBaseline PROPERTIES OUTPUT_NAME BanjoTooieSteamDeckPort)
     else()
         target_link_libraries(TooieBaseline PRIVATE ${_baseline_startup_libraries})
         # Double-click play opens no console; diagnostics go to the profile log.
