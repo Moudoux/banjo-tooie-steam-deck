@@ -25,10 +25,24 @@ Trot toggle, MSAA as an option.
   - [ ] Mayahem Temple renders black in the distance. Possibly draw distance or
     fog, so it might share a fix with the item above.
   - [ ] The save-select arm animation runs at a low frame rate.
-  - [ ] Menu logo jitter: currently worked around by presenting maps `0x18B`
-    and `0x158` at the original rate. The real fix is tagging those draws
-    with matrix groups in the guest, so menus can run at the display rate.
-    More involved.
+  - [ ] Startup intro (`0x18B`) at the display rate. It is still presented at
+    the original rate (`devices.cpp` `update_screen`); game select (`0x158`)
+    already follows the chosen rate. Tried on 2026-10-24 and reverted:
+    - Lifting the force with Interpolate all objects on: the camera and the
+      solid N64 logo (actor model `80206340`, its own `0xE0` group, 32 calls
+      under the `A0000003` projection) interpolate, but the Rareware card
+      turned at 20 fps: it turns by its vertices under one fixed matrix, and
+      actor groups skip vertex positions. Interpolating vertex positions for
+      actor groups on `0x18B` only fixed that at 60 Hz on the dev machine.
+    - On the Deck (90 Hz, Cutscene Aspect "Follow game") the owner still saw
+      the N64 and Rareware logos jitter vertically. Not reproduced at 60 Hz.
+      The glow and the fading logos step at the game rate because colour
+      and alpha are not interpolated (expected). Registration measurements
+      on the spinning logo were unreliable, locally and on the slow-motion
+      video.
+    - Next: an F4 trace on the Deck (`TOOIE_INTERPOLATION_TRACE=1`) during
+      the solid N64 logo, to see whether its group or the camera's
+      projection changes between frames.
 
 ## Deck and controls
 
