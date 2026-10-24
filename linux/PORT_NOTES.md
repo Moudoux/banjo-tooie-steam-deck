@@ -218,18 +218,26 @@ Steam Deck features:
 - **Draw distance and Disable LOD** (Video menu, `tooie_draw_distance` 1-12,
   `tooie_disable_lod`; `src/draw_distance.cpp`, raw hooks
   `GRAPHICS_HOOKS` in `tools/baseline/minimum_host_hooks.py`), after
-  Lighthouse's `GraphicsPatches.cpp`. `func_800DE498` (model render) culls a
-  model once its focus distance (sp+0xDC) reaches the draw distance at
-  `0x8012C82C` (set per actor by `func_800DF428` from `func_80101970`, reset
-  after every model by `func_800DE318`). A hook at `L_800DE68C`, reached once
-  per model, multiplies it by the setting (+0.1 past whole multiples, as
-  Lighthouse, which stops at 6x; this player goes to 12x). With LOD disabled, a hook before `0x800DE628` skips the
+  Lighthouse's `GraphicsPatches.cpp`. Every distance cull multiplies by the
+  viewport's draw-distance scale, `func_800E42C0` (viewport `+0x164`):
+  `func_800DE498` (model render: focus distance sp+0xDC against `0x8012C82C`,
+  set per actor by `func_800DF428` from `func_80101970`), `func_800D3104`
+  (draws the props and actors of cubes within the camera's cube +-4 x scale)
+  with `func_800D2F44` (cube distance), and `func_800E1C00` (level geometry,
+  fading over the last 500 units). A hook after its call (before
+  `0x800E42D4`) multiplies the result by the setting (+0.1 past whole
+  multiples, as Lighthouse, which stops at 6x; this player goes to 12x), so
+  all of them extend together, as Lighthouse scales BK's model cull, cube
+  width and cube distance. The first version scaled only the model cull,
+  so entities in cubes past about 4 cubes still vanished. Confirmed on the
+  Deck by the owner (2026-10-24): distant entities stay visible at 12x. With LOD disabled, a hook before `0x800DE628` skips the
   small-and-far shrink (4000 units, size x 50), and the three LOD geo
   commands (type 8 in the geo tables listed at `0x80123198`:
   `func_800DD214`, `func_800DD2E8`, `func_800DD37C`, which draw their branch
   for squared distance in (min^2, max^2]) see distance 1, picking the
   nearest branch. Not covered: actors the game has not spawned or keeps
-  inactive far away, and level geometry culled by other means.
+  inactive far away, and level geometry culled by other means (fog is
+  unchanged).
   `baseline_input_host_test` (not built by default) would also need
   `src/draw_distance.cpp`.
 
