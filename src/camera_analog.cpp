@@ -243,6 +243,79 @@ extern "C" void tooie_egg_aim_yaw(std::uint8_t* rdram, recomp_context* ctx) {
 #endif
 }
 
+namespace {
+// The Blaster eases its look angle back to a target: in control type 1 one set
+// by the left stick's position, in type 0 the level angle while +0x254 is set.
+// The right stick's accumulated look is added to both targets, so the view
+// stays where the right stick left it. Reset when the Blaster is re-entered.
+float blaster_look_offset = 0.0f;
+std::chrono::steady_clock::time_point blaster_last_look{};
+// Turn and look at the same rate, as the user asked for the Blaster.
+constexpr float k_blaster_look_speed_degrees = k_yaw_speed_degrees;
+
+float register_float(gpr value) { return std::bit_cast<float>(static_cast<std::uint32_t>(value)); }
+gpr float_register(float value) { return static_cast<gpr>(std::bit_cast<std::int32_t>(value)); }
+}
+
+// Twin-stick Blaster while the analog camera is on: the right stick turns, so
+// the left stick's X strafes (added to the C-left/C-right axis, -1 left) and
+// no longer turns. control_type only tells the two hook sites apart.
+extern "C" void tooie_blaster_strafe(std::uint8_t* rdram, recomp_context* ctx, int control_type) {
+    (void)control_type;
+    if (!tooie::camera::analog_enabled()) return;
+    const gpr player = static_cast<gpr>(MEM_W(0x30, ctx->r29)); // func_80804848's a0.
+    float stick_x = 0.0f;
+    guest_call(ctx, [&](gpr) {
+        ctx->r4 = player;
+        bastick_getX(rdram, ctx);
+        stick_x = ctx->f0.fl;
+    });
+    if (!std::isfinite(stick_x) || stick_x == 0.0f) return;
+    ctx->r5 = float_register(std::clamp(register_float(ctx->r5) + stick_x, -1.0f, 1.0f));
+}
+
+extern "C" void tooie_blaster_left_turn(std::uint8_t* rdram, recomp_context* ctx, int control_type) {
+    (void)rdram;
+    (void)control_type;
+    if (tooie::camera::analog_enabled()) ctx->r5 = float_register(0.0f);
+}
+
+extern "C" void tooie_blaster_turn(std::uint8_t* rdram, recomp_context* ctx) {
+    if (!tooie::camera::analog_enabled()) return;
+    float horizontal = 0.0f, vertical = 0.0f;
+    read_stick(horizontal, vertical);
+    if (horizontal == 0.0f) return;
+    // Facing yaw turns the same way as the orbit's camera yaw (the view is
+    // facing + 180), at the orbit's rate.
+    const gpr delta = ctx->r29 + 0x28;
+    store_float(rdram, delta, load_float(rdram, delta) + horizontal * k_yaw_speed_degrees * game_delta(rdram));
+}
+
+extern "C" void tooie_blaster_look(std::uint8_t* rdram, recomp_context* ctx) {
+    const gpr state = ctx->r16; // The Blaster state at player +0x188.
+    const auto now = std::chrono::steady_clock::now();
+    if (now - blaster_last_look > std::chrono::milliseconds(500)) blaster_look_offset = 0.0f;
+    blaster_last_look = now;
+    if (!tooie::camera::analog_enabled()) { blaster_look_offset = 0.0f; return; }
+    float horizontal = 0.0f, vertical = 0.0f;
+    read_stick(horizontal, vertical);
+    if (vertical == 0.0f) return;
+    // +0x20C rises as the view tilts down. Pushing up looks up (unless Invert
+    // camera Y is on), the opposite of the orbit, where up raises the camera.
+    const float step = -vertical * k_blaster_look_speed_degrees * game_delta(rdram);
+    store_float(rdram, state + 0x20C, load_float(rdram, state + 0x20C) + step);
+    const float limit = std::max(std::fabs(load_float(rdram, state + 0x1E8)), std::fabs(load_float(rdram, state + 0x1EC)));
+    if (std::isfinite(limit)) blaster_look_offset = std::clamp(blaster_look_offset + step, -limit, limit);
+}
+
+extern "C" void tooie_blaster_look_target(std::uint8_t* rdram, recomp_context* ctx, int control_type) {
+    (void)rdram;
+    if (blaster_look_offset == 0.0f || !tooie::camera::analog_enabled()) return;
+    // Type 1's target is in f2 (func_80806928); type 0's level angle in f0 (func_808069BC).
+    if (control_type == 1) ctx->f2.fl += blaster_look_offset;
+    else ctx->f0.fl += blaster_look_offset;
+}
+
 extern "C" float tooie_camera_first_person_axis(float original_value, int vertical) noexcept {
 #ifndef TOOIE_NATIVE_HOST
     (void)vertical;

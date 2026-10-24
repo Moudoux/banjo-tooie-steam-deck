@@ -72,7 +72,32 @@ EGG_AIM_PITCH_TEXT=('{ extern void tooie_egg_aim_pitch(uint8_t*, recomp_context*
     'tooie_egg_aim_pitch(rdram, ctx); }')
 EGG_AIM_YAW_TEXT=('{ extern void tooie_egg_aim_yaw(uint8_t*, recomp_context*); '
     'tooie_egg_aim_yaw(rdram, ctx); }')
+# Breegull Blaster (bsfirstp) right stick, driven like the orbit camera rather
+# than through the Blaster's own smoothed stick inputs (func_80804848 ->
+# func_808045FC, with a ramp and, in control type 1, a position-based look).
+# Turn: func_80809AF8 adds its yaw delta (sp+0x28) to the facing after the call
+# at 0x80809BB0. Look: func_8080682C steps +0x20C, then clamps it from
+# 0x80806890. Type 1's look target (f2) is stored at 0x80806998 in func_80806928.
+BLASTER_TURN_TEXT=('{ extern void tooie_blaster_turn(uint8_t*, recomp_context*); '
+    'tooie_blaster_turn(rdram, ctx); }')
+BLASTER_LOOK_TEXT=('{ extern void tooie_blaster_look(uint8_t*, recomp_context*); '
+    'tooie_blaster_look(rdram, ctx); }')
+# Type 0 eases to its level angle (f0, stored at 0x808069D8 in func_808069BC)
+# while +0x254 is set. With the analog camera on, func_80804848's left stick X
+# strafes (added to a1, the C strafe axis, before 0x80804938 / L_8080499C) and
+# its turn input (a1 before 0x80804960 / 0x808049C4) is zeroed.
+def _blaster_call(name, control_type):
+    return ('{ extern void %s(uint8_t*, recomp_context*, int); %s(rdram, ctx, %d); }'
+            % (name, name, control_type))
 GRAPHICS_HOOKS=(('func_808002A4_bafpctrl',0x80800368,MOUSE_AIM_TEXT),
+                ('func_80809AF8_bsfirstp',0x80809BB8,BLASTER_TURN_TEXT),
+                ('func_8080682C_bsfirstp',0x80806890,BLASTER_LOOK_TEXT),
+                ('func_80806928_bsfirstp',0x80806998,_blaster_call('tooie_blaster_look_target',1)),
+                ('func_808069BC_bsfirstp',0x808069D8,_blaster_call('tooie_blaster_look_target',0)),
+                ('func_80804848_bsfirstp',0x80804938,_blaster_call('tooie_blaster_strafe',0)),
+                ('func_80804848_bsfirstp',0x8080499C,_blaster_call('tooie_blaster_strafe',1)),
+                ('func_80804848_bsfirstp',0x80804960,_blaster_call('tooie_blaster_left_turn',0)),
+                ('func_80804848_bsfirstp',0x808049C4,_blaster_call('tooie_blaster_left_turn',1)),
                 ('func_80800264_baeggaim',0x808002E8,EGG_AIM_PITCH_TEXT),
                 ('func_80800264_baeggaim',0x80800300,EGG_AIM_YAW_TEXT),
                 ('func_800DE498',0x800DE628,LOD_SKIP_TEXT),
