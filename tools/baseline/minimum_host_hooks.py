@@ -52,22 +52,22 @@ FRUSTUM_HOOKS=(('func_808005AC_chintroticker',0x80800644,INTRO_SKIP_TEXT),
                ('func_800CA218',0x800CA218,_pad('r5')),
                ('func_800CA2A8',0x800CA2A8,_pad('r5')),
                ('func_800CA1B0',0x800CA200,_pad('r6')))
-# Model draw distance and LOD (Lighthouse's Extended Draw Distance / Disable LOD,
-# GraphicsPatches.cpp). func_800DE498 (model render) culls a model when its focus
-# distance (sp+0xDC) reaches the draw distance at 0x8012C82C; func_800DF428 sets
-# that per actor and func_800DE318 resets it after every model. With LOD off the
-# small-and-far shrink (4000 units, size x 50) is skipped, as in Lighthouse; at
-# L_800DE68C, which every path reaches once per model, the distance is scaled.
+# Draw distance and LOD (Lighthouse's Extended Draw Distance / Disable LOD,
+# GraphicsPatches.cpp). func_800E42C0 returns the viewport's draw-distance scale
+# (+0x164), and every distance cull multiplies by it: func_800DE498 (model render:
+# focus distance sp+0xDC against 0x8012C82C, set per actor by func_800DF428),
+# func_800D3104 (cubes within camera cube +-4 x scale) with func_800D2F44 (cube
+# distance), and func_800E1C00 (level geometry, fading 500 units before the
+# limit). Scaling its result after the call at 0x800E42CC extends all of them, as
+# Lighthouse scales the model cull, cube width and cube distance. With LOD off the
+# small-and-far model shrink (4000 units, size x 50) is skipped, as in Lighthouse.
 # The three LOD geo commands (type 8 of the 0x80123198 tables) draw their branch
 # when the squared distance lies in (min^2, max^2]; Lighthouse forces distance 1
 # so the nearest, full-detail branch is chosen.
 LOD_SKIP_TEXT=('{ extern int tooie_model_lod_disabled(void); '
     'if (tooie_model_lod_disabled()) goto L_800DE68C; }')
 DRAW_DISTANCE_TEXT=('{ extern float tooie_model_draw_distance_scale(void); '
-    'const float tooie_scale = tooie_model_draw_distance_scale(); '
-    'if (tooie_scale != 1.0f) { union { uint32_t u; float f; } tooie_distance = '
-    '{ (uint32_t)MEM_W(-0x37D4, (gpr)(int32_t)0x80130000) }; tooie_distance.f *= tooie_scale; '
-    'MEM_W(-0x37D4, (gpr)(int32_t)0x80130000) = (int32_t)tooie_distance.u; } }')
+    'ctx->f0.fl *= tooie_model_draw_distance_scale(); }')
 LOD_GEO_TEXT=('{ extern int tooie_model_lod_disabled(void); '
     'if (tooie_model_lod_disabled()) ctx->f0.fl = 1.0f; }')
 # First-person mouse aim: func_808002A4_bafpctrl (first-person control) subtracts
@@ -125,7 +125,7 @@ GRAPHICS_HOOKS=(('func_808002A4_bafpctrl',0x80800368,MOUSE_AIM_TEXT),
                 ('func_80800264_baeggaim',0x808002E8,EGG_AIM_PITCH_TEXT),
                 ('func_80800264_baeggaim',0x80800300,EGG_AIM_YAW_TEXT),
                 ('func_800DE498',0x800DE628,LOD_SKIP_TEXT),
-                ('func_800DE498',0x800DE68C,DRAW_DISTANCE_TEXT),
+                ('func_800E42C0',0x800E42D4,DRAW_DISTANCE_TEXT),
                 ('func_800DD214',0x800DD298,LOD_GEO_TEXT),
                 ('func_800DD2E8',0x800DD32C,LOD_GEO_TEXT),
                 ('func_800DD37C',0x800DD3C0,LOD_GEO_TEXT))+ACTOR_DRAW_HOOKS
