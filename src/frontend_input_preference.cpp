@@ -287,7 +287,8 @@ BindingTable defaults() {
 #ifdef TOOIE_DECK_DEFAULTS
     if (host().baseline) {
         // Xbox 360 (XBLA) layout: X attacks and B talks/cancels (both N64 B),
-        // either trigger crouches, either bumper centres the camera, Y looks
+        // either trigger crouches, the right bumper centres the camera (the
+        // left bumper is N64 L, for Hold L to levitate), Y looks
         // first-person, the right stick turns the camera (C-left/right, X axis
         // inverted) and either vertical push toggles camera views (C-down).
         // With the analog camera on, the right stick orbits on both axes and
@@ -295,16 +296,16 @@ BindingTable defaults() {
         // the four C-buttons, so every C action (Z + C-right Wonderwing, egg
         // aiming, C-left/right turns) stays reachable with the stick orbiting;
         // Tooie reads no N64 D-pad input through its button API.
-        // L, unused by XBLA, stays on LS.
+        // L, unused by XBLA, is also on LS.
         put(table, Action::A, Device::Button, SDL_CONTROLLER_BUTTON_A);
         put(table, Action::B, Device::Button, SDL_CONTROLLER_BUTTON_X);
         put(table, Action::B, Device::Button, SDL_CONTROLLER_BUTTON_B, 1);
         put(table, Action::Start, Device::Button, SDL_CONTROLLER_BUTTON_START);
         put(table, Action::Z, Device::AxisPositive, SDL_CONTROLLER_AXIS_TRIGGERLEFT);
         put(table, Action::Z, Device::AxisPositive, SDL_CONTROLLER_AXIS_TRIGGERRIGHT, 1);
-        put(table, Action::R, Device::Button, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
-        put(table, Action::R, Device::Button, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, 1);
-        put(table, Action::L, Device::Button, SDL_CONTROLLER_BUTTON_LEFTSTICK);
+        put(table, Action::L, Device::Button, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+        put(table, Action::L, Device::Button, SDL_CONTROLLER_BUTTON_LEFTSTICK, 1);
+        put(table, Action::R, Device::Button, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
         put(table, Action::CUp, Device::Button, SDL_CONTROLLER_BUTTON_Y);
         put(table, Action::CDown, Device::AxisPositive, SDL_CONTROLLER_AXIS_RIGHTY);
         put(table, Action::CDown, Device::AxisNegative, SDL_CONTROLLER_AXIS_RIGHTY);

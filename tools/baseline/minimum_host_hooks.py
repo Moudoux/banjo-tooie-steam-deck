@@ -110,10 +110,11 @@ ACTOR_DRAW_HOOKS=(('func_8010A79C',0x8010A7E8,_native_call('tooie_actor_draw_beg
                   ('func_8010A79C',0x8010A7F0,_native_call('tooie_actor_draw_end')),
                   ('func_800DE498',0x800DE498,_native_call('tooie_model_draw_begin')),
                   ('func_800DE498',0x800DF310,_native_call('tooie_model_draw_end')))
-# Minimap (src/level_minimap.cpp): bainput_update entry, once per character
-# update with the PlayerState in a0, samples the player, camera and level
-# collision on the guest thread.
-MINIMAP_HOOKS=(('bainput_update',0x8009819C,_native_call('tooie_level_minimap_observe')),)
+# bainput_update entry, once per character update with the PlayerState in a0:
+# the minimap (src/level_minimap.cpp) samples the player, camera and level
+# collision, and levitation (src/levitate.cpp) lifts the player while L is held.
+PLAYER_UPDATE_HOOKS=(('bainput_update',0x8009819C,
+    _native_call('tooie_level_minimap_observe')+' '+_native_call('tooie_levitate_update')),)
 def _blaster_call(name, control_type):
     return ('{ extern void %s(uint8_t*, recomp_context*, int); %s(rdram, ctx, %d); }'
             % (name, name, control_type))
@@ -132,7 +133,7 @@ GRAPHICS_HOOKS=(('func_808002A4_bafpctrl',0x80800368,MOUSE_AIM_TEXT),
                 ('func_800E42C0',0x800E42D4,DRAW_DISTANCE_TEXT),
                 ('func_800DD214',0x800DD298,LOD_GEO_TEXT),
                 ('func_800DD2E8',0x800DD32C,LOD_GEO_TEXT),
-                ('func_800DD37C',0x800DD3C0,LOD_GEO_TEXT))+ACTOR_DRAW_HOOKS+MINIMAP_HOOKS
+                ('func_800DD37C',0x800DD3C0,LOD_GEO_TEXT))+ACTOR_DRAW_HOOKS+PLAYER_UPDATE_HOOKS
 
 def add_hooks(hooks,selected):
     assert type(selected) is bool

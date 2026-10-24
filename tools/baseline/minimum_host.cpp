@@ -10,6 +10,7 @@
 #include "draw_distance.hpp"
 #include "object_interpolation.hpp"
 #include "level_minimap.hpp"
+#include "levitate.hpp"
 #if BASELINE_PLAYER
 #include "virtual_clock.hpp"
 #include "player_version.hpp"
@@ -407,6 +408,10 @@ void update_preference(Preference key, int value) {
         if (value < 0 || value > 1) return;
         selected.minimap = value; settings::set_bool("baseline_minimap", value != 0);
         tooie::level_minimap::set_enabled(value != 0); break;
+    case Preference::Levitate:
+        if (value < 0 || value > 1) return;
+        selected.levitate = value; settings::set_bool("baseline_levitate", value != 0);
+        tooie::levitate::set_enabled(value != 0); break;
     case Preference::VSync:
         if (value < 0 || value > 1) return;
         selected.vsync = value; settings::set_int("baseline_vsync", value);
@@ -699,6 +704,8 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     tooie::objects::set_enabled(selected.object_interpolation != 0);
     selected.minimap = settings::get_bool("baseline_minimap", true) ? 1 : 0;
     tooie::level_minimap::set_enabled(selected.minimap != 0);
+    selected.levitate = settings::get_bool("baseline_levitate", false) ? 1 : 0;
+    tooie::levitate::set_enabled(selected.levitate != 0);
     latched = selected; vsync.store(selected.vsync, std::memory_order_release);
     resolution.store(selected.resolution, std::memory_order_release);
     texture_filter.store(selected.texture_filter, std::memory_order_release);

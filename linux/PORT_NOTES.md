@@ -140,9 +140,10 @@ Steam Deck features:
   never loaded this file.
 - **XBLA button layout** as the Deck default (`src/frontend_input_preference.cpp`
   `defaults()`, `TOOIE_DECK_DEFAULTS`), checked against the XBLA manual
-  table: A=A, X and B=N64 B, LT/RT=Z, LB/RB=R, Y=C-up, right stick X=C-left/
+  table: A=A, X and B=N64 B, LT/RT=Z, RB=R, Y=C-up, right stick X=C-left/
   right (inverted at the owner's request), right stick up or down and RS click=C-down, D-pad=C-buttons (no N64 D-pad: Tooie reads none),
-  LS click=L, View=menu. The camera is stepped C-buttons, not XBLA's analog
+  LB and LS click=L (XBLA had LB=R too; LB is L so Hold L to levitate is on
+  a bumper; profiles saved before keep their bindings), View=menu. The camera is stepped C-buttons, not XBLA's analog
   camera. XBLA's Talon Trot chord: while two controller inputs bound to Z
   are held (LT + RT), `z_chord_down` adds C-left, but only once the previous
   poll already sent Z, so pressing both in the same frame crouches first.
@@ -261,7 +262,28 @@ Steam Deck features:
   rooms show the player's level; walls near the player's height are lines;
   ceilings are left out. The map hides when the player has not been updated
   for 300 ms (menus, cutscenes, loads, pause). Verified locally in Spiral
-  Mountain; sectioned maps are not verified.
+  Mountain and confirmed working on the Deck by the owner (2026-10-24);
+  sectioned maps are not specifically verified.
+
+- **Hold L to levitate** (Controls menu, `baseline_levitate`, default off;
+  `src/levitate.cpp`, from the same `bainput_update` entry hook as the
+  minimap), Lighthouse's `Cheats.Levitate` (`Cheats.cpp`). For the controlled
+  character, while `bakey_held(player, BUTTON_L)` (so the game's per-button
+  suppression applies): gravity 0 and vertical velocity 500 (the physics
+  struct at PlayerState `+0xC8`, fields `+0x34` and `+0x14`, as
+  `baphysics_set_gravity` / `baphysics_set_vertical_velocity`), and
+  `func_800956B8` (bafalldamage_start, as Flap Flip each frame) so the fall is
+  measured from where L is released. On release, or when turned off while
+  held, gravity returns to the default at `D_80117EF0`
+  (`baphysics_reset_gravity`), once. As in Lighthouse, releasing L high up
+  gives a damaging fall, and tapping L again lower down cancels it (the fall is
+  measured from the tap); Lighthouse's explicit reset to the idle state was not
+  needed. Not copied: Lighthouse pauses while talking (`balookat_getState`,
+  which Tooie lacks); in Bottles' dialogue holding L changes the physics but
+  Banjo stays put and falls back after. Verified locally in Spiral Mountain
+  (scripted L: rises 500 units/s, gravity -2700 restored on release, splat
+  from about 1300 units, normal landing after a tap at about 900). Confirmed on the
+  Deck by the owner (2026-10-24), with L1 bound to L.
   `baseline_input_host_test` (not built by default) would also need
   `src/draw_distance.cpp`.
 

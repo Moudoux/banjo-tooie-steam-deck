@@ -165,6 +165,9 @@ void controls(const Snapshot& snapshot) {
     bool skip = snapshot.preferences.start_skips_cutscenes != 0;
     if (ImGui::Checkbox("Start skips story cutscenes", &skip))
         preference(Preference::StartSkipsCutscenes, int(skip));
+    bool levitate = snapshot.preferences.levitate != 0;
+    if (ImGui::Checkbox("Hold L to levitate", &levitate))
+        preference(Preference::Levitate, int(levitate));
 #endif
     static int device = 0;
     ImGui::Combo("Binding type", &device, "Keyboard\0Controller\0");

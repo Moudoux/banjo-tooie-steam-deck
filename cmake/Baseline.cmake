@@ -569,6 +569,8 @@ inline constexpr char version[] = "@TOOIE_PLAYER_VERSION@";
     target_sources(TooieBaseline PRIVATE src/menu_interpolation.cpp src/object_interpolation.cpp)
     # Minimap, sampled by the bainput_update raw hook and drawn by the ImGui overlay.
     target_sources(TooieBaseline PRIVATE src/level_minimap.cpp)
+    # Hold L to levitate (Lighthouse), from the same bainput_update raw hook.
+    target_sources(TooieBaseline PRIVATE src/levitate.cpp)
     if(NOT TOOIE_BASELINE_RT64_GENERIC_FIXES)
         message(FATAL_ERROR "The player's object matrix groups need TOOIE_BASELINE_RT64_GENERIC_FIXES")
     endif()
