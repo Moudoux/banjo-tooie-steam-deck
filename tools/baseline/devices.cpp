@@ -6,6 +6,7 @@
 #if TOOIE_BASELINE_HOST
 #include "minimum_host.hpp"
 #include "minimum_render.hpp"
+#include "object_interpolation.hpp"
 #if BASELINE_RENDERER_COMPARISON
 #error Minimum host and developer comparison own different Inspectors; select one
 #endif
@@ -426,7 +427,13 @@ public:
         }
         app->state->rsp->reset();
         app->interpreter->loadUCodeGBI(task->t.ucode & 0x3FFFFFF, task->t.ucode_data & 0x3FFFFFF, true);
+#ifdef BASELINE_PLAYER
+        tooie::objects::begin_display_list(app->state.get(), task->t.data_ptr & 0x3FFFFFF);
+#endif
         app->processDisplayLists(app->core.RDRAM, task->t.data_ptr & 0x3FFFFFF, 0, true);
+#ifdef BASELINE_PLAYER
+        tooie::objects::end_display_list(app->state.get());
+#endif
         if (first) {
             std::fprintf(stderr, "baseline graphics-task-return start=%08x size=%u expected_size=%u size_match=%u parser_returned=1\n",
                 start, task->t.data_size, first_dl_size.load(), unsigned(task->t.data_size == first_dl_size.load()));

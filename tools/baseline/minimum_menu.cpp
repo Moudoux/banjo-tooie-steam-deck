@@ -122,6 +122,8 @@ void video(const Snapshot& snapshot) {
     int color=prefs.color_format;
     if(ImGui::Combo("Color precision",&color,"Standard\0High (less banding)\0Automatic\0"))preference(Preference::ColorFormat,color);
     if(color!=snapshot.latched_color_format)ImGui::TextDisabled("Color precision changes on the next launch.");
+    bool objects=prefs.object_interpolation!=0;
+    if(ImGui::Checkbox("Interpolate all objects",&objects))preference(Preference::ObjectInterpolation,int(objects));
 #endif
     int rate=prefs.output_rate;
     if(ImGui::Combo("Output rate",&rate,"Default (Original)\0Original\0Display\0Manual\0"))preference(Preference::OutputRate,rate);

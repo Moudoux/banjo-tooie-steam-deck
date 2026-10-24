@@ -60,11 +60,16 @@ matrix/depth preservation, not visual acceptance of the Jinjo Village artifact.
 
 ## Player projection residual preservation
 
-`projection_residual.delta.json` revision 1 selects only operations 4 and 5 of
+`projection_residual.delta.json` revision 1 selected only operations 4 and 5 of
 `projection_preservation.delta.json` revision 5 for the baseline player renderer.
 It retains the same immutable RT64 pin and MIT-licensed input, with no auxiliary
-camera fallback or IGNORE-group matching policy. Its 210-line output is SHA256
-`c268ed716403eed67a24d5d6d0c5c28227ad78df938658cd679a07a224fda988`.
+camera fallback or IGNORE-group matching policy. Revision 2 adds
+`projectionShapeJumped`: a mapped projection whose horizontal or vertical scale
+changes by more than 15% between game frames (Tooie's cinematic letterbox
+changes the vertical scale by a third) is not interpolated, at both places that
+decide projection interpolation, so the image is not squashed for the
+interpolated frames after the change. Its 231-line output is SHA256
+`9df4f7ddff6983474a4c5ac222e3cdeac6cb05fee394b9bca851cad52788ece1`.
 
 The unmapped path preserves the source combined matrix, scaling only its X
 column for aspect adjustment. The mapped path preserves the decomposition
@@ -74,3 +79,11 @@ product recipe's linear correction; this is not a visual acceptance claim.
 The CPU matrix regression can prove source-matrix and clip-depth preservation,
 not that Greg's Jinjo Village scene or other reported artifacts are resolved.
 The full product recipe remains unchanged.
+
+## Object groups observer
+
+`object_groups.delta.json` targets the same pin and MIT-licensed
+`src/hle/rt64_interpreter.cpp`. It adds `RT64::tooieCommandObserver`, null by
+default, and calls it with each HLE display-list command's RDRAM address before
+the command runs. The player sets it only while "Interpolate all objects" is
+on (`src/object_interpolation.cpp`); with it null, interpretation is unchanged.

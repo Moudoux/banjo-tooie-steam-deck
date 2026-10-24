@@ -4,6 +4,7 @@
 #include "platform_support.hpp"
 #include "camera_analog.hpp"
 #include "draw_distance.hpp"
+#include "object_interpolation.hpp"
 #if BASELINE_PLAYER
 #include "player_version.hpp"
 #endif
@@ -106,6 +107,7 @@ void mark_issue() {
         ? std::string(" saved at ") + clock_stamp + ". Send player.log."
         : std::string(" at ") + clock_stamp + " could not be written to player.log.");
     marker_until = std::chrono::steady_clock::now() + std::chrono::seconds(4);
+    tooie::objects::request_trace(); // Only with TOOIE_INTERPOLATION_TRACE=1.
     if (notice.rfind("F4 is bound to ", 0) == 0) notice.clear();
 }
 #endif
@@ -248,6 +250,10 @@ void update_preference(Preference key, int value) {
         if (value < 0 || value > 100) return;
         selected.dither_noise = value; settings::set_int("baseline_dither_noise", value);
         publish_picture(); break;
+    case Preference::ObjectInterpolation:
+        if (value < 0 || value > 1) return;
+        selected.object_interpolation = value; settings::set_bool("baseline_object_interpolation", value != 0);
+        tooie::objects::set_enabled(value != 0); break;
     case Preference::VSync:
         if (value < 0 || value > 1) return;
         selected.vsync = value; settings::set_int("baseline_vsync", value);
@@ -364,6 +370,8 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile) {
     selected.texture_lod = settings::get_bool("baseline_texture_lod", true) ? 1 : 0;
     selected.dither_noise = bounded(settings::get_int("baseline_dither_noise", 100), 0, 100, 100);
     publish_picture();
+    selected.object_interpolation = settings::get_bool("baseline_object_interpolation", true) ? 1 : 0;
+    tooie::objects::set_enabled(selected.object_interpolation != 0);
     latched = selected; vsync.store(selected.vsync, std::memory_order_release);
     resolution.store(selected.resolution, std::memory_order_release);
     quiet_talon_trot.store(selected.quiet_talon_trot != 0, std::memory_order_release);

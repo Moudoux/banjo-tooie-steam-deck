@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "name": "rt64_projection_residual",
-  "delta_revision": 1,
+  "delta_revision": 2,
   "upstream": {
     "dependency": "rt64",
     "commit": "d9817c68ffd7328cd0af383af124971489366e18",
@@ -11,16 +11,48 @@
   },
   "output": {
     "filename": "rt64_projection_processor.cpp",
-    "sha256": "c268ed716403eed67a24d5d6d0c5c28227ad78df938658cd679a07a224fda988",
-    "lines": 210
+    "sha256": "9df4f7ddff6983474a4c5ac222e3cdeac6cb05fee394b9bca851cad52788ece1",
+    "lines": 232
   },
   "operations": [
     {
-      "original_start": 108,
-      "original_end": 110,
-      "original_sha256": "f01bf7e0fcf1b0f2c2e95feeaf5ae77e9fde2f70a8b08d0393b3ff2d901c75c3",
+      "original_start": 5,
+      "original_end": 5,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "replacement_lines": [
-        "            // Debugger camera.\n",
+        "\n",
+        "#include <algorithm>\n",
+        "#include <cmath>\n"
+      ]
+    },
+    {
+      "original_start": 18,
+      "original_end": 18,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "\n",
+        "    // A projection whose horizontal or vertical scale changes by more than this between\n",
+        "    // two game frames was replaced (Tooie's cinematic letterbox scales the vertical\n",
+        "    // field of view by a third), not zoomed; interpolating it squashes the image.\n",
+        "    static bool projectionShapeJumped(const interop::float4x4 &prevProj, const interop::float4x4 &curProj) {\n",
+        "        const float JumpRatio = 0.15f;\n",
+        "        for (int i = 0; i < 2; i++) {\n",
+        "            const float prevScale = std::abs(prevProj[i][i]);\n",
+        "            const float curScale = std::abs(curProj[i][i]);\n",
+        "            if (std::abs(curScale - prevScale) > JumpRatio * std::max(prevScale, curScale)) {\n",
+        "                return true;\n",
+        "            }\n",
+        "        }\n",
+        "\n",
+        "        return false;\n",
+        "    }\n"
+      ]
+    },
+    {
+      "original_start": 109,
+      "original_end": 110,
+      "original_sha256": "2d53cbe9e8cbe52c6e9cd868bcebb3472a4338b0f8d970207605297188725762",
+      "replacement_lines": [
         "            const bool debuggerCameraApplied = workload.debuggerCamera.enabled &&\n",
         "                (proj.type == Projection::Type::Perspective) &&\n",
         "                (workload.debuggerCamera.sceneIndex == sceneIndex);\n",
@@ -28,11 +60,27 @@
       ]
     },
     {
-      "original_start": 142,
-      "original_end": 146,
-      "original_sha256": "dbcbecdedb913804e9db9d0a987ff37215d0fa0263582de1b9ff4fbe320a918b",
+      "original_start": 126,
+      "original_end": 128,
+      "original_sha256": "2df9d3a97f3b2b6de44c3630c9868fff7bed43666dae860ce658e7ab66be60c0",
       "replacement_lines": [
-        "            interop::float4x4 &prevViewProjTransform = drawData.prevViewProjTransforms[proj.transformsIndex];\n",
+        "                // We only interpolate the projection if the view matrix has been interpolated\n",
+        "                // and the projection was not replaced.\n",
+        "                const bool interpolateProjection = (rigidBody->lerpTranslation || rigidBody->lerpRotation) &&\n",
+        "                    !projectionShapeJumped(adjustedPrevProj, curProjTransform);\n"
+      ]
+    },
+    {
+      "original_start": 142,
+      "original_end": 144,
+      "original_sha256": "b2744aeef17f5b83d46a35094bf73c8ca8ed171bb3e2948341a151d35b50ec32",
+      "replacement_lines": []
+    },
+    {
+      "original_start": 145,
+      "original_end": 146,
+      "original_sha256": "ebd5f0075e7908f66134f3871a1e951a79b0d5c622a9aa1645cc52c0baf02ed3",
+      "replacement_lines": [
         "            if (!debuggerCameraApplied &&\n",
         "                ((prevProjMatrix == nullptr) || (prevViewMatrix == nullptr) || (rigidBody == nullptr))) {\n",
         "                // The source projection may be a fixed 16.16 combined matrix.\n",
@@ -67,7 +115,8 @@
         "                    // translation and rotation are not interpolated. In that\n",
         "                    // case both composed matrices use the current projection,\n",
         "                    // so the residual must also come from the current frame.\n",
-        "                    const bool interpolateProjection = rigidBody->lerpTranslation || rigidBody->lerpRotation;\n",
+        "                    const bool interpolateProjection = (rigidBody->lerpTranslation || rigidBody->lerpRotation) &&\n",
+        "                        !projectionShapeJumped(prevProjSource, curProjSource);\n",
         "                    for (int row = 0; row < 4; row++) {\n",
         "                        for (int col = 0; col < 4; col++) {\n",
         "                            const float curResidual = curSource[row][col] - curRecomposed[row][col];\n",

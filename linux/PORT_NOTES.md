@@ -305,34 +305,18 @@ Steam Deck features:
   its pins are unchanged. Found via Lighthouse (HarbourMasters' Banjo-Kazooie
   port), which pads its frustum the same way.
 
-- **Startup intro at the original rate** (`tools/baseline/devices.cpp`,
-  `update_screen`): the intro's untagged logo cards jitter under RT64's
-  automatic interpolation (`G_EX_ID_AUTO`). The renderer reads the current
-  map (u16 at `0x80132DC2`, returned by `func_800EA05C`) each frame and
-  presents map `0x18B` at Original while Display/Manual is selected; the
-  saved preference is untouched. Map changes are logged as
-  `baseline map=0x... menu_rate_original=...`. Game select (`0x158`) used to
-  be forced too; it now has matrix groups (below) and keeps the chosen rate.
-
-- **Game select matrix groups** (`src/menu_interpolation.cpp`, raw hooks
-  `MENU_GROUP_HOOKS` in `minimum_host_hooks.py`). Its picture frames and
-  frame contents are actors with descriptor selectors `0x80C`-`0x813`
-  (`D_80132ED0[slot] + 0x14`; live slots in the bitmap at `0x80135450`),
-  drawn with no group, and several share a model, so RT64's automatic
-  matching paired them wrongly between frames. `func_8010A79C`, the actor
-  draw dispatcher, calls the template's draw at `0x8010A7E8` (actor in a0)
-  and returns to `0x8010A7F0`; hooks there wrap each draw on map `0x158` in
-  `gEXEnable` + `gEXMatrixGroupDecomposed` (id `0xD1000000 | selector << 8 |
-  slot`, outside the guest owners' ranges) and `gEXPopMatrixGroup`, written
-  at the display-list cursor (`*0x80127658`, `func_800A7180`) inside the
-  current pool (`D_8007BCD0[D_8007BEDA]`, `0x8FC0` bytes, in the heap's
-  expanded RDRAM above 8 MiB), at most 1 KiB per frame, skipped while
-  `D_8007BCE8[0]` redirects output. The hand (`0x862`) keeps its own owner.
-  Measured on the dev machine at 60 Hz output, 4 s of game select captured
-  from the window: frame-to-frame change max 2.59 -> 0.48, p95 0.92 -> 0.39,
-  with the spikes on interpolated frames gone. The same groups on the intro
-  measured no clear difference (its motion is mostly the camera), so the
-  intro keeps the Original override.
+- **Interpolation at Display/Manual output** (`linux/INTERPOLATION.md` has the
+  details, every case found so far and the debugging workflow). Game select's
+  actors get matrix groups (`src/menu_interpolation.cpp`) and follow the chosen
+  rate; the startup intro (map `0x18B`) is still presented at Original
+  (`devices.cpp` `update_screen`, logged as `baseline map=0x... menu_rate_original=`).
+  **Interpolate all objects** (Video menu, `baseline_object_interpolation`, on by
+  default) gives every actor and the player its own group without writing to the
+  game's display lists (`src/object_interpolation.cpp`, RT64 repair
+  `object_groups`), which fixed Cheato's pages, Stony's backpack and the warp pad
+  menu. `projection_residual` revision 2 stops the letterbox from squashing the
+  scene as it opens. `TOOIE_INTERPOLATION_TRACE=1` makes F4 log three frames of
+  objects and RT64 matching data to `player.log`.
 
 - **Analog camera** (Deck default on, invert X on): the retired frontend's
   `src/camera_analog.cpp`, unchanged, linked into the player
@@ -452,7 +436,9 @@ Steam Deck features:
   no scissor/viewport alignment commands were added. Picture options apply
   (logged as `baseline picture config-applied`); clean shutdown.
 - Steam Deck, confirmed by the owner after the RT64 update: the build runs,
-  game select, the picture options and the settings menu work.
+  game select, the picture options and the settings menu work. With
+  Interpolate all objects: Cheato, Stony and the warp pad menu (including the
+  letterbox opening) look right at Display rate, and nothing looked worse.
 - Not verified: real gamepad input with the XBLA layout, battery and
   90 Hz pacing, extended gameplay.
 
