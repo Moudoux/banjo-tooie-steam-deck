@@ -91,8 +91,9 @@ Your profile, saves, settings and `player.log` are in
 | Start | Start | Pause |
 | View | | Settings menu |
 
-The settings menu has **Analog camera**, **Invert camera X** and **Invert
-camera Y**. With the analog camera off, the right stick acts as C-left /
+The settings menu has **Analog camera**, **Invert camera X**, **Invert
+camera Y** and **Mouse / gyro aiming** (first person; for the Deck's gyro, set
+it to output as mouse in the Steam controller layout). With the analog camera off, the right stick acts as C-left /
 C-right in steps and up / down toggles camera views.
 Everything can be rebound in the settings menu. Profiles made before this
 layout keep their bindings until you choose "Reset bindings".

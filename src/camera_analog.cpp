@@ -41,6 +41,8 @@ constexpr std::uint32_t k_camera_mode_rule_table = 0x801247ACu;
 std::atomic_bool configured_analog_enabled{false};
 std::atomic_bool configured_horizontal_inverted{false};
 std::atomic_bool configured_vertical_inverted{false};
+std::atomic<float> configured_mouse_sensitivity{0.06f};
+std::atomic_bool configured_mouse_inverted{true};
 
 struct Orbit {
     bool active = false, entering = false;
@@ -121,6 +123,85 @@ void tooie::camera::set_vertical_inverted(bool inverted) noexcept {
 
 bool tooie::camera::vertical_inverted() noexcept {
     return configured_vertical_inverted.load(std::memory_order_acquire);
+}
+
+void tooie::camera::set_mouse_aim_sensitivity(float degrees_per_count) noexcept {
+    configured_mouse_sensitivity.store(std::clamp(degrees_per_count, 0.01f, 2.0f), std::memory_order_release);
+}
+
+void tooie::camera::set_mouse_aim_inverted(bool inverted) noexcept {
+    configured_mouse_inverted.store(inverted, std::memory_order_release);
+}
+
+#ifdef TOOIE_NATIVE_HOST
+namespace {
+// This frame's mouse turn in Tooie's first-person rotation units (degrees; pitch
+// falls when looking up, yaw falls when turning right, like the stick math).
+// Keeps relative mouse mode on while first-person control runs; motion from
+// more than 150 ms before (before entering first person) is dropped.
+bool take_mouse_turn(float& pitch, float& yaw) {
+    tooie::input::note_first_person_aim();
+    static std::chrono::steady_clock::time_point last_call{};
+    const auto now = std::chrono::steady_clock::now();
+    const bool continuing = last_call != std::chrono::steady_clock::time_point{} &&
+        now - last_call < std::chrono::milliseconds(150);
+    last_call = now;
+    float x = 0.0f, y = 0.0f;
+    tooie::input::take_mouse_aim(&x, &y);
+    if (!continuing || tooie::input::game_input_disabled() || !std::isfinite(x) || !std::isfinite(y)) return false;
+    const float sensitivity = configured_mouse_sensitivity.load(std::memory_order_acquire);
+    if (configured_mouse_inverted.load(std::memory_order_acquire)) y = -y;
+    pitch = y * sensitivity; // Moving up (negative y) looks up.
+    yaw = -x * sensitivity;  // Moving right turns right.
+    return true;
+}
+// Egg aim takes the turn in its pitch hook when pitch is unlocked; the yaw hook
+// (reached on every egg-aim frame) then uses the yaw taken there.
+bool egg_yaw_pending = false;
+float egg_yaw = 0.0f;
+}
+#endif
+
+extern "C" void tooie_first_person_aim(std::uint8_t* rdram, recomp_context* ctx) {
+#ifndef TOOIE_NATIVE_HOST
+    (void)rdram;
+    (void)ctx;
+#else
+    (void)rdram;
+    float pitch = 0.0f, yaw = 0.0f;
+    if (!take_mouse_turn(pitch, yaw)) return;
+    ctx->f12.fl += pitch;
+    ctx->f6.fl += yaw;
+#endif
+}
+
+extern "C" void tooie_egg_aim_pitch(std::uint8_t* rdram, recomp_context* ctx) {
+#ifndef TOOIE_NATIVE_HOST
+    (void)rdram;
+    (void)ctx;
+#else
+    float pitch = 0.0f, yaw = 0.0f;
+    const bool taken = take_mouse_turn(pitch, yaw);
+    egg_yaw_pending = true;
+    egg_yaw = taken ? yaw : 0.0f;
+    if (taken) store_float(rdram, ctx->r29 + 0x24, load_float(rdram, ctx->r29 + 0x24) + pitch);
+#endif
+}
+
+extern "C" void tooie_egg_aim_yaw(std::uint8_t* rdram, recomp_context* ctx) {
+#ifndef TOOIE_NATIVE_HOST
+    (void)rdram;
+    (void)ctx;
+#else
+    float yaw = egg_yaw;
+    bool taken = egg_yaw_pending;
+    egg_yaw_pending = false;
+    if (!taken) {
+        float pitch = 0.0f; // Pitch is locked on this frame.
+        taken = take_mouse_turn(pitch, yaw);
+    }
+    if (taken && yaw != 0.0f) store_float(rdram, ctx->r29 + 0x28, load_float(rdram, ctx->r29 + 0x28) + yaw);
+#endif
 }
 
 extern "C" float tooie_camera_first_person_axis(float original_value, int vertical) noexcept {

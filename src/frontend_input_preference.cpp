@@ -8,6 +8,7 @@
 #include <atomic>
 #include <climits>
 #include <cmath>
+#include <cstdio>
 #include <chrono>
 #include <cstdio>
 #include <fstream>
@@ -186,6 +187,16 @@ std::atomic_uint64_t published_buttons{0};
 std::atomic_uint32_t transient_buttons{0};
 std::atomic_bool mapped_activity{false};
 std::atomic<float> baseline_x{0}, baseline_y{0};
+std::atomic_bool mouse_aim_wanted{true};
+std::atomic<std::int64_t> first_person_until{0}; // steady_clock nanoseconds.
+std::mutex mouse_aim_mutex;
+float mouse_aim_x = 0, mouse_aim_y = 0; // Counts since the guest last took them.
+bool mouse_aim_relative = false; // SDL owner only.
+int cursor_shown = -1; // SDL owner only; -1 before the first tick.
+std::int64_t steady_nanoseconds() noexcept {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 std::atomic_int published_x{0}, published_y{0}, published_rx{0}, published_ry{0};
 std::atomic_bool published_enabled{false}, published_physical{false}, published_rumble{false};
 std::atomic_bool desired_rumble{false};
@@ -1605,6 +1616,9 @@ void initialize_settings(const std::filesystem::path& config_root, bool allow_ba
 }
 void shutdown() noexcept {
     mapped_activity.store(false, std::memory_order_release);
+    if (mouse_aim_relative) { SDL_SetRelativeMouseMode(SDL_FALSE); mouse_aim_relative = false; }
+    if (cursor_shown == 0) SDL_ShowCursor(SDL_ENABLE);
+    cursor_shown = -1;
     baseline_x.store(0, std::memory_order_release); baseline_y.store(0, std::memory_order_release);
     std::lock_guard lock(controller_mutex);
     stop_rumble();
@@ -1624,6 +1638,11 @@ void shutdown() noexcept {
     set_fast_forward_held(false);
 }
 void handle_event(const SDL_Event& event) {
+    if (event.type == SDL_MOUSEMOTION && mouse_aim_relative) {
+        std::lock_guard lock(mouse_aim_mutex);
+        mouse_aim_x += float(event.motion.xrel);
+        mouse_aim_y += float(event.motion.yrel);
+    }
 #ifdef TOOIE_PERSISTENT_RUNTIME_EXPERIMENT
     apply_persistent_input_reset();
     if (persistent_input_quarantine && event.type != SDL_CONTROLLERDEVICEADDED &&
@@ -2123,6 +2142,34 @@ void tick(SDL_Window* window, bool gameplay, bool menu_open) {
             else rx = ry = 0;
         }
     }
+    {
+        // The cursor is only shown while the settings menu is open (the player
+        // sets ImGuiConfigFlags_NoMouseCursorChange, so ImGui leaves it alone).
+        const int show = host().menu_open() ? 1 : 0;
+        if (show != cursor_shown) {
+            SDL_ShowCursor(show ? SDL_ENABLE : SDL_DISABLE);
+            cursor_shown = show;
+        }
+    }
+    {
+        // First-person mouse aim: relative mode only while first-person control ran
+        // in the last 150 ms, so the cursor is never captured elsewhere.
+        const bool want = enabled && focused && mouse_aim_wanted.load(std::memory_order_acquire) &&
+            steady_nanoseconds() < first_person_until.load(std::memory_order_acquire);
+        if (want != mouse_aim_relative) {
+            mouse_aim_relative = want && SDL_SetRelativeMouseMode(SDL_TRUE) == 0;
+            if (!mouse_aim_relative) SDL_SetRelativeMouseMode(SDL_FALSE);
+            static int logged = -1; // relative + 2 x wanted, logged on change only.
+            const int state = int(mouse_aim_relative) + 2 * int(want);
+            if (state != logged) {
+                logged = state;
+                std::fprintf(stderr, "input mouse-aim relative=%d wanted=%d%s%s\n", int(mouse_aim_relative), int(want),
+                    want && !mouse_aim_relative ? " error=" : "", want && !mouse_aim_relative ? SDL_GetError() : "");
+            }
+            std::lock_guard lock(mouse_aim_mutex);
+            mouse_aim_x = mouse_aim_y = 0;
+        }
+    }
     if (host().baseline) {
         // Held opposing keys still count as activity, even when their output cancels.
         bool mapped_button_held = false;
@@ -2215,6 +2262,16 @@ void get_right_analog(int port, float* x, float* y) noexcept {
     const bool enabled = port == 0 && published_enabled.load(std::memory_order_acquire);
     if (x) *x = enabled ? published_rx.load(std::memory_order_acquire) / 32767.0f : 0;
     if (y) *y = enabled ? published_ry.load(std::memory_order_acquire) / 32767.0f : 0;
+}
+void set_mouse_aim_enabled(bool enabled) noexcept { mouse_aim_wanted.store(enabled, std::memory_order_release); }
+void note_first_person_aim() noexcept {
+    first_person_until.store(steady_nanoseconds() + 150'000'000, std::memory_order_release);
+}
+void take_mouse_aim(float* x, float* y) noexcept {
+    std::lock_guard lock(mouse_aim_mutex);
+    if (x) *x = mouse_aim_x;
+    if (y) *y = mouse_aim_y;
+    mouse_aim_x = mouse_aim_y = 0;
 }
 void set_rumble(int port, bool enabled) noexcept {
     if (port == 0) desired_rumble.store(enabled, std::memory_order_release);

@@ -32,8 +32,8 @@ Trot toggle, MSAA as an option.
 
 ## Deck and controls
 
-- [ ] **Gyro aiming in first person (egg aiming).** SDL exposes the Deck's
-  gyro. Medium effort; big improvement for egg shooting.
+- [x] **Gyro aiming in first person (egg aiming).** Done as first-person mouse
+  aiming, used with Steam Input's gyro-as-mouse; native SDL gyro did not work.
 - [ ] **Talon Trot toggle.** Press once instead of holding. Lighthouse:
   `Controls.TalonTrotToggle` in `src/port/Controller/ControlSchemes.cpp`.
   Small.

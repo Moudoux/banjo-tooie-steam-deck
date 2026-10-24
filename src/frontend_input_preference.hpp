@@ -100,6 +100,13 @@ bool game_input_disabled() noexcept;
 void persistent_reset_transients() noexcept;
 #endif
 void get_right_analog(int port, float* x, float* y) noexcept;
+// First-person mouse aim (also Steam Input's gyro-as-mouse). The guest notes
+// each frame of first-person control; while that is recent, game input is
+// enabled and the window is focused, the SDL owner holds relative mouse mode
+// and accumulates motion (SDL counts) for the guest to take.
+void set_mouse_aim_enabled(bool enabled) noexcept;
+void note_first_person_aim() noexcept;
+void take_mouse_aim(float* x, float* y) noexcept;
 void set_rumble(int port, bool enabled) noexcept;
 bool physical_controller() noexcept;
 bool rumble_capable() noexcept;

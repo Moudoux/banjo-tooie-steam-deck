@@ -379,6 +379,18 @@ void video(const Snapshot& snapshot) {
     if(ImGui::Checkbox("Invert camera X",&invert))preference(Preference::CameraInvertX,int(invert));
     bool invert_y=prefs.camera_invert_y!=0;
     if(ImGui::Checkbox("Invert camera Y",&invert_y))preference(Preference::CameraInvertY,int(invert_y));
+#if BASELINE_PLAYER
+    bool mouse=prefs.mouse_aim!=0;
+    if(ImGui::Checkbox("Mouse / gyro aiming (first person)",&mouse))preference(Preference::MouseAim,int(mouse));
+    if(mouse) {
+        float mouse_speed=prefs.mouse_sensitivity/100.0f;
+        if(ImGui::SliderFloat("Aim sensitivity",&mouse_speed,0.01f,1.0f,"%.2f deg"))
+            preference(Preference::MouseSensitivity,int(mouse_speed*100.0f+0.5f));
+        bool mouse_invert=prefs.mouse_invert_y!=0;
+        if(ImGui::Checkbox("Invert aim Y",&mouse_invert))preference(Preference::MouseInvertY,int(mouse_invert));
+        ImGui::TextWrapped("Steam Deck gyro: in the Steam controller layout, set the gyro to output as mouse.");
+    }
+#endif
     bool sync=prefs.vsync<0?render::effective_vsync():prefs.vsync!=0;
     if(ImGui::Checkbox("VSync",&sync))preference(Preference::VSync,int(sync));
     ImGui::Text("VSync: %s",status(render::vsync_status()));

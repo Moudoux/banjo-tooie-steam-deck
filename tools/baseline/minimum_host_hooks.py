@@ -62,7 +62,25 @@ DRAW_DISTANCE_TEXT=('{ extern float tooie_model_draw_distance_scale(void); '
     'MEM_W(-0x37D4, (gpr)(int32_t)0x80130000) = (int32_t)tooie_distance.u; } }')
 LOD_GEO_TEXT=('{ extern int tooie_model_lod_disabled(void); '
     'if (tooie_model_lod_disabled()) ctx->f0.fl = 1.0f; }')
-GRAPHICS_HOOKS=(('func_800DE498',0x800DE628,LOD_SKIP_TEXT),
+# First-person mouse aim: func_808002A4_bafpctrl (first-person control) subtracts
+# stick x speed x dt from pitch and yaw, then clamps pitch at 0x80800368 (f12 =
+# pitch, f6 = yaw, stored by the call's delay slot). Only reached while
+# first-person control is active.
+MOUSE_AIM_TEXT=('{ extern void tooie_first_person_aim(uint8_t*, recomp_context*); '
+    'tooie_first_person_aim(rdram, ctx); }')
+# First-person egg aim, func_80800264_baeggaim: the reticle follows the stick and
+# func_80800170 turns the view near the screen edge; the turn is added to yaw
+# (sp+0x28) and, unless pitch is locked (func_80095738 flag 0x3A), to pitch
+# (sp+0x24) before the clamp at 0x808002F4. Pitch goes in before 0x808002E8 (the
+# unlocked path), yaw at L_80800300 (both paths), before the rotation is set.
+EGG_AIM_PITCH_TEXT=('{ extern void tooie_egg_aim_pitch(uint8_t*, recomp_context*); '
+    'tooie_egg_aim_pitch(rdram, ctx); }')
+EGG_AIM_YAW_TEXT=('{ extern void tooie_egg_aim_yaw(uint8_t*, recomp_context*); '
+    'tooie_egg_aim_yaw(rdram, ctx); }')
+GRAPHICS_HOOKS=(('func_808002A4_bafpctrl',0x80800368,MOUSE_AIM_TEXT),
+                ('func_80800264_baeggaim',0x808002E8,EGG_AIM_PITCH_TEXT),
+                ('func_80800264_baeggaim',0x80800300,EGG_AIM_YAW_TEXT),
+                ('func_800DE498',0x800DE628,LOD_SKIP_TEXT),
                 ('func_800DE498',0x800DE68C,DRAW_DISTANCE_TEXT),
                 ('func_800DD214',0x800DD298,LOD_GEO_TEXT),
                 ('func_800DD2E8',0x800DD32C,LOD_GEO_TEXT),
