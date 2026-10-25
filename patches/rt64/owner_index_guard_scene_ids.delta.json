@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "name": "rt64_owner_index_guard_scene_ids",
-  "delta_revision": 1,
+  "delta_revision": 2,
   "upstream": {
     "dependency": "rt64",
     "commit": "d9817c68ffd7328cd0af383af124971489366e18",
@@ -11,10 +11,20 @@
   },
   "output": {
     "filename": "rt64_game_frame.cpp",
-    "sha256": "ebcec7013b368ba88a94ffe328da401193fd384794c6d727ff31e80e13ec65b9",
-    "lines": 1093
+    "sha256": "5a50c04083bd765e764d23182a6f49e3a7691e9250aee7658f094c29afb7f34c",
+    "lines": 1196
   },
   "operations": [
+    {
+      "original_start": 10,
+      "original_end": 10,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "\n",
+        "#include <algorithm>\n",
+        "#include <tuple>\n"
+      ]
+    },
     {
       "original_start": 333,
       "original_end": 333,
@@ -153,43 +163,223 @@
       ]
     },
     {
-      "original_start": 533,
-      "original_end": 533,
-      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_start": 512,
+      "original_end": 515,
+      "original_sha256": "e98c15a574669fe6c31adf50646acb028fe7ed73b75b4fafce30d19c9d401037",
       "replacement_lines": [
-        "                const bool callOwnersMatch =\n",
-        "                    (curProjIndices.workloadIndex == firstCurProjIndices.workloadIndex) &&\n",
-        "                    (prevProjIndices.workloadIndex == firstPrevProjIndices.workloadIndex);\n"
+        "        // The check sets depend only on per-call properties, so build them per hash bucket from the\n",
+        "        // distinct properties on each side instead of visiting every current x previous call pair,\n",
+        "        // which is quadratic in the bucket size (557-call buckets, 440k pairs per frame in Hailfire\n",
+        "        // Peaks with extended draw distance). Sorted, deduplicated vectors iterate in the same order\n",
+        "        // as the std::set they replace, so the matching below sees identical input.\n",
+        "        thread_local std::vector<IndexPair> transformCheckSet;\n",
+        "        thread_local std::vector<IndexPair> tileCheckSet;\n",
+        "        thread_local std::vector<IndexPair> lookAtCheckSet;\n"
       ]
     },
     {
-      "original_start": 535,
-      "original_end": 536,
-      "original_sha256": "b0751697e9a5d3eee83ca36c173abd0ecdad5977fc9265c3f498d03240ce7c53",
+      "original_start": 519,
+      "original_end": 543,
+      "original_sha256": "370885616e97ac20cef4e565d4485da576a75d8590ff42170123b8a3b22fdf7d",
       "replacement_lines": [
-        "                if (callOwnersMatch && (curWorldMatrixCount == prevWorldMatrixCount) && curIt.second.doTransformMatching && prevIt->second.doTransformMatching) {\n"
+        "        struct CallSide {\n",
+        "            uint64_t hash;\n",
+        "            uint32_t worldMin, worldCount, tileIndex, tileCount, lookAt;\n",
+        "            bool transform, tileInterpolation, tileMatching, textureGen;\n",
+        "        };\n",
+        "\n",
+        "        // Only calls owned by the first workload of each scene can produce check pairs.\n",
+        "        const uint32_t textureGenMask = G_LIGHTING | G_TEXTURE_GEN;\n",
+        "        auto collectSides = [&](const std::multimap<uint64_t, GameCallMap> &hashMap, const GameScene &scene, uint32_t ownerWorkloadIndex, std::vector<CallSide> &sides) {\n",
+        "            sides.clear();\n",
+        "            for (const auto &it : hashMap) {\n",
+        "                const GameIndices::Projection &projIndices = scene.projections[it.second.sceneProjIndex];\n",
+        "                if (projIndices.workloadIndex != ownerWorkloadIndex) continue;\n",
+        "                const Workload &workload = workloadQueue.workloads[projIndices.workloadIndex];\n",
+        "                const Projection &proj = workload.fbPairs[projIndices.fbPairIndex].projections[projIndices.projectionIndex];\n",
+        "                const GameCall &call = proj.gameCalls[it.second.callIndex];\n",
+        "                CallSide side;\n",
+        "                side.hash = it.first;\n",
+        "                side.worldMin = call.callDesc.minWorldMatrix;\n",
+        "                side.worldCount = (call.callDesc.maxWorldMatrix - call.callDesc.minWorldMatrix) + 1;\n",
+        "                side.tileIndex = call.callDesc.tileIndex;\n",
+        "                side.tileCount = call.callDesc.tileCount;\n",
+        "                side.transform = it.second.doTransformMatching;\n",
+        "                side.tileInterpolation = it.second.doTileInterpolation;\n",
+        "                side.tileMatching = it.second.doTileMatching;\n",
+        "                side.textureGen = (call.callDesc.geometryMode & textureGenMask) == textureGenMask;\n",
+        "                side.lookAt = 0;\n",
+        "                if (side.textureGen) {\n",
+        "                    // FIXME: We assume the same look at is used throughout the entire draw call, so we only check the first vertex.\n",
+        "                    const uint32_t vertexIndex = workload.drawData.faceIndices[call.meshDesc.faceIndicesStart];\n",
+        "                    side.lookAt = workload.drawData.lookAtIndices[vertexIndex] >> RSP_LOOKAT_INDEX_SHIFT;\n",
+        "                }\n",
+        "\n",
+        "                sides.emplace_back(side);\n",
+        "            }\n",
+        "        };\n",
+        "\n",
+        "        // Both lists come out in hash order (multimap order), so equal-hash buckets pair up in one merge walk.\n",
+        "        thread_local std::vector<CallSide> curSides;\n",
+        "        thread_local std::vector<CallSide> prevSides;\n",
+        "        collectSides(curCallHashMap, curScene, firstCurProjIndices.workloadIndex, curSides);\n",
+        "        collectSides(prevCallHashMap, prevScene, firstPrevProjIndices.workloadIndex, prevSides);\n",
+        "\n",
+        "        thread_local std::vector<IndexPair> curRanges, prevRanges;\n",
+        "        thread_local std::vector<uint32_t> curLookAts, prevLookAts;\n",
+        "        struct TileKey {\n",
+        "            uint32_t tileCount, slot;\n",
+        "            bool matching;\n",
+        "            uint64_t hash;\n",
+        "            uint32_t tileIndex;\n",
+        "            bool operator<(const TileKey &other) const {\n",
+        "                return std::tie(tileCount, slot, matching, hash, tileIndex) < std::tie(other.tileCount, other.slot, other.matching, other.hash, other.tileIndex);\n",
+        "            }\n",
+        "        };\n",
+        "\n",
+        "        thread_local std::vector<TileKey> prevTiles;\n",
+        "        auto byCountThenStart = [](const IndexPair &a, const IndexPair &b) { return (a.second < b.second) || ((a.second == b.second) && (a.first < b.first)); };\n",
+        "        size_t c = 0, q = 0;\n",
+        "        while ((c < curSides.size()) && (q < prevSides.size())) {\n",
+        "            if (curSides[c].hash < prevSides[q].hash) { c++; continue; }\n",
+        "            if (prevSides[q].hash < curSides[c].hash) { q++; continue; }\n",
+        "            const uint64_t hash = curSides[c].hash;\n",
+        "            const size_t cBegin = c, qBegin = q;\n",
+        "            while ((c < curSides.size()) && (curSides[c].hash == hash)) c++;\n",
+        "            while ((q < prevSides.size()) && (prevSides[q].hash == hash)) q++;\n",
+        "\n",
+        "            // Transforms: distinct (first world matrix, matrix count) ranges on each side.\n",
+        "            curRanges.clear();\n",
+        "            prevRanges.clear();\n",
+        "            for (size_t i = cBegin; i < c; i++) if (curSides[i].transform) curRanges.emplace_back(curSides[i].worldMin, curSides[i].worldCount);\n",
+        "            for (size_t i = qBegin; i < q; i++) if (prevSides[i].transform) prevRanges.emplace_back(prevSides[i].worldMin, prevSides[i].worldCount);\n",
+        "            std::sort(curRanges.begin(), curRanges.end(), byCountThenStart);\n",
+        "            curRanges.erase(std::unique(curRanges.begin(), curRanges.end()), curRanges.end());\n",
+        "            std::sort(prevRanges.begin(), prevRanges.end(), byCountThenStart);\n",
+        "            prevRanges.erase(std::unique(prevRanges.begin(), prevRanges.end()), prevRanges.end());\n",
+        "            size_t pr = 0;\n",
+        "            for (const IndexPair &curRange : curRanges) {\n",
+        "                while ((pr < prevRanges.size()) && (prevRanges[pr].second < curRange.second)) pr++;\n",
+        "                for (size_t k = pr; (k < prevRanges.size()) && (prevRanges[k].second == curRange.second); k++) {\n",
+        "                    for (uint32_t w = 0; w < curRange.second; w++) {\n",
+        "                        const uint32_t curWorldMatrix = curRange.first + w;\n",
+        "                        const uint32_t curGroupIndex = firstCurWorkload.drawData.worldTransformGroups[curWorldMatrix];\n",
+        "                        const TransformGroup &curGroup = firstCurWorkload.drawData.transformGroups[curGroupIndex];\n",
+        "                        const uint32_t prevWorldMatrix = prevRanges[k].first + w;\n",
+        "                        const uint32_t prevGroupIndex = firstPrevWorkload.drawData.worldTransformGroups[prevWorldMatrix];\n",
+        "                        const TransformGroup &prevGroup = firstPrevWorkload.drawData.transformGroups[prevGroupIndex];\n"
+      ]
+    },
+    {
+      "original_start": 544,
+      "original_end": 545,
+      "original_sha256": "d20d7c3c51d8699a582e49e797bc95545ed57c25098574f9e7ba2e7ee2879baa",
+      "replacement_lines": [
+        "                            transformCheckSet.emplace_back(curWorldMatrix, prevWorldMatrix);\n"
+      ]
+    },
+    {
+      "original_start": 548,
+      "original_end": 548,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "            }\n"
       ]
     },
     {
       "original_start": 549,
-      "original_end": 550,
-      "original_sha256": "bf4cf97f5e9ca4fa2e6e95d9d5b719d02c89a10e14c4cd0049fedaa95b451332",
+      "original_end": 557,
+      "original_sha256": "31c1cfe9eabdf90fb97262c6b4310ff257aed9f4b57d292f0c751fbe088d9494",
       "replacement_lines": [
-        "                if (callOwnersMatch && (curCall.callDesc.tileCount == prevCall.callDesc.tileCount) && (curIt.second.doTileInterpolation && prevIt->second.doTileInterpolation)) {\n"
+        "            // Tiles: the same tile slot of calls with the same tile count. When both calls match\n",
+        "            // tiles, only tiles with the same TMEM hash pair up, so previous tiles are sorted by\n",
+        "            // (count, slot, matching, hash) and each current tile takes one or two ranges.\n",
+        "            prevTiles.clear();\n",
+        "            for (size_t i = qBegin; i < q; i++) {\n",
+        "                const CallSide &prevSide = prevSides[i];\n",
+        "                if (!prevSide.tileInterpolation) continue;\n",
+        "                for (uint32_t t = 0; t < prevSide.tileCount; t++) {\n",
+        "                    const uint64_t tileHash = prevSide.tileMatching ? firstPrevWorkload.drawData.callTiles[prevSide.tileIndex + t].tmemHashOrID : 0;\n",
+        "                    prevTiles.push_back({ prevSide.tileCount, t, prevSide.tileMatching, tileHash, prevSide.tileIndex + t });\n",
+        "                }\n",
+        "            }\n"
       ]
     },
     {
-      "original_start": 565,
-      "original_end": 566,
-      "original_sha256": "ac77a484a6ed774f7e87509cd398b7b1cbf597fbc6b323cb7243e5f5f5a953eb",
+      "original_start": 558,
+      "original_end": 559,
+      "original_sha256": "2a88c03dd8743ec6f543fa29c6c359bbfe663e95c571fb587e357bf2f7bdd6b2",
       "replacement_lines": [
-        "                if (callOwnersMatch && curUsesTextureGen && prevUsesTextureGen && (true && true)) { // TODO: Do look at matching condition.\n"
+        "            std::sort(prevTiles.begin(), prevTiles.end());\n",
+        "            auto bySlot = [](const TileKey &x, const TileKey &y) { return std::tie(x.tileCount, x.slot) < std::tie(y.tileCount, y.slot); };\n",
+        "            auto byHash = [](const TileKey &x, const TileKey &y) { return std::tie(x.tileCount, x.slot, x.matching, x.hash) < std::tie(y.tileCount, y.slot, y.matching, y.hash); };\n",
+        "            auto byMatching = [](const TileKey &x, const TileKey &y) { return std::tie(x.tileCount, x.slot, x.matching) < std::tie(y.tileCount, y.slot, y.matching); };\n",
+        "            for (size_t i = cBegin; i < c; i++) {\n",
+        "                const CallSide &curSide = curSides[i];\n",
+        "                if (!curSide.tileInterpolation) continue;\n",
+        "                for (uint32_t t = 0; t < curSide.tileCount; t++) {\n",
+        "                    const uint32_t curTile = curSide.tileIndex + t;\n",
+        "                    auto addRange = [&](std::pair<std::vector<TileKey>::iterator, std::vector<TileKey>::iterator> range) {\n",
+        "                        for (auto it = range.first; it != range.second; it++) tileCheckSet.emplace_back(curTile, it->tileIndex);\n",
+        "                    };\n",
+        "\n",
+        "                    if (curSide.tileMatching) {\n",
+        "                        const uint64_t curHash = firstCurWorkload.drawData.callTiles[curTile].tmemHashOrID;\n",
+        "                        addRange(std::equal_range(prevTiles.begin(), prevTiles.end(), TileKey{ curSide.tileCount, t, false, 0, 0 }, byMatching));\n",
+        "                        addRange(std::equal_range(prevTiles.begin(), prevTiles.end(), TileKey{ curSide.tileCount, t, true, curHash, 0 }, byHash));\n",
+        "                    }\n",
+        "                    else {\n",
+        "                        addRange(std::equal_range(prevTiles.begin(), prevTiles.end(), TileKey{ curSide.tileCount, t, false, 0, 0 }, bySlot));\n"
+      ]
+    },
+    {
+      "original_start": 561,
+      "original_end": 561,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "            }\n"
+      ]
+    },
+    {
+      "original_start": 562,
+      "original_end": 572,
+      "original_sha256": "3a3f3d3d83b4c5e99fd65d0bbe411cc8c17fd8decd52d458612673f3c15bb70c",
+      "replacement_lines": [
+        "            // Look at: distinct indices on each side.\n",
+        "            curLookAts.clear();\n",
+        "            prevLookAts.clear();\n",
+        "            for (size_t i = cBegin; i < c; i++) if (curSides[i].textureGen) curLookAts.emplace_back(curSides[i].lookAt);\n",
+        "            for (size_t i = qBegin; i < q; i++) if (prevSides[i].textureGen) prevLookAts.emplace_back(prevSides[i].lookAt);\n",
+        "            std::sort(curLookAts.begin(), curLookAts.end());\n",
+        "            curLookAts.erase(std::unique(curLookAts.begin(), curLookAts.end()), curLookAts.end());\n",
+        "            std::sort(prevLookAts.begin(), prevLookAts.end());\n",
+        "            prevLookAts.erase(std::unique(prevLookAts.begin(), prevLookAts.end()), prevLookAts.end());\n",
+        "            for (uint32_t curLookAt : curLookAts) {\n",
+        "                for (uint32_t prevLookAt : prevLookAts) {\n",
+        "                    lookAtCheckSet.emplace_back(curLookAt, prevLookAt);\n"
+      ]
+    },
+    {
+      "original_start": 575,
+      "original_end": 575,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "\n",
+        "        auto sortUnique = [](std::vector<IndexPair> &pairs) {\n",
+        "            std::sort(pairs.begin(), pairs.end());\n",
+        "            pairs.erase(std::unique(pairs.begin(), pairs.end()), pairs.end());\n",
+        "        };\n",
+        "\n",
+        "        sortUnique(transformCheckSet);\n",
+        "        sortUnique(tileCheckSet);\n",
+        "        sortUnique(lookAtCheckSet);\n"
       ]
     }
   ],
   "integration_purpose": [
     "workload owner and index guards",
     "same-scene projection reuse eligibility and conservative ordinal fallback",
-    "explicit projection matrix IDs decide scene pairing before matrix distance"
+    "explicit projection matrix IDs decide scene pairing before matrix distance",
+    "matchScene builds its transform, tile and look-at check sets from the distinct per-call properties of each hash bucket instead of every current x previous call pair (same sets, same order)"
   ]
 }

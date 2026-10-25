@@ -283,6 +283,28 @@ Steam Deck features:
   kept): the same scripted run snapped at workloads 884 and 887 every time
   without the recipe and never with it. Also worth reporting upstream (RT64).
 
+- **Draw-call matching without the quadratic pair loop** (same recipe,
+  revision 2). RT64's `matchScene` hashes each draw call (combiner, other
+  mode, geometry mode, triangle count, matrix IDs) and then visited every
+  current x previous call pair with the same hash, inserting transform, tile
+  and look-at candidate pairs into `std::set`s. Level geometry with identical
+  state shares one hash: in Hailfire Peaks' icy side, looking out of the ice
+  cave toward the sky bridge (map `0x128`), one scene had 2,371 calls, a
+  557-call bucket and 441,719 pairs per game frame, for 430 transform, ~16,800
+  tile and 23 look-at pairs. That made `RT64_Workload` the Deck's limit (84%
+  of a core, ~32 presents/s at Manual 60). The sets only depend on per-call
+  properties, so revision 2 builds them per bucket from the distinct matrix
+  ranges and look-at indices on each side and, for tiles, looks previous
+  tiles up by (tile count, slot, matching, TMEM hash). Sorted unique vectors
+  replace the sets and iterate in the same order, so the matching is
+  unchanged: an A/B build computing both compared every scene (8,400 scenes at
+  that view, 6,600 running round Jinjo Village, no mismatch). Dev machine,
+  release build at that view: `RT64_Workload` 39% -> 8% of a core, at 6x and
+  1x alike. Confirmed on the Deck by the owner (2026-10-25): no lag there at
+  6x with LOD off, stable at 90 Hz (F4: 89.7 presents/s, game at 30 every
+  frame; before, 31.7 presents/s). The game thread's parse still takes ~16.5 ms
+  median there (texture loads and TMEM hashing are the largest part).
+
 - **F4 reports carry a guest RAM snapshot** (`tools/baseline/issue_evidence.cpp`):
   F4 also copies the 8 MB guest RDRAM once and writes it next to the report as
   `<report>-rdram.bin` (recomp layout), plus a `game_state` row (map, player
@@ -802,8 +824,8 @@ breaks one of them is not done. In practice:
   options, draw distance and LOD, frustum padding, underwater sway width,
   minimap, levitate,
   autosave, heap, analog camera, mouse/gyro aim, the culling and camera
-  fixes, the F4 RAM snapshot, the startup dummy-workload fix, and anything
-  added since).
+  fixes, draw-call matching speed, the F4 RAM snapshot, the startup
+  dummy-workload fix, and anything added since).
 - When a conflict or a moved/failed raw hook touches one, carry it over (move
   the hook, re-anchor the code); never drop it to make the build pass.
 - Drop ours only where upstream now provides the same feature (as with rumble,
