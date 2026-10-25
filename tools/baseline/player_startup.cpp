@@ -220,48 +220,6 @@ std::vector<std::wstring> command_line() {
     return result;
 }
 
-Arguments parse_arguments(const std::vector<std::wstring>& arguments) {
-    Arguments result;
-    if (arguments.empty()) return result;
-    const auto usage = [] {
-        return Failure("Usage: BanjoTooieScurvyDogPort [--profile-dir FOLDER [--rom FILE] [--import-save FILE] "
-            "[--seconds 1..900 [--input-script FILE]]]");
-    };
-    bool seconds_seen = false;
-    for (size_t i = 0; i < arguments.size(); i += 2) {
-        if (i + 1 == arguments.size()) throw usage();
-        const auto& name = arguments[i];
-        const auto& value = arguments[i + 1];
-        const auto take = [&](fs::path& slot) {
-            if (!slot.empty() || value.empty()) throw usage();
-            slot = value;
-        };
-        if (name == L"--profile-dir") take(result.profile);
-        else if (name == L"--rom") take(result.rom);
-        else if (name == L"--import-save") take(result.import_save);
-        else if (name == L"--input-script") take(result.input_script);
-        else if (name == L"--seconds") {
-            if (seconds_seen) throw usage();
-            seconds_seen = true;
-            unsigned seconds = 0;
-            bool valid = !value.empty() && value.size() <= 3;
-            for (const wchar_t c : value) {
-                if (c < L'0' || c > L'9') valid = false;
-                else seconds = seconds * 10 + unsigned(c - L'0');
-            }
-            if (!valid || seconds < 1 || seconds > 900) throw Failure("--seconds must be 1..900");
-            result.seconds = seconds;
-        } else throw usage();
-    }
-    if (result.profile.empty())
-        throw Failure("QA options require --profile-dir; start without arguments for normal play.");
-    // The existing engineering script owns port 0 only for a bounded QA run.
-    if (!result.input_script.empty() && result.seconds == 0)
-        throw Failure("--input-script requires an explicit --seconds bound.");
-    result.qa = true;
-    return result;
-}
-
 fs::path default_profile_root() { return local_app_data() / product_folder; }
 fs::path previous_profile_root() { return local_app_data() / previous_folder; }
 fs::path legacy_save_path() { return local_app_data() / legacy_folder / L"saves" / save_name; }

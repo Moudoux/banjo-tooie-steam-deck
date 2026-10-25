@@ -2,13 +2,20 @@
 // Reference: deps/RecompFrontend/recompui/src/renderer/rt64_render_context.cpp.
 // RecompFrontend translation units stay unlinked; HOST selects authored baseline hooks.
 #include "devices.hpp"
+#if TOOIE_BASELINE_HOST && defined(BASELINE_PLAYER)
+#include "guest/minimum-host/first_person_aim_abi.h"
+#include "recomp.h"
+#endif
+#ifdef BASELINE_PLAYER
+#include "guest_clock.hpp"
+#include "frontend_input_preference.hpp"
+#include "sound_trace.hpp"
+#include "issue_evidence.hpp"
+#endif
 #include "input.hpp"
 #ifdef BASELINE_TERMINAL_FENCE
 #include "runtime_lifecycle.hpp"
 #include "ultramodern/error_handling.hpp"
-#ifdef BASELINE_SAVE_COMPOSITION
-#include "save_persistence.hpp"
-#endif
 #endif
 #if TOOIE_BASELINE_HOST
 #include "minimum_host.hpp"
@@ -31,9 +38,11 @@
 #include <unordered_map>
 #endif
 #include "SDL.h"
+#if defined(_WIN32)
 #include "SDL_syswm.h"
 // Runtime's lean Windows include omits the COM bases required by DXC headers.
 #include <objbase.h>
+#endif
 #include "hle/rt64_application.h"
 #include "hle/rt64_state.h"
 #include "hle/rt64_rsp.h"
@@ -155,6 +164,8 @@ std::atomic<uint32_t> first_dl_start{0}, first_dl_size{0};
 std::atomic<bool> first_dl_armed{false}, first_dl_processed{false};
 std::mutex input_mutex;
 input::Player input_player;
+// Same critical section/publication as Player's physical input.
+uint32_t physical_aim_sample = 0, physical_aim_policy = 0;
 #if !TOOIE_BASELINE_HOST
 SDL_GameController* gamepad = nullptr;
 bool gamepad_enabled = false;
@@ -288,6 +299,24 @@ class StockRenderer final : public ultramodern::renderer::RendererContext {
     std::array<uint8_t, 0x1000> dmem{}, imem{};
     std::array<uint32_t, 9> registers{};
     std::unique_ptr<RT64::Application> app;
+#ifdef BASELINE_PLAYER
+    uint32_t diagnostic_task_sequence = 0;
+    void record_graphics(uint32_t kind, const OSTask* task = nullptr) {
+        issue_evidence::GraphicsRecord record{};
+        record.kind = kind;
+        if (task) {
+            record.task_sequence = diagnostic_task_sequence;
+            record.data_ptr = task->t.data_ptr; record.data_size = task->t.data_size;
+        }
+        record.swap_chain_rate = get_display_framerate(); // Release renderer lock before recorder lock.
+        record.resolution = int(app->userConfig.resolutionMultiplier);
+        record.output_rate = int(app->userConfig.refreshRate);
+        record.manual_hz = app->userConfig.refreshRateTarget;
+        record.texture_filter = !app->userConfig.threePointFiltering;
+        record.output_filter = int(app->userConfig.filtering);
+        issue_evidence::record(record);
+    }
+#endif
 public:
     StockRenderer(uint8_t* rdram, ultramodern::renderer::WindowHandle handle, bool developer) {
         using namespace ultramodern::renderer;
@@ -295,7 +324,11 @@ public:
         chosen_api = GraphicsApi::Auto;
         if (developer != bool(BASELINE_RENDERER_COMPARISON)) fail("Developer mode differs from selected baseline admission");
         RT64::Application::Core core{};
+#if defined(_WIN32)
         core.window = handle.window;
+#elif defined(__linux__)
+        core.window = handle;
+#endif
         core.HEADER = header.data(); core.RDRAM = rdram;
         core.DMEM = dmem.data(); core.IMEM = imem.data();
         core.checkInterrupts = check_interrupts;
@@ -339,7 +372,11 @@ public:
 #if TOOIE_BASELINE_HOST
         host::render::configure_startup(*app);
 #endif
-        const auto original = app->setup(handle.thread_id);
+        uint32_t thread_id = 0;
+#if defined(_WIN32)
+        thread_id = handle.thread_id;
+#endif
+        const auto original = app->setup(thread_id);
         setup_result = map_result(original);
         if (setup_result == SetupResult::Success && (!app->device || !app->swapChain || !app->interpreter ||
             !app->state || !app->workloadQueue || !app->presentQueue || !app->sharedQueueResources
@@ -356,6 +393,11 @@ public:
             case RT64::UserConfiguration::GraphicsAPI::Vulkan: chosen_api = GraphicsApi::Vulkan; break;
             default: fail("RT64 chose undeclared graphics API");
             }
+            // An explicit D3D12 request (QA or engineering --api d3d12; the default never asks for
+            // it) must run D3D12. RT64's Windows creation fallback and its vendor compatibility
+            // override can both create Vulkan instead; that is refused, never reported as D3D12.
+            if (get_graphics_config().api_option == GraphicsApi::D3D12 && chosen_api != GraphicsApi::D3D12)
+                fail("Requested D3D12 but RT64 created another graphics API; no fallback accepted", false);
             app->setFullScreen(false);
 #if TOOIE_BASELINE_HOST
             host::render::publish_renderer(*app,window);
@@ -382,6 +424,7 @@ public:
             if (host::render::update_rate(app->userConfig, *app->sharedQueueResources, old_config, new_config)) {
                 std::fprintf(stderr, "baseline output-rate config-applied rr_option=%d rr_manual_value=%d owner=gfx presented=unobserved\n",
                     int(new_config.rr_option), new_config.rr_manual_value);
+                record_graphics(issue_evidence::GraphicsRecord::ConfigApplied);
                 return true;
             }
         } catch (const std::exception& error) { fail(error.what()); }
@@ -399,6 +442,8 @@ public:
         if (!valid() || !task) fail("Display list on invalid renderer");
 #ifdef BASELINE_PLAYER
         apply_texture_packs(*app->textureCache);
+        ++diagnostic_task_sequence;
+        record_graphics(issue_evidence::GraphicsRecord::ParseBegin, task);
 #endif
         const bool armed = first_dl_armed.load(std::memory_order_acquire);
         if (armed && task_ordinal < 3) ++task_ordinal;
@@ -419,6 +464,9 @@ public:
         app->state->rsp->reset();
         app->interpreter->loadUCodeGBI(task->t.ucode & 0x3FFFFFF, task->t.ucode_data & 0x3FFFFFF, true);
         app->processDisplayLists(app->core.RDRAM, task->t.data_ptr & 0x3FFFFFF, 0, true);
+#ifdef BASELINE_PLAYER
+        record_graphics(issue_evidence::GraphicsRecord::ParseEnd, task);
+#endif
         if (first) {
             std::fprintf(stderr, "baseline graphics-task-return start=%08x size=%u expected_size=%u size_match=%u parser_returned=1\n",
                 start, task->t.data_size, first_dl_size.load(), unsigned(task->t.data_size == first_dl_size.load()));
@@ -432,26 +480,40 @@ public:
     }
     void send_dummy_workload(uint32_t fb) override {
         if (!valid()) fail("Dummy workload on invalid renderer");
+#ifdef BASELINE_PLAYER
+        record_graphics(issue_evidence::GraphicsRecord::DummyBegin);
+#endif
         app->state->listProcessBegin();
         app->state->rdp->setColorImage(G_IM_FMT_RGBA, G_IM_SIZ_16b, 320, fb);
         app->state->rdp->setOtherMode(0x382C30, 0);
         app->state->rdp->fillRect(0, 0, 320 << 2, 240 << 2);
         app->state->fullSync();
         app->state->listProcessEnd();
+#ifdef BASELINE_PLAYER
+        record_graphics(issue_evidence::GraphicsRecord::DummyEnd);
+#endif
     }
     void update_screen() override {
         if (!valid()) fail("Screen update on invalid renderer");
 #if BASELINE_PLAYER
+        record_graphics(issue_evidence::GraphicsRecord::ScreenBegin);
         const int resolution = host::requested_resolution();
         if (host::render::update_resolution(app->userConfig, *app->sharedQueueResources, resolution)) {
             std::fprintf(stderr, "baseline resolution config-applied scale=%d owner=gfx presented=unobserved\n", resolution);
         }
+        const int texture_filter = host::requested_texture_filter(), output_filter = host::requested_output_filter();
+        if (host::render::update_filters(app->userConfig, *app->sharedQueueResources, texture_filter, output_filter))
+            std::fprintf(stderr, "baseline filtering config-applied texture=%d output=%d owner=gfx presented=unobserved\n",
+                texture_filter, output_filter);
         const auto requested = host::requested_output_rate();
         auto config = ultramodern::renderer::get_graphics_config(); // Graphics owner only after startup.
         host::render::preference_rate(config, requested.option, requested.manual_hz);
         if (config != ultramodern::renderer::get_graphics_config()) ultramodern::renderer::set_graphics_config(config);
 #endif
         app->updateScreen();
+#ifdef BASELINE_PLAYER
+        record_graphics(issue_evidence::GraphicsRecord::ScreenEnd);
+#endif
         const uint32_t rate = get_display_framerate();
         if ((!display_rate_seen && rate != 0) || (display_rate_seen && rate != observed_display_rate)) {
             display_rate_seen = true; observed_display_rate = rate;
@@ -511,6 +573,9 @@ void set_frequency(uint32_t frequency) {
         fail("SDL audio format admission failed");
     }
     audio_frequency = frequency;
+#ifdef BASELINE_PLAYER
+    sound_trace::record(sound_trace::Kind::AudioFrequency, frequency);
+#endif
     if (audio_summary.limit) {
         auto& s=audio_summary; ++s.opened;
         s.queries_at_submit=s.queries;
@@ -521,83 +586,173 @@ void set_frequency(uint32_t frequency) {
     }
     SDL_PauseAudioDevice(audio, 0);
 }
+#ifdef BASELINE_PLAYER
+// F6, guarded by audio_mutex: accelerated guest audio is discarded. The next
+// submit/query clears after any applied edge, including a complete hold/release
+// between audio calls; rate and revision are sampled under the same clock lock.
+uint32_t audio_clock_revision = 0;
+bool accelerated_audio_locked() {
+    const auto clock = tooie::guest_clock::applied();
+    if (clock.revision != audio_clock_revision) {
+        audio_clock_revision = clock.revision;
+        if (audio) SDL_ClearQueuedAudio(audio);
+        sound_trace::record(sound_trace::Kind::AudioClock, clock.rate, clock.revision);
+        auto& s = audio_summary;
+        if (s.limit && s.chunks < s.limit) { s.stopped = true; s.tail[0] = s.tail[1] = 0; }
+    }
+    return clock.rate > 1U;
+}
+#endif
 void queue_samples(int16_t* samples, size_t count) {
     if ((count & 1) || count > std::numeric_limits<Uint32>::max() / sizeof(int16_t) || (count && !samples))
         fail("Invalid audio samples");
-    if (!count) return;
+    if (!count)
+        return;
     std::lock_guard guard(audio_mutex);
-    if (!audio) fail("Audio submitted before frequency admission");
+    if (!audio)
+        fail("Audio submitted before frequency admission");
+#ifdef BASELINE_PLAYER
+    if (accelerated_audio_locked()) {
+        sound_trace::record(sound_trace::Kind::AudioDrop, count);
+        return;
+    }
+#endif
     static std::vector<int16_t> corrected; // Reused only under audio_mutex; SDL_QueueAudio copies.
     corrected.resize(count);
-    for (size_t i = 0; i < count; i += 2) { corrected[i] = samples[i + 1]; corrected[i + 1] = samples[i]; }
-    auto& s=audio_summary;
-    const bool observe=count!=0 && s.limit && s.armed && s.chunks<s.limit && !s.stopped && !quit_published.load(std::memory_order_acquire);
-    if (observe) SDL_LockAudioDevice(audio);
-    const uint64_t pre=observe ? SDL_GetQueuedAudioSize(audio) : 0;
-    const int queued=SDL_QueueAudio(audio, corrected.data(), Uint32(count * sizeof(int16_t)));
-    if (observe) SDL_UnlockAudioDevice(audio);
-    if (queued) fail("Audio queue failed");
-    const bool empty=observe && s.chunks && pre==0;
+    for (size_t i = 0; i < count; i += 2) {
+        corrected[i] = samples[i + 1];
+        corrected[i + 1] = samples[i];
+    }
+    auto& s = audio_summary;
+    const bool observe = count != 0 && s.limit && s.armed && s.chunks < s.limit && !s.stopped &&
+        !quit_published.load(std::memory_order_acquire);
+    if (observe)
+        SDL_LockAudioDevice(audio);
+    const uint64_t pre = observe ? SDL_GetQueuedAudioSize(audio) : 0;
+    const int queued = SDL_QueueAudio(audio, corrected.data(), Uint32(count * sizeof(int16_t)));
+    if (observe)
+        SDL_UnlockAudioDevice(audio);
+    if (queued)
+        fail("Audio queue failed");
+#ifdef BASELINE_PLAYER
+    // Fingerprint only; never retain PCM. Equal hashes are clues, not proof of replay.
+    uint64_t digest = 14695981039346656037ULL;
+    const auto* pcm_bytes = reinterpret_cast<const unsigned char*>(corrected.data());
+    for (size_t i = 0; i < corrected.size() * sizeof(int16_t); ++i) {
+        digest ^= pcm_bytes[i];
+        digest *= 1099511628211ULL;
+    }
+    sound_trace::record(sound_trace::Kind::AudioChunk, count, digest, SDL_GetQueuedAudioSize(audio));
+#endif
+    const bool empty = observe && s.chunks && pre == 0;
     if (observe && !quit_published.load(std::memory_order_acquire)) {
         // Only first-to-last locked submit intervals; no shutdown-tail inference.
-        const uint64_t request=s.obtained_size, after=pre+count*sizeof(int16_t);
-        if (!request || request%4 || after>UINT32_MAX) ++s.drain_invalid;
+        const uint64_t request = s.obtained_size,
+            after = pre + count * sizeof(int16_t);
+        if (!request || request % 4 || after > UINT32_MAX)
+            ++s.drain_invalid;
         if (s.chunks) {
-            if (!request || request%4 || pre>s.locked_after || s.locked_after>UINT32_MAX) ++s.drain_invalid;
-            else if (pre) { if ((s.locked_after-pre)%request) ++s.drain_invalid; }
+            if (!request || request % 4 || pre > s.locked_after || s.locked_after > UINT32_MAX)
+                ++s.drain_invalid;
+            else if (pre) {
+                if ((s.locked_after - pre) % request)
+                    ++s.drain_invalid;
+            }
             else {
-                const uint64_t remainder=s.locked_after%request;
-                const uint32_t step=uint32_t(std::max({std::abs(int(s.tail[0])),std::abs(int(s.tail[1])),std::abs(int(corrected[0])),std::abs(int(corrected[1]))}));
-                if (remainder) { ++s.partial_fills; s.silence_min_frames+=(request-remainder)/4; s.partial_step_max=std::max(s.partial_step_max,step); }
-                else { ++s.boundary_empty; s.boundary_step_max=std::max(s.boundary_step_max,step); }
-                if (!s.first_dry_chunk) s.first_dry_chunk=s.chunks+1;
-                s.last_dry_chunk=s.chunks+1;
+                const uint64_t remainder = s.locked_after % request;
+                const uint32_t step = uint32_t(std::max({
+                    std::abs(int(s.tail[0])), std::abs(int(s.tail[1])),
+                    std::abs(int(corrected[0])), std::abs(int(corrected[1]))}));
+                if (remainder) {
+                    ++s.partial_fills;
+                    s.silence_min_frames += (request - remainder) / 4;
+                    s.partial_step_max = std::max(s.partial_step_max, step);
+                }
+                else {
+                    ++s.boundary_empty;
+                    s.boundary_step_max = std::max(s.boundary_step_max, step);
+                }
+                if (!s.first_dry_chunk)
+                    s.first_dry_chunk = s.chunks + 1;
+                s.last_dry_chunk = s.chunks + 1;
             }
         }
-        s.locked_after=after;
-        const uint64_t now=audio_observation_us(),post_bytes=SDL_GetQueuedAudioSize(audio);
+        s.locked_after = after;
+        const uint64_t now = audio_observation_us(),
+            post_bytes = SDL_GetQueuedAudioSize(audio);
         if (s.chunks) {
-            const uint64_t gap=now-s.last_us, queued_us=s.post_bytes*1000000ull/(4ull*s.hz), block_us=uint64_t(s.obtained_samples)*1000000ull/s.hz;
-            if (gap>s.submit_gap_max_us) {
-                s.submit_gap_max_us=gap;
-                s.max_gap_ending_chunk=s.chunks+1;
-                s.max_gap_queries=s.queries-s.queries_at_submit;
-                s.max_gap_first_query_us=s.max_gap_queries ? s.first_interval_query_us-s.last_us : 0;
-                s.max_gap_last_query_us=s.max_gap_queries ? now-s.last_query_us : 0;
+            const uint64_t gap = now - s.last_us,
+                queued_us = s.post_bytes * 1000000ull / (4ull * s.hz),
+                block_us = uint64_t(s.obtained_samples) * 1000000ull / s.hz;
+            if (gap > s.submit_gap_max_us) {
+                s.submit_gap_max_us = gap;
+                s.max_gap_ending_chunk = s.chunks + 1;
+                s.max_gap_queries = s.queries - s.queries_at_submit;
+                s.max_gap_first_query_us = s.max_gap_queries ? s.first_interval_query_us - s.last_us : 0;
+                s.max_gap_last_query_us = s.max_gap_queries ? now - s.last_query_us : 0;
             }
-            if (gap>queued_us) { ++s.headroom_excess; s.headroom_max_us=std::max(s.headroom_max_us,gap-queued_us); }
-            if (gap>queued_us+block_us) { ++s.block_headroom_excess; s.block_headroom_max_us=std::max(s.block_headroom_max_us,gap-queued_us-block_us); }
-            for (size_t channel=0;channel<2;++channel) { const int32_t d=int32_t(corrected[channel])-s.tail[channel]; s.join_max=std::max(s.join_max,uint32_t(d<0 ? -d : d)); }
+            if (gap > queued_us) {
+                ++s.headroom_excess;
+                s.headroom_max_us = std::max(s.headroom_max_us, gap - queued_us);
+            }
+            if (gap > queued_us + block_us) {
+                ++s.block_headroom_excess;
+                s.block_headroom_max_us = std::max(s.block_headroom_max_us, gap - queued_us - block_us);
+            }
+            for (size_t channel = 0; channel < 2; ++channel) {
+                const int32_t d = int32_t(corrected[channel]) - s.tail[channel];
+                s.join_max = std::max(s.join_max, uint32_t(d < 0 ? -d : d));
+            }
             ++s.joins;
-        } else { s.first_us=now; s.first_chunk_frames=count/2; }
-        for (size_t i=2;i<count;++i) { const int32_t d=int32_t(corrected[i])-corrected[i-2]; s.internal_max=std::max(s.internal_max,uint32_t(d<0 ? -d : d)); }
-        s.last_us=now; s.post_bytes=post_bytes;
-        s.queries_at_submit=s.queries;
-        s.first_interval_query_us=0;
-        s.tail[0]=corrected[count-2]; s.tail[1]=corrected[count-1];
-        for (int16_t sample:corrected) {
-            const uint32_t magnitude=sample<0 ? uint32_t(-int32_t(sample)) : uint32_t(sample);
-            if (magnitude>s.peak) s.peak=magnitude;
-            s.rails+=sample==INT16_MIN || sample==INT16_MAX;
         }
-        s.zero_before+=empty; s.frames+=count/2; ++s.chunks;
-        if (s.chunks==s.limit) s.tail[0]=s.tail[1]=0;
+        else {
+            s.first_us = now;
+            s.first_chunk_frames = count / 2;
+        }
+        for (size_t i = 2; i < count; ++i) {
+            const int32_t d = int32_t(corrected[i]) - corrected[i - 2];
+            s.internal_max = std::max(s.internal_max, uint32_t(d < 0 ? -d : d));
+        }
+        s.last_us = now;
+        s.post_bytes = post_bytes;
+        s.queries_at_submit = s.queries;
+        s.first_interval_query_us = 0;
+        s.tail[0] = corrected[count - 2];
+        s.tail[1] = corrected[count - 1];
+        for (int16_t sample : corrected) {
+            const uint32_t magnitude = sample < 0 ? uint32_t(-int32_t(sample)) : uint32_t(sample);
+            if (magnitude > s.peak)
+                s.peak = magnitude;
+            s.rails += sample == INT16_MIN || sample == INT16_MAX;
+        }
+        s.zero_before += empty;
+        s.frames += count / 2;
+        ++s.chunks;
+        if (s.chunks == s.limit)
+            s.tail[0] = s.tail[1] = 0;
     }
 }
 size_t frames_remaining() {
     std::lock_guard guard(audio_mutex);
-    const size_t frames=audio ? SDL_GetQueuedAudioSize(audio) / (2 * sizeof(int16_t)) : 0;
-    auto& s=audio_summary;
-    if (s.limit && s.chunks && s.chunks<s.limit && !s.stopped) {
-        const uint64_t now=audio_observation_us();
-        if (s.queries==s.queries_at_submit) s.first_interval_query_us=now;
-        ++s.queries; s.zero_queries+=frames==0;
-        if (s.last_query_us) s.query_gap_max_us=std::max(s.query_gap_max_us,now-s.last_query_us);
-        s.last_query_us=now;
+#ifdef BASELINE_PLAYER
+    if (audio && accelerated_audio_locked())
+        return 0; // Discarded; no normal query evidence.
+#endif
+    const size_t frames = audio ? SDL_GetQueuedAudioSize(audio) / (2 * sizeof(int16_t)) : 0;
+    auto& s = audio_summary;
+    if (s.limit && s.chunks && s.chunks < s.limit && !s.stopped) {
+        const uint64_t now = audio_observation_us();
+        if (s.queries == s.queries_at_submit)
+            s.first_interval_query_us = now;
+        ++s.queries;
+        s.zero_queries += frames == 0;
+        if (s.last_query_us)
+            s.query_gap_max_us = std::max(s.query_gap_max_us, now - s.last_query_us);
+        s.last_query_us = now;
     }
 #ifdef BASELINE_PLAYER
-    const size_t reserve=audio_frequency/60; // audio_mutex is held; subtract saturating.
-    return frames>reserve ? frames-reserve : 0;
+    const size_t reserve = audio_frequency / 60; // audio_mutex is held; subtract saturating.
+    return frames > reserve ? frames - reserve : 0;
 #else
     return frames;
 #endif
@@ -654,7 +809,17 @@ bool keyboard_input(int port, uint16_t* buttons, float* x, float* y) {
     }
     return true;
 }
+#ifdef BASELINE_PLAYER
+void controller_rumble(int port, bool enabled) {
+    std::lock_guard guard(input_mutex);
+    tooie::input::set_rumble(port, enabled && !quit_published.load(std::memory_order_acquire) &&
+        input_player.delivers_physical());
+}
+#endif
 ultramodern::input::connected_device_info_t keyboard_device(int port) {
+#ifdef BASELINE_PLAYER
+    if (port == 0) return {ultramodern::input::Device::Controller, ultramodern::input::Pak::RumblePak};
+#endif
     return {port == 0 ? ultramodern::input::Device::Controller : ultramodern::input::Device::None, ultramodern::input::Pak::None};
 }
 std::unique_ptr<ultramodern::renderer::RendererContext> create_renderer(uint8_t* rdram,
@@ -767,6 +932,9 @@ ultramodern::renderer::WindowHandle open_devices(const std::filesystem::path& ro
 #if TOOIE_BASELINE_HOST
         | SDL_WINDOW_RESIZABLE
 #endif
+#if defined(__linux__)
+        | SDL_WINDOW_VULKAN
+#endif
         );
     if (!window) throw std::runtime_error(SDL_GetError());
     if (required_display) {
@@ -823,8 +991,10 @@ ultramodern::renderer::WindowHandle open_devices(const std::filesystem::path& ro
     select_gamepad();
 #endif
     keyboard_observed.store(false, std::memory_order_relaxed);
+#if defined(_WIN32)
     SDL_SysWMinfo wm{}; SDL_VERSION(&wm.version);
     if (!SDL_GetWindowWMInfo(window, &wm)) throw std::runtime_error(SDL_GetError());
+#endif
     using namespace ultramodern::renderer;
     GraphicsConfig config{};
     config.developer_mode = bool(BASELINE_RENDERER_COMPARISON); config.res_option = Resolution::Original;
@@ -841,7 +1011,14 @@ ultramodern::renderer::WindowHandle open_devices(const std::filesystem::path& ro
     quit_published.store(false, std::memory_order_relaxed);
     quit_at = seconds ? std::chrono::steady_clock::now() + std::chrono::seconds(seconds)
         : std::chrono::steady_clock::time_point::max();
+#if defined(_WIN32)
     return {wm.info.win.window, GetCurrentThreadId()};
+#elif defined(__linux__)
+    // The selected runtime and RT64 SDL Vulkan backend share this SDL owner.
+    return window;
+#else
+#error Selected baseline window handle requires a platform implementation
+#endif
 }
 void emit_audio_summary() {
     std::lock_guard guard(audio_mutex);
@@ -893,7 +1070,13 @@ void close_devices() {
 }
 ultramodern::renderer::callbacks_t renderer_callbacks() { return {create_renderer, nullptr}; }
 ultramodern::audio_callbacks_t audio_callbacks() { return {queue_samples, frames_remaining, set_frequency}; }
-ultramodern::input::callbacks_t input_callbacks() { return {poll_input, keyboard_input, nullptr, keyboard_device}; }
+ultramodern::input::callbacks_t input_callbacks() {
+#ifdef BASELINE_PLAYER
+    return {poll_input, keyboard_input, controller_rumble, keyboard_device};
+#else
+    return {poll_input, keyboard_input, nullptr, keyboard_device};
+#endif
+}
 
 void vi_complete() {
     // The stock VI callback runs after its initial mode and both states are seeded.
@@ -905,6 +1088,12 @@ void update_gfx(void*) {
 #if TOOIE_BASELINE_HOST
     SDL_Event event;
     while(SDL_PollEvent(&event)) host::handle_event(event);
+#ifdef BASELINE_PLAYER
+    {
+        std::lock_guard guard(input_mutex);
+        if (!input_player.delivers_physical()) tooie::input::set_rumble(0, false);
+    }
+#endif
     // Exactly one SDL-owner publication; no second controller registry/poller.
     const auto publication=host::tick(start_requested);
     const bool deadline_reached=std::chrono::steady_clock::now()>=quit_at;
@@ -917,14 +1106,12 @@ void update_gfx(void*) {
 #ifdef BASELINE_TERMINAL_FENCE
     if(!quit_requested && !lifecycle_stop_seen && tooie::lifecycle::stopping()) {
         lifecycle_stop_seen=true;
-        report_lifecycle_failure();
+        report_lifecycle_failure(); // Retained by main's error owner, never shown here.
     }
     const bool lifecycle_stopping=lifecycle_stop_seen;
-    bool lifecycle_quit=lifecycle_stop_seen && !quit_requested && !runtime_error_report_pending();
-#ifdef BASELINE_SAVE_COMPOSITION
-    // A recorded saver failure retains its existing player-owned quit.
-    lifecycle_quit=lifecycle_quit && tooie::save_persistence::failed.load(std::memory_order_acquire)==0;
-#endif
+    // Errors from any thread are only retained; this SDL owner alone turns a retained
+    // report or a lifecycle stop into quit.
+    const bool lifecycle_quit=lifecycle_stop_seen || runtime_error_retained();
 #else
     constexpr bool lifecycle_stopping=false, lifecycle_quit=false;
 #endif
@@ -938,6 +1125,10 @@ void update_gfx(void*) {
         std::lock_guard guard(input_mutex);
         input_player.publish(physical,activity,stopping,now,
             (publication.focused || publication.physical_admitted) && !stopping,&events);
+#ifdef BASELINE_PLAYER
+        physical_aim_sample = stopping ? 0 : publication.aim_sample;
+        physical_aim_policy = stopping ? 0 : publication.aim_policy;
+#endif
     }
     print_input_events(events);
     if(!quit_requested && (close || deadline_reached || start_failed || start_refused || lifecycle_quit)) {
@@ -959,7 +1150,11 @@ void update_gfx(void*) {
         host::render::latch_startup(true);
         host::note_game_started();
         start_requested=true;
+#ifdef BASELINE_PLAYER // Matches the port 0 Pak reported by keyboard_device.
+        std::fputs("baseline start_game requested after initial VI; input=shared-mapper port0 pak=RumblePak\n",stderr);
+#else
         std::fputs("baseline start_game requested after initial VI; input=shared-mapper port0 pak=None\n",stderr);
+#endif
         recomp::start_game(u8"bt.n64.us.1.0", "");
     }
 #else
@@ -1026,3 +1221,20 @@ void update_gfx(void*) {
 #endif
 }
 }
+
+#if TOOIE_BASELINE_HOST && defined(BASELINE_PLAYER)
+extern "C" void tooie_baseline_first_person_aim(uint8_t*, recomp_context* ctx) {
+    using namespace baseline;
+    uint32_t sample = 0, policy = 0;
+    {
+        std::lock_guard guard(input_mutex);
+        if (!quit_published.load(std::memory_order_acquire) && input_player.delivers_physical() &&
+            (physical_aim_policy & TOOIE_FP_AIM_ENABLED)) {
+            sample = physical_aim_sample;
+            policy = physical_aim_policy;
+        }
+    }
+    ctx->r2 = (gpr)(int32_t)sample;
+    ctx->r3 = (gpr)(int32_t)policy;
+}
+#endif

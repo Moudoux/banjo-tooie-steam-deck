@@ -4,7 +4,6 @@ import hashlib
 import json
 from pathlib import Path
 
-
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -43,12 +42,12 @@ def main():
         raise ValueError("Fixture children must remain in the nominated build subtree")
     specs = [
         (binary / "baseline/lifecycle/mesgqueue.cpp", "mesgqueue.cpp",
-         "ed3f3d6e2ad4894e3648143eb6375aa7ca67cb5df4c1e2bc394033f6915d1cee",
+         "0889f02f33c2da072eebdccaccc81bcdeba09993eb7ea3e020200feaeabfcf8d",
          b'extern "C" void tooie_wait_save_fixture_timeout(int) noexcept;\n',
          b"        while (!external_messages.wait_dequeue_timed(to_send, std::chrono::milliseconds{10})) {\n",
          b"            tooie_wait_save_fixture_timeout(osGetThreadId(rdram, 0));\n"),
         (root / "src/runtime_lifecycle.cpp", "runtime_lifecycle.cpp",
-         "d665d74b3bad8e239ed404bf2d9b95b8970fd0a310cecad97dfc3d6d600c0146",
+         "b757d64a2b1620fa3d5eef1b2d2a6594043cac6604f03236431375af533a7f69",
          b'#include <cstddef>\nextern "C" void tooie_wait_save_fixture_quiescence(bool, std::size_t) noexcept;\n',
          b"bool wait_for_shutdown_quiescence(std::chrono::milliseconds timeout) {\n    std::unique_lock lock(owner_mutex);\n",
          b"    tooie_wait_save_fixture_quiescence(stopping_flag.load(std::memory_order_acquire), producers.size());\n"),

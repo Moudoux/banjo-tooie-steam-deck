@@ -1,0 +1,183 @@
+--- a/timer.cpp
++++ b/timer.cpp
+@@ -1,4 +1,6 @@
+ #include "runtime_lifecycle.hpp"
++#include "guest_clock.hpp"
++#include "virtual_clock.hpp"
+ #include <type_traits>
+ #include <thread>
+ #include <variant>
+@@ -25,3 +27,3 @@
+-static_assert(std::is_same_v<std::chrono::high_resolution_clock, std::chrono::steady_clock>, "Baseline timer requires the pinned MSVC clock alias");
++// Selected timer/VI time uses steady_clock; see the F6 compatibility boundary below.
+ // Start time for the program
+ static std::chrono::high_resolution_clock::time_point start_time = std::chrono::high_resolution_clock::now();
+@@ -31,3 +33,56 @@
+ constexpr uint32_t speed_multiplier = 1;
+ // N64 CPU counter ticks per millisecond
+ constexpr uint32_t counter_per_ms = 46'875 * speed_multiplier;
++
++// F6 compatibility boundary. Guest time and every selected timer/VI deadline use
++// steady_clock. Where high_resolution_clock is steady_clock (pinned MSVC),
++// steady_start is start_time itself, so the unengaged paths compute exactly the
++// upstream values. Elsewhere steady_start is an independent steady epoch sampled
++// in the same static initialization, right after start_time; it is never
++// converted to or from start_time, which keeps serving the public
++// get_start()/time_since_start().
++constexpr bool guest_clock_is_upstream =
++    std::is_same_v<std::chrono::high_resolution_clock, std::chrono::steady_clock>;
++template <class Clock>
++static std::chrono::steady_clock::time_point guest_steady_epoch(const typename Clock::time_point& upstream) {
++    if constexpr (std::is_same_v<Clock, std::chrono::steady_clock>) return upstream;
++    else return std::chrono::steady_clock::now();
++}
++static const std::chrono::steady_clock::time_point steady_start =
++    guest_steady_epoch<std::chrono::high_resolution_clock>(start_time);
++
++struct GuestMap {
++    std::mutex mutex;
++    std::atomic_bool engaged{false};
++    std::atomic_uint32_t revision{0};
++    std::chrono::steady_clock::time_point host_anchor{};
++    std::chrono::steady_clock::duration guest_anchor{};
++    uint32_t rate = 1;
++};
++static GuestMap guest_map;
++
++// Engaged callers sample steady now under guest_map.mutex after the rebase that
++// set host_anchor, so the host interval is never negative.
++static std::chrono::steady_clock::duration guest_elapsed_locked(std::chrono::steady_clock::time_point now) {
++    if (!guest_map.engaged.load(std::memory_order_relaxed)) return now - steady_start;
++    return guest_map.guest_anchor + (now - guest_map.host_anchor) * guest_map.rate;
++}
++
++// Earliest steady point whose guest time has reached target; never early.
++static std::chrono::steady_clock::time_point guest_host_point_locked(std::chrono::steady_clock::duration target) {
++    if (!guest_map.engaged.load(std::memory_order_relaxed)) return steady_start + target;
++    const auto delta = target - guest_map.guest_anchor;
++    if (delta <= std::chrono::steady_clock::duration::zero()) return guest_map.host_anchor + delta;
++    auto host = delta / guest_map.rate;
++    if (host * guest_map.rate < delta) host += std::chrono::steady_clock::duration{1};
++    return guest_map.host_anchor + host;
++}
++
++// The upstream primitive where its parameter type is this steady point.
++template <class TimePoint>
++static void guest_sleep_until(const TimePoint& deadline) {
++    if constexpr (std::is_same_v<TimePoint, std::chrono::high_resolution_clock::time_point>)
++        ultramodern::sleep_until(deadline);
++    else
++        std::this_thread::sleep_until(deadline);
++}
+@@ -57,2 +112,3 @@
+ struct ContinuousTimerStop {};
+-using Action = std::variant<AddTimerAction, RemoveTimerAction, ContinuousTimerStop>;
++struct ClockRateChanged {};
++using Action = std::variant<AddTimerAction, RemoveTimerAction, ContinuousTimerStop, ClockRateChanged>;
+@@ -71,5 +127,5 @@
+ static bool timer_device_checkpoint() { return true; }
+-static bool timer_device_enabled() { return false; }
++static bool timer_device_enabled() { return guest_map.engaged.load(std::memory_order_acquire); }
+ static void publish_timer_action(const Action& action) {
+     if (!timer_context.action_queue.enqueue(timer_context.mutation_producer, action))
+         throw std::runtime_error("Timer mutation publication failed");
+@@ -92,7 +148,12 @@
+-std::chrono::high_resolution_clock::time_point ticks_to_timepoint(uint64_t ticks) {
+-    return start_time + ticks_to_duration(ticks);
+-}
+-
+-uint64_t time_now() {
+-    return duration_to_ticks(std::chrono::high_resolution_clock::now() - start_time);
+-}
++std::chrono::steady_clock::time_point ticks_to_timepoint(uint64_t ticks) {
++    if (!guest_map.engaged.load(std::memory_order_acquire)) return steady_start + ticks_to_duration(ticks);
++    std::lock_guard lock{guest_map.mutex};
++    return guest_host_point_locked(ticks_to_duration(ticks));
++}
++
++uint64_t time_now() {
++    if (!guest_map.engaged.load(std::memory_order_acquire))
++        return duration_to_ticks(std::chrono::steady_clock::now() - steady_start);
++    std::lock_guard lock{guest_map.mutex};
++    return duration_to_ticks(guest_elapsed_locked(std::chrono::steady_clock::now()));
++}
+@@ -185,2 +246,73 @@
++// Applies the tooie::timing request under the existing timer request owner.
++// The request is read inside request_mutex, so the latest notification (or the
++// initial application in init_timers) always ends on the latest request.
++static void guest_rate_changed() noexcept {
++    const char* failure = nullptr;
++    try {
++        std::lock_guard request{timer_context.request_mutex};
++        const uint32_t requested = tooie::timing::rate();
++        std::lock_guard lock{guest_map.mutex};
++        if (requested == guest_map.rate) return;
++        const bool engaged = guest_map.engaged.load(std::memory_order_relaxed);
++        bool woke = true;
++        try {
++            publish_timer_action(ClockRateChanged{});
++        } catch (const std::exception&) {
++            woke = false;
++        }
++        if (!woke && !engaged) {
++            // An unengaged worker may sit in an unsliced upstream wait: stay 1x.
++            // The next release/press cycle notifies again and retries.
++            failure = "baseline fast-forward refused: timer wake publication failed; staying 1x\n";
++        } else {
++            if (!woke) failure = "baseline fast-forward: timer wake publication failed; engaged 2 ms worker slice bounds the change\n";
++            const auto now = std::chrono::steady_clock::now();
++            guest_map.guest_anchor = guest_elapsed_locked(now);
++            guest_map.host_anchor = now;
++            guest_map.rate = requested;
++            guest_map.engaged.store(true, std::memory_order_release);
++            guest_map.revision.fetch_add(1, std::memory_order_release);
++        }
++    } catch (...) {
++        tooie::lifecycle::fail(std::current_exception());
++        failure = "baseline fast-forward: rate change not applied (timer request lock failed)\n";
++    }
++    if (failure) {
++        std::fputs(failure, stderr);
++        std::fflush(stderr);
++    }
++}
++
++bool tooie::guest_clock::owns_vi() noexcept {
++    return !guest_clock_is_upstream || guest_map.engaged.load(std::memory_order_acquire);
++}
++
++tooie::guest_clock::Applied tooie::guest_clock::applied() noexcept {
++    std::lock_guard lock{guest_map.mutex};
++    return {guest_map.rate, guest_map.revision.load(std::memory_order_relaxed)};
++}
++
++uint64_t tooie::guest_clock::wait_vi(uint64_t total_vis, const std::atomic_bool& exited) {
++    using namespace std::chrono_literals;
++    // Upstream VI arithmetic over guest time: deadline total_vis/60 s, count below.
++    const std::chrono::steady_clock::duration target = (total_vis * 1000000us) / 60;
++    for (;;) {
++        uint32_t seen;
++        std::chrono::steady_clock::time_point next;
++        {
++            std::lock_guard lock{guest_map.mutex};
++            seen = guest_map.revision.load(std::memory_order_relaxed);
++            next = guest_host_point_locked(target);
++        }
++        guest_sleep_until(next);
++        // An applied change during the sleep, including 1->2->1, moves the revision.
++        if (exited.load() || guest_map.revision.load(std::memory_order_acquire) == seen) break;
++    }
++    std::lock_guard lock{guest_map.mutex};
++    return (guest_elapsed_locked(std::chrono::steady_clock::now()) * 60 / 1000ms) + 1;
++}
++
+ void ultramodern::init_timers(RDRAM_ARG1) {
++    tooie::timing::set_rate_change_notifier(guest_rate_changed);
++    guest_rate_changed();
+     timer_context.thread = std::thread{ timer_thread, PASS_RDRAM1 };
+@@ -274,4 +406,5 @@
+ void tooie::lifecycle::stop_and_join_timer() {
++    tooie::timing::set_rate_change_notifier(nullptr);
+     if (timer_context.thread.joinable()) {
+         try {
+             std::lock_guard lock{timer_context.request_mutex};

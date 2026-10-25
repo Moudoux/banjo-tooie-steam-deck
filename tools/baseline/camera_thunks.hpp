@@ -2,9 +2,22 @@
 // Mechanical guest ABI marshalling only. Guest leaves own all camera policy.
 // Optional shadow receipt below reads original state and changes no guest registers or memory.
 #if BASELINE_CAMERA_IDENTITY
+// Guest code has already established that an emitted push cannot be closed.
+extern "C" void tooie_bridge_required_stop(uint8_t*, recomp_context* ctx) {
+    switch (uint32_t(ctx->r4)) {
+    case 1: rejected_body("Honey guest paid-close ownership tripwire");
+    case 2: rejected_body("Actor palette guest paid-close ownership tripwire");
+    case 3: rejected_body("Shadow guest paid-mode ownership tripwire");
+    default: rejected_body("Bridge guest paid-close ownership tripwire");
+    }
+}
 #include "demo_timing_layout.h"
 #include "shadow_projection_layout.h"
+#include "bk_pipeline_selection_layout.h"
 #include "pre_background_layout.h"
+#ifdef BASELINE_PLAYER
+#include "issue_evidence_guest.hpp"
+#endif
 #if TOOIE_BASELINE_CAMERA_RUNTIME_OBSERVER
 #include "shadow_witness.hpp"
 #endif
@@ -16,13 +29,18 @@ extern "C" void tooie_camera_construction_begin(uint8_t*, recomp_context*);
 extern "C" void tooie_camera_construction_end(uint8_t*, recomp_context*);
 #if TOOIE_SHADOW_SELECTED
 extern "C" void tooie_shadow_reset(uint8_t*,recomp_context*);
+#if !TOOIE_BK_PIPELINE_SELECTED
 extern "C" void tooie_shadow_source(uint8_t*,recomp_context*);
 extern "C" void tooie_shadow_prepare(uint8_t*,recomp_context*);
+#endif
 extern "C" void tooie_shadow_de498(uint8_t*,recomp_context*);
 extern "C" void tooie_shadow_rectangle_args(uint8_t*,recomp_context*);
 extern "C" void tooie_shadow_mode_begin(uint8_t*,recomp_context*);
 extern "C" void tooie_shadow_mode_end(uint8_t*,recomp_context*);
 extern "C" void tooie_shadow_complete(uint8_t*,recomp_context*);
+#if TOOIE_SHADOW_MV
+extern "C" void tooie_shadow_mv_end(uint8_t*,recomp_context*);
+#endif
 #endif
 namespace {
 void camera_clone_context(recomp_context& clone, const recomp_context& source) {
@@ -35,13 +53,22 @@ void camera_clone_context(recomp_context& clone, const recomp_context& source) {
         rejected_body("camera thunk unexpected FR/pointer pair");
     clone.r29 = SUB32(source.r29, 16);
 }
+// Original func_800DE498 frame, read from source's SP (never clone.r29, the helper's own
+// outgoing area): SP+0xF8 holds the GraphicsBuffers pointer, SP+0xCC is DE498's local
+// gfx-cursor word whose address the helper stores through, and SP+0x10C holds the
+// effective model after callback/cache resolution. Shared by the DE498 ignore, actor
+// CPU-root and NPC665/CPU625/Backpack621 admit transports; each passes a fresh clone.
+void camera_clone_de498_args(uint8_t* rdram, recomp_context& clone, const recomp_context& source) {
+    constexpr uint32_t de498_buffers_slot = 0xF8, de498_cursor_slot = 0xCC, de498_model_slot = 0x10C;
+    camera_clone_context(clone, source);
+    clone.r4 = (gpr)(int32_t)MEM_W(de498_buffers_slot, source.r29);
+    clone.r5 = ADD32(source.r29, de498_cursor_slot);
+    clone.r6 = (gpr)(int32_t)MEM_W(de498_model_slot, source.r29);
+}
 }
 extern "C" void baseline_camera_de498_ignore(uint8_t* rdram, recomp_context* ctx) {
     recomp_context clone;
-    camera_clone_context(clone, *ctx);
-    clone.r4 = (gpr)(int32_t)MEM_W(0xF8, ctx->r29);
-    clone.r5 = ADD32(ctx->r29, 0xCC);
-    clone.r6 = (gpr)(int32_t)MEM_W(0x10C, ctx->r29);
+    camera_clone_de498_args(rdram, clone, *ctx);
 #if TOOIE_SHADOW_SELECTED
     tooie_shadow_de498(rdram, &clone);
 #else
@@ -51,10 +78,7 @@ extern "C" void baseline_camera_de498_ignore(uint8_t* rdram, recomp_context* ctx
 #if TOOIE_ACTOR_PALETTE_SELECTED
 extern "C" void baseline_actor_cpu_root_begin(uint8_t* rdram, recomp_context* ctx) {
     recomp_context clone;
-    camera_clone_context(clone, *ctx);
-    clone.r4 = (gpr)(int32_t)MEM_W(0xF8, ctx->r29);
-    clone.r5 = ADD32(ctx->r29, 0xCC);
-    clone.r6 = (gpr)(int32_t)MEM_W(0x10C, ctx->r29);
+    camera_clone_de498_args(rdram, clone, *ctx);
     tooie_camera_cpu_root_begin(rdram, &clone);
 }
 #endif
@@ -74,8 +98,16 @@ extern "C" void baseline_camera_construction_begin(uint8_t* rdram, recomp_contex
 #if TOOIE_SHADOW_SELECTED
     camera_clone_context(clone,*ctx);clone.r4=ctx->r29;tooie_shadow_reset(rdram,&clone);
 #endif
+#ifdef BASELINE_PLAYER
+    baseline::issue_evidence::guest::record_frame(rdram,*ctx,baseline::issue_evidence::guest::Begin);
+#endif
 }
 extern "C" void baseline_camera_construction_end(uint8_t* rdram, recomp_context* ctx) {
+#ifdef BASELINE_PLAYER
+    // Metadata before the end owner clears active/owner_frame. A78F8 already
+    // cleared saved.valid; no matrix is sampled at this outer-close boundary.
+    baseline::issue_evidence::guest::record_frame(rdram,*ctx,baseline::issue_evidence::guest::End);
+#endif
     recomp_context clone;
     camera_clone_context(clone, *ctx);
     clone.r4 = ctx->r29;
@@ -85,7 +117,7 @@ extern "C" void baseline_camera_construction_end(uint8_t* rdram, recomp_context*
 #if TOOIE_SHADOW_SELECTED
 namespace {
 void shadow_fix_receipt(uint8_t* rdram,const char* phase,uint32_t group=0) {
-#if TOOIE_BASELINE_CAMERA_RUNTIME_OBSERVER
+#if TOOIE_BASELINE_CAMERA_RUNTIME_OBSERVER && !TOOIE_BK_PIPELINE_SELECTED
     if(!shadow_witness::armed.load(std::memory_order_acquire) || shadow_witness::lines>=256)return;
     const gpr state=(gpr)(int32_t)TOOIE_SHADOW_STATE;uint32_t words[4]{};
     if(group>=0x80000000u && group<=0x80FFFFF0u && !(group&7u))for(uint32_t i=0;i<4;++i)words[i]=uint32_t(MEM_W(i*4,(gpr)(int32_t)group));
@@ -95,38 +127,91 @@ void shadow_fix_receipt(uint8_t* rdram,const char* phase,uint32_t group=0) {
     (void)rdram;(void)phase;(void)group;
 #endif
 }
+#if !TOOIE_BK_PIPELINE_SELECTED
 void shadow_source(uint8_t* rdram,recomp_context* ctx,uint32_t pc) {
     recomp_context clone;camera_clone_context(clone,*ctx);clone.r4=(gpr)(int32_t)pc;tooie_shadow_source(rdram,&clone);
-} }
+}
+#endif
+}
+// BK selection: A6CF0/A6D60/A6664/A666C belong to the generic shadow scope (bk_shadow_attach_thunks.hpp).
+#if !TOOIE_BK_PIPELINE_SELECTED
 extern "C" void baseline_shadow_source_local(uint8_t* rdram,recomp_context* ctx) { shadow_source(rdram,ctx,0x800A6CF0u); }
 extern "C" void baseline_shadow_source_fallback(uint8_t* rdram,recomp_context* ctx) { shadow_source(rdram,ctx,0x800A6D60u); }
+#endif
+// Original A6250 frame at A6664: +0x250 is saved a0 (A6260),
+// +0x1CC is F53D0's return (A6284), and +0x1C8 is D674C's return (A62AC).
+// The DE448 fifth argument is not stored at SP+0x10 until delay slot A6668.
+// Read ctx's saved words; clone's outgoing frame has a different SP.
+#if !TOOIE_BK_PIPELINE_SELECTED
 extern "C" void baseline_shadow_prepare(uint8_t* rdram,recomp_context* ctx) {
-    recomp_context clone;camera_clone_context(clone,*ctx);
-    clone.r4=(gpr)(int32_t)MEM_W(0x1CC,ctx->r29);clone.r5=(gpr)(int32_t)MEM_W(0x250,ctx->r29);clone.r6=(gpr)(int32_t)MEM_W(0x1C8,ctx->r29);
-    tooie_shadow_prepare(rdram,&clone);shadow_fix_receipt(rdram,"prepare");
+    recomp_context clone;
+    camera_clone_context(clone,*ctx);
+    clone.r4=(gpr)(int32_t)MEM_W(0x1CC,ctx->r29);
+    clone.r5=(gpr)(int32_t)MEM_W(0x250,ctx->r29);
+    clone.r6=(gpr)(int32_t)MEM_W(0x1C8,ctx->r29);
+    tooie_shadow_prepare(rdram,&clone);
+    shadow_fix_receipt(rdram,"prepare");
 }
+#endif
+// At original A6250's A69D4 call, a2/a3 and SP+0x10/+0x14 are forwarded
+// rectangle arguments; A69C8/A69C4 produced the two stack words.
+// The helper's fifth argument uses clone SP+0x10 in its separate outgoing area.
+// Copy the helper's four words to ctx before the original A5EC4 call.
 extern "C" void baseline_shadow_fullframe(uint8_t* rdram,recomp_context* ctx) {
     if(uint32_t(ctx->r4)!=0x80127658u)return; // Original A5EC4 buffers owner.
-    recomp_context clone;camera_clone_context(clone,*ctx);
+    recomp_context clone;
+    camera_clone_context(clone,*ctx);
     // Five o32 arguments: reserve32 bytes, including the fifth outgoing stack word.
-    clone.r29=SUB32(ctx->r29,32);clone.r4=(gpr)(int32_t)MEM_W(0,ctx->r4);
-    clone.r5=ctx->r6;clone.r6=ctx->r7;clone.r7=(gpr)(int32_t)MEM_W(0x10,ctx->r29);
-    const uint32_t group=uint32_t(MEM_W(20,(gpr)(int32_t)TOOIE_SHADOW_STATE));
+    clone.r29=SUB32(ctx->r29,32);
+#if TOOIE_BK_PIPELINE_SELECTED
+    // BK: the composite key is this A6250 activation (its sp), matched against the tagged body.
+    clone.r4=ctx->r29;
+#else
+    clone.r4=(gpr)(int32_t)MEM_W(0,ctx->r4);
+#endif
+    clone.r5=ctx->r6;
+    clone.r6=ctx->r7;
+    clone.r7=(gpr)(int32_t)MEM_W(0x10,ctx->r29);
+    const uint32_t group=TOOIE_BK_PIPELINE_SELECTED?0u:uint32_t(MEM_W(20,(gpr)(int32_t)TOOIE_SHADOW_STATE));
     shadow_fix_receipt(rdram,"rectangle-before",group);
-    MEM_W(0x10,clone.r29)=MEM_W(0x14,ctx->r29);tooie_shadow_rectangle_args(rdram,&clone);
+    MEM_W(0x10,clone.r29)=MEM_W(0x14,ctx->r29);
+    tooie_shadow_rectangle_args(rdram,&clone);
     shadow_fix_receipt(rdram,"rectangle-after",group);
     if(uint32_t(clone.r2)!=TOOIE_SHADOW_ARGS)rejected_body("shadow rectangle result address");
-    ctx->r6=(gpr)(int32_t)MEM_W(0,clone.r2);ctx->r7=(gpr)(int32_t)MEM_W(4,clone.r2);
-    MEM_W(0x10,ctx->r29)=MEM_W(8,clone.r2);MEM_W(0x14,ctx->r29)=MEM_W(12,clone.r2);
+    ctx->r6=(gpr)(int32_t)MEM_W(0,clone.r2);
+    ctx->r7=(gpr)(int32_t)MEM_W(4,clone.r2);
+    MEM_W(0x10,ctx->r29)=MEM_W(8,clone.r2);
+    MEM_W(0x14,ctx->r29)=MEM_W(12,clone.r2);
 }
+// In A5EC4, v1 is the gfx cursor loaded at A5F04. Before A5F84/A6180,
+// publish the helper's returned cursor to v1 before the original code uses it.
 extern "C" void baseline_shadow_mode_begin(uint8_t* rdram,recomp_context* ctx) {
-    recomp_context clone;camera_clone_context(clone,*ctx);clone.r4=ctx->r3;tooie_shadow_mode_begin(rdram,&clone);ctx->r3=clone.r2;shadow_fix_receipt(rdram,"mode-begin");
+    recomp_context clone;
+    camera_clone_context(clone,*ctx);
+    clone.r4=ctx->r3;
+    tooie_shadow_mode_begin(rdram,&clone);
+    ctx->r3=clone.r2;
+    shadow_fix_receipt(rdram,"mode-begin");
 }
 extern "C" void baseline_shadow_mode_end(uint8_t* rdram,recomp_context* ctx) {
-    recomp_context clone;camera_clone_context(clone,*ctx);clone.r4=ctx->r3;tooie_shadow_mode_end(rdram,&clone);ctx->r3=clone.r2;shadow_fix_receipt(rdram,"mode-end");
+    recomp_context clone;
+    camera_clone_context(clone,*ctx);
+    clone.r4=ctx->r3;
+    tooie_shadow_mode_end(rdram,&clone);
+    ctx->r3=clone.r2;
+    shadow_fix_receipt(rdram,"mode-end");
 }
 extern "C" void baseline_shadow_complete(uint8_t* rdram,recomp_context* ctx) {
     recomp_context clone;camera_clone_context(clone,*ctx);clone.r4=(gpr)(int32_t)MEM_W(0,(gpr)(int32_t)0x80127658u);tooie_shadow_complete(rdram,&clone);shadow_fix_receipt(rdram,"complete");
+}
+// At A666C, after the A6664 DE448 call returned and before the optional backpack DE448 at A66BC.
+// The guest reads/advances the 80127658 cursor itself; ctx (including v0) is untouched.
+extern "C" void baseline_shadow_mv_end(uint8_t* rdram,recomp_context* ctx) {
+#if TOOIE_SHADOW_MV
+    recomp_context clone;camera_clone_context(clone,*ctx);tooie_shadow_mv_end(rdram,&clone);shadow_fix_receipt(rdram,"mv-end");
+#else
+    (void)rdram;(void)ctx;
+#endif
 }
 #endif
 
@@ -257,6 +342,7 @@ extern "C" void baseline_pre_background_end(uint8_t* rdram,recomp_context* ctx) 
 #if TOOIE_BASELINE_CAMERA_RUNTIME_OBSERVER
     pre_scope_receipt(rdram,"end");
 #endif
+    if(clone.r2)rejected_body("PRE background paid scope cannot close on its list");
 }
 extern "C" void baseline_pre_background_reset(uint8_t* rdram,recomp_context* ctx) {
     recomp_context clone;camera_clone_context(clone,*ctx);tooie_pre_background_reset(rdram,&clone);

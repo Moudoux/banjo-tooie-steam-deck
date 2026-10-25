@@ -6,7 +6,7 @@ SECTIONS {
     .player_helper ALIGN(4) : { *(.text.player_boundary) } >patch
     .actor_helper ALIGN(4) : { *(.text.actor_palette) } >patch
     .tooie_render_bridge_state ALIGN(4) : { *(.tooie_render_bridge_state) } >patch
-    ASSERT(SIZEOF(.tooie_render_bridge_state)==18844, "bridge state extent")
+    ASSERT(SIZEOF(.tooie_render_bridge_state)==23036, "bridge state extent")
     .forbidden : {
         *(.text*) *(.rodata*) *(.srodata*) *(.data*) *(.sdata*)
         *(.bss*) *(.sbss*) *(COMMON) *(.tdata*) *(.tbss*) *(.lit*)

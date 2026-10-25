@@ -3,6 +3,13 @@
 #define F3DEX_GBI_2
 #include "render_bridge.h"
 #include "rt64_extended_gbi.h"
+#if TOOIE_CAMERA_HONEY
+#define TOOIE_CAMERA_GUEST 1
+#include "camera_identity.h"
+#define TOOIE_RENDER_LOWER_BYTES TOOIE_BRIDGE_LOWER_BYTES
+#else
+#define TOOIE_RENDER_LOWER_BYTES 0x8FC0u
+#endif
 #define PATCH __attribute__((section(".recomp_patch")))
 #define INLINE static inline __attribute__((always_inline))
 void bzero(void*, int) __asm__("_bzero");
@@ -65,6 +72,8 @@ PATCH Unk80132ED0* func_800EBED4(void* arg0, s32 arg1, s32 arg2, s32 arg3) {
     bytes[0x13] = (u8)(((u32)arg3 & 1u) | (bytes[0x13] & 0xFEu));
     *(u32*)(bytes + 8) = (u32)func_800EBB50;
     bytes[0x2A] |= 2u;
+    /* @recomp Descriptor-table slot validation and birth serial bookkeeping, between the
+       original initialization above and the original EBE74 publication. */
     address = (u32)descriptor;
     offset = address - (u32)D_80132ED0;
     if (address >= (u32)D_80132ED0 && offset < 200u * 0x30u && offset % 0x30u == 0) {
@@ -81,6 +90,8 @@ PATCH Unk80132ED0* func_800EBED4(void* arg0, s32 arg1, s32 arg2, s32 arg3) {
 }
 
 PATCH void func_80800380_chhoneycarrier(Actor* actor, void* arg1) {
+    /* @recomp Finite owner/capacity/identity/admission/reentry envelope and public push,
+       before the original 80101870 call. */
     const u8* bytes = (const u8*)actor;
     Unk80132ED0* descriptor = actor->unk0;
     u32 epoch = tooie_render_bridge_state.epoch;
@@ -90,12 +101,19 @@ PATCH void func_80800380_chhoneycarrier(Actor* actor, void* arg1) {
     s32* store = 0;
     GfxCommand* cursor;
     int admitted = 0, owns_active = 0;
+#if TOOIE_CAMERA_HONEY
+    u32 camera_owner = 0, camera_base = 0, camera_returned = 0;
+    volatile struct TooieCameraState* camera_state = &tooie_camera_state;
+#endif
     count(&tooie_render_bridge_state.calls);
     if (tooie_render_bridge_state.active) reason = TOOIE_BRIDGE_REENTRY;
     else {
         if (epoch != tooie_render_bridge_state.seen_epoch) {
             tooie_render_bridge_state.seen_epoch = epoch;
             tooie_render_bridge_state.extra_bytes = 0;
+            tooie_render_bridge_state.primary_bytes = 0;
+            tooie_render_bridge_state.secondary_ledger.bytes = 0;
+            tooie_render_bridge_state.secondary_route.state = 0;
             tooie_render_bridge_state.last_end = 0;
             tooie_render_bridge_state.poisoned = 0;
         }
@@ -109,9 +127,17 @@ PATCH void func_80800380_chhoneycarrier(Actor* actor, void* arg1) {
                 base = D_8007BCD0[index];
                 store = func_800A7180();
                 current = (u32)*store;
-                if (base > 0xFFFF703Fu || current < base || current - base > 0x8FC0u)
+                if (base > 0xFFFFFFFFu - TOOIE_RENDER_LOWER_BYTES || current < base || current - base > TOOIE_RENDER_LOWER_BYTES)
                     reason = TOOIE_BRIDGE_RANGE;
                 else if ((current & 7u) != 0 || (base & 7u) != 0) reason = TOOIE_BRIDGE_ALIGN;
+#if TOOIE_CAMERA_HONEY
+                else if (base != (camera_base = (u32)&tooie_camera_main[index][0]) ||
+                         !(camera_owner = camera_state->owner_frame) || camera_state->control.active != 1u ||
+                         camera_state->control.epoch != epoch || camera_state->control.main_base != camera_base ||
+                         camera_state->control.main_end != camera_base + TOOIE_CAMERA_M_BYTES ||
+                         current < camera_base || current > camera_base + TOOIE_CAMERA_M_BYTES ||
+                         camera_base + TOOIE_CAMERA_M_BYTES - current < 24u) reason = TOOIE_BRIDGE_RANGE;
+#endif
                 else if (current < tooie_render_bridge_state.last_end) {
                     tooie_render_bridge_state.poisoned = 1;
                     count(&tooie_render_bridge_state.poison_count);
@@ -136,7 +162,7 @@ PATCH void func_80800380_chhoneycarrier(Actor* actor, void* arg1) {
                         else if (tooie_render_bridge_state.slots[slot].birth == birth &&
                             tooie_render_bridge_state.slots[slot].stamp == epoch) reason = TOOIE_BRIDGE_DUPLICATE;
                         else {
-                            end = base + 0x8FC0u;
+                            end = base + TOOIE_RENDER_LOWER_BYTES;
                             if (tooie_render_bridge_state.extra_bytes > 6368u || end - current < 32u)
                                 reason = TOOIE_BRIDGE_CAPACITY;
                             else if (!bind_block(slot, birth, pair, &id)) reason = TOOIE_BRIDGE_BLOCKS;
@@ -172,14 +198,41 @@ PATCH void func_80800380_chhoneycarrier(Actor* actor, void* arg1) {
         owns_active = 1;
     }
     func_80101870(actor, arg1);
+    /* @recomp Tripwire, contained prepaid pop/failure handling, cursor high-water and
+       reentry retirement; the final actor-bit 80103110 call is original. */
     if (admitted) {
         if (selector_pair(descriptor) != pair) {
             count(&tooie_render_bridge_state.tripwire_count);
             tooie_render_bridge_state.slots[slot].block_and_valid = 0;
         }
+#if TOOIE_CAMERA_HONEY
+        camera_returned = (u32)*store;
+        if (camera_state->owner_frame == camera_owner && tooie_render_bridge_state.epoch == epoch &&
+            camera_state->control.epoch == epoch && D_8007BCD0[index] == camera_base &&
+            !(camera_returned & 7u) && camera_returned >= camera_base &&
+            camera_returned <= camera_base + TOOIE_CAMERA_M_BYTES &&
+            camera_base + TOOIE_CAMERA_M_BYTES - camera_returned >= 8u) {
+#endif
         cursor = (GfxCommand*)(u32)*store;
         gEXPopMatrixGroup(cursor, 0);
         *store = (s32)(u32)(cursor + 1);
+#if TOOIE_CAMERA_HONEY
+        } else {
+            tooie_render_bridge_state.poisoned = 1;
+            count(&tooie_render_bridge_state.poison_count);
+            camera_state->control.latch = 1;camera_state->diagnostics.refusals++;
+            if (!camera_state->diagnostics.first_reason) {
+                camera_state->diagnostics.first_reason = 0x101u;
+                camera_state->diagnostics.raw0 = camera_returned;
+                camera_state->diagnostics.raw1 = camera_base;
+                camera_state->diagnostics.raw2 = camera_base + TOOIE_CAMERA_M_BYTES;
+                camera_state->diagnostics.raw3 = 8u;
+            }
+#if TOOIE_BRIDGE_REQUIRED_STOP
+            tooie_bridge_required_stop(1u);
+#endif
+        }
+#endif
     }
     if (store && reason != TOOIE_BRIDGE_RANGE && reason != TOOIE_BRIDGE_ALIGN) {
         returned = (u32)*store;

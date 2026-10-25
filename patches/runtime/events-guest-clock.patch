@@ -1,0 +1,20 @@
+--- a/events.cpp
++++ b/events.cpp
+@@ -180,3 +180,5 @@
+ void set_dummy_vi(bool odd);
++// F6 player arm: the selected timer owns the applied guest clock.
++#include "guest_clock.hpp"
+ 
+ void vi_thread_func() {
+@@ -191,2 +193,6 @@
+     while (!exited) {
++        uint64_t new_total_vis;
++        if (tooie::guest_clock::owns_vi()) {
++            new_total_vis = tooie::guest_clock::wait_vi(total_vis, exited);
++        } else { // Raw upstream 1x VI wait (high_resolution_clock is steady_clock), until first acceleration.
+         // Determine the next VI time (more accurate than adding 16ms each VI interrupt)
+@@ -209,2 +215,3 @@
+         // Calculate how many VIs have passed
+-        uint64_t new_total_vis = (time_now * (60 * ultramodern::get_speed_multiplier()) / 1000ms) + 1;
++        new_total_vis = (time_now * (60 * ultramodern::get_speed_multiplier()) / 1000ms) + 1;
++        }

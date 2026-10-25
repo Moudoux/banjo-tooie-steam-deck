@@ -10,6 +10,9 @@
     "func_800E9F20"
   ],
   "imports": [
+    "D_8007BCD8",
+    "D_8007BCF0",
+    "D_8007BEDA",
     "D_80127674",
     "D_80127EF4",
     "D_801282E0",
@@ -38,6 +41,7 @@
     "func_800CA334",
     "func_800CA364",
     "func_800CA6E8",
+    "func_800CA7AC",
     "func_800CA7E4",
     "func_800CB124",
     "func_800D2A44",

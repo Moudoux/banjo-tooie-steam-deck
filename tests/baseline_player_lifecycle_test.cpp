@@ -52,6 +52,10 @@ constexpr uint32_t state=TOOIE_PLAYER_STATE_ADDRESS;
 constexpr uint32_t pc=state+offsetof(TooieRenderBridgeState,player);
 #define PF(field) (pc+offsetof(TooiePlayerBoundary,field))
 #define SF(field) (state+offsetof(TooieRenderBridgeState,field))
+// PC[8]: entry [0][0] is the open paid entry when running; [1][2] is an inactive retained entry of
+// the same owner that must retire (never on the paid path).
+constexpr uint32_t paid_entry=state+offsetof(TooieRenderBridgeState,primary);
+constexpr uint32_t other_entry=paid_entry+(1u*4u+2u)*32u;
 static_assert(TOOIE_PLAYER_INIT_FRAME_BYTES>0 && TOOIE_PLAYER_INIT_FRAME_BYTES<guard);
 static_assert(TOOIE_PLAYER_FREE_FRAME_BYTES>0 && TOOIE_PLAYER_FREE_FRAME_BYTES<guard);
 enum Kind { Backpack, Set936, Set937, Allocate, Resolve, Resource, Bind, Create,
@@ -198,6 +202,9 @@ Output run(Case test,recomp_func_t* fn,unsigned frame,bool matching=false,bool r
     put(rdram,owner+0x50,bodies);put(rdram,PF(owner),matching?owner:owner+0x1000);
     put(rdram,PF(idbase),0x90000200);put(rdram,PF(stamp),7);put(rdram,SF(epoch),7);
     put(rdram,SF(next_block),2);put(rdram,SF(active),running?1:0);
+    put(rdram,paid_entry,matching?owner:owner+0x1000);put(rdram,paid_entry+24,0x90000200);put(rdram,paid_entry+28,7);
+    put(rdram,other_entry,matching?owner:owner+0x1000);put(rdram,other_entry+24,0x90000400);
+    put(rdram,other_entry+28,7);put(rdram,SF(primary_paid),running?1u:0u);
     put(rdram,PF(buffers),0x80300000);put(rdram,PF(base),0x80300100);
     put(rdram,PF(pool_index),1);put(rdram,PF(begin),0x80300200);put(rdram,PF(end),0);
     put(rdram,PF(current_bone_role),3);put(rdram,PF(emitted_bones),5);put(rdram,PF(emitted_leaf_calls),6);
@@ -229,6 +236,9 @@ void lifecycle(bool freeing,bool running) {
     require(word(rdram,SF(next_block))==2,"lifecycle does not allocate/reset issuer");
     if(!running) require(word(rdram,PF(idbase))==0 && word(rdram,PF(stamp))==(freeing?UINT32_MAX:0),
         "destruction tombstone versus completed init reopening");
+    if(!running) require(word(rdram,paid_entry+24)==0 && word(rdram,other_entry+24)==0 &&
+        word(rdram,paid_entry+28)==(freeing?UINT32_MAX:0) && word(rdram,other_entry+28)==(freeing?UINT32_MAX:0),
+        "every retained entry of the owner retires, not only the last admitted one");
     else {
         require(word(rdram,PF(idbase))==0x90000200 && word(rdram,PF(stamp))==7 &&
             word(rdram,PF(buffers))==0x80300000 && word(rdram,PF(base))==0x80300100 &&
@@ -238,6 +248,68 @@ void lifecycle(bool freeing,bool running) {
             word(rdram,SF(active))==1,"active lifecycle preserves all paid unwind fields");
         require(word(rdram,PF(tripwires))!=0 && word(rdram,SF(tripwire_count))!=0 &&
             word(rdram,SF(poisoned))==1,"persistent player/global fatal signal and epoch poison");
+        require(word(rdram,paid_entry+24)==0x90000200 && word(rdram,other_entry+24)==0x90000400,
+            "the paid owner's trip preserves every entry");
+    }
+}
+// PC[8] paid-entry interface: primary_paid (1+slot*4+view) names the open paid entry. Entry [5][2]
+// is the paid or last admitted entry; self also retains [0][1] and [3][3]. The original calls and
+// the CPU625/backpack621/Trot retirements are unchanged in every case.
+uint32_t entry(uint32_t slot,uint32_t view) { return SF(primary)+(slot*4u+view)*32u; }
+constexpr uint32_t foreign=owner+0x1000;
+Output fullview_run(bool freeing,uint32_t paid_owner,uint32_t paid,uint32_t open) {
+    Output out{std::vector<uint8_t>(16*1024*1024),{},{}};auto* rdram=out.ram.data();
+    active={0x12340001,0xABCD8001,false};events.clear();retire_events.clear();
+    for(uint32_t p=owner-16;p<owner+0x198;++p) MEM_B(0,guest(p))=0xCC;
+    for(uint32_t i=0;i<body_count;++i)
+        for(uint32_t p=bodies+i*body_stride-16;p<bodies+i*body_stride+0x128;++p) MEM_B(0,guest(p))=0xA7;
+    put(rdram,owner+0x50,bodies);put(rdram,SF(epoch),7);put(rdram,SF(next_block),40);
+    put(rdram,SF(active),open);put(rdram,SF(primary_paid),paid);
+    // The global scope snapshots entry [5][2] with the identity check_retirements expects.
+    put(rdram,PF(owner),paid_owner);put(rdram,PF(idbase),0x90000200);put(rdram,PF(stamp),7);
+    put(rdram,entry(5,2),paid_owner);put(rdram,entry(5,2)+24,0x90000200);put(rdram,entry(5,2)+28,7);
+    put(rdram,entry(0,1),owner);put(rdram,entry(0,1)+24,0x90000400);put(rdram,entry(0,1)+28,7);
+    put(rdram,entry(3,3),owner);put(rdram,entry(3,3)+24,0x90000600);put(rdram,entry(3,3)+28,6);
+    invoke(rdram,freeing?func_800F3880:func_80092898,freeing?TOOIE_PLAYER_FREE_FRAME_BYTES:TOOIE_PLAYER_INIT_FRAME_BYTES);
+    out.trace=events;out.retire=retire_events;check_retirements(out,freeing);
+    require(out.trace.size()==(freeing?2u:17u),"original calls continue in every paid-entry case");
+    return out;
+}
+void fullview_lifecycle(bool freeing) {
+    const uint32_t retired=freeing?UINT32_MAX:0u;
+    // F1: self owns the paid entry [5][2] (primary_paid 23): unsupported reentry reaches the
+    // unchanged global fatal word and retires nothing.
+    {
+        auto out=fullview_run(freeing,owner,1u+5u*4u+2u,1u);auto* rdram=out.ram.data();
+        require(word(rdram,PF(tripwires))!=0 && word(rdram,SF(tripwire_count))!=0 && word(rdram,SF(poisoned))==1,
+            "a paid (5,2) owner reentry reaches the global fatal word");
+        require(word(rdram,entry(5,2)+24)==0x90000200 && word(rdram,entry(0,1)+24)==0x90000400 &&
+            word(rdram,entry(3,3)+24)==0x90000600 && word(rdram,PF(idbase))==0x90000200 &&
+            word(rdram,SF(active))==1 && word(rdram,SF(primary_paid))==23,"the paid trip retires nothing");
+    }
+    // F2: another owner's (5,2) scope is paid: self's inactive entries retire; that scope, its
+    // entry and the fatal words are untouched.
+    {
+        auto out=fullview_run(freeing,foreign,23u,1u);auto* rdram=out.ram.data();
+        require(!word(rdram,PF(tripwires)) && !word(rdram,SF(tripwire_count)) && !word(rdram,SF(poisoned)),
+            "a foreign paid scope is not this owner's reentry");
+        require(!word(rdram,entry(0,1)+24) && word(rdram,entry(0,1)+28)==retired &&
+            !word(rdram,entry(3,3)+24) && word(rdram,entry(3,3)+28)==retired,"every inactive entry of self retires");
+        require(word(rdram,entry(5,2))==foreign && word(rdram,entry(5,2)+24)==0x90000200 &&
+            word(rdram,entry(5,2)+28)==7 && word(rdram,PF(owner))==foreign && word(rdram,PF(idbase))==0x90000200 &&
+            word(rdram,PF(stamp))==7 && word(rdram,SF(active))==1 && word(rdram,SF(primary_paid))==23,
+            "the foreign paid scope and its entry survive");
+    }
+    // F3: a nonplayer scope is open (active, primary_paid 0) and self was last admitted: every
+    // entry and the global snapshot of self retire without a trip; the open scope stays open.
+    {
+        auto out=fullview_run(freeing,owner,0u,1u);auto* rdram=out.ram.data();
+        require(!word(rdram,PF(tripwires)) && !word(rdram,SF(tripwire_count)) && !word(rdram,SF(poisoned)),
+            "another family's open scope is not this owner's reentry");
+        for(const uint32_t e:{entry(5,2),entry(0,1),entry(3,3)})
+            require(!word(rdram,e+24) && word(rdram,e+28)==retired,"all entries of self retire");
+        require(!word(rdram,PF(idbase)) && word(rdram,PF(stamp))==retired && word(rdram,SF(active))==1 &&
+            !word(rdram,SF(primary_paid)),"the global snapshot retires and the nonplayer scope stays open");
     }
 }
 }
@@ -280,6 +352,7 @@ int main() {
         compare({1,1,false},true);compare({1,1,true},true);
         compare({1,1,false},false,true);compare({1,1,false},true,true); // Unaffected active owner.
         for(bool freeing:{false,true}) for(bool running:{false,true}) lifecycle(freeing,running);
+        for(bool freeing:{false,true}) fullview_lifecycle(freeing);
         std::cout<<"Player lifecycle actual-body differential and retirement controls passed\n";return 0;
     } catch(const std::exception& e) { std::cerr<<e.what()<<'\n';return 1; }
 }

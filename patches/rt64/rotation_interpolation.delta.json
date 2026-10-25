@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "name": "rt64_rotation_interpolation",
-  "delta_revision": 1,
+  "delta_revision": 2,
   "upstream": {
     "dependency": "rt64",
     "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
@@ -11,7 +11,7 @@
   },
   "output": {
     "filename": "rt64_math.cpp",
-    "sha256": "56fdbe4bde360580678cae5af913998acff7daf6ee35d9108c09f61bd162e140",
+    "sha256": "01d0168bbbaa02ddcd7ce32e28c2accf5550f29741efc490e90913b6070877bf",
     "lines": 500
   },
   "operations": [
@@ -21,9 +21,9 @@
       "original_sha256": "ee67f95b5378892f196cd1af49168cca083e8020cfb3667995527c7d64cb0221",
       "replacement_lines": [
         "            if (useSlerp) {\n",
-        "                // The pinned hlsl++ slerp reverses its endpoints and does not\n",
-        "                // use both spherical coefficients. Interpolate the shortest\n",
-        "                // quaternion arc with the same previous-to-current weight.\n",
+        "                // Upstream passes 1 - weight to offset the pinned hlsl++ slerp's\n",
+        "                // reversed endpoints; that slerp still omits one spherical\n",
+        "                // coefficient. Interpolate the shortest arc directly by weight.\n",
         "                const hlslpp::quaternion target = float(dot(a.rotation, b.rotation)) > 0.0f\n",
         "                    ? b.rotation : -b.rotation;\n",
         "                const float cosTheta = std::fmin(1.0f, std::fmax(0.0f, float(dot(a.rotation, target))));\n",

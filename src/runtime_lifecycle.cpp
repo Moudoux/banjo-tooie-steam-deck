@@ -14,6 +14,8 @@ std::condition_variable owners_changed;
 std::unordered_map<UltraThreadContext*,bool> producers;
 std::exception_ptr first_failure;
 std::size_t created_count=0, enqueued_count=0, deleted_count=0;
+bool final_drain_owned=false; // Selected fence registers before any worker exists.
+int final_drain_admission=-1; // -1 pending, 0 refused, 1 admitted.
 }
 namespace tooie::lifecycle {
 void enable(bool reject_tasks) {
@@ -27,19 +29,28 @@ void poll() { if (stopping()) throw ultramodern::thread_terminated{}; }
 void request_stop() noexcept {
     {
         std::lock_guard lock(owner_mutex);
-        stopping_flag.store(true,std::memory_order_release);
+        stopping_flag.store(true, std::memory_order_release);
         // Only touch native semaphores. Guest queues and OSThread memory belong to
         // the scheduler, and must never be modified by the controller concurrently.
-        for (auto [context,launched]:producers) if (launched) context->running.signal();
+        for (auto [context, launched] : producers)
+            if (launched)
+                context->running.signal();
         owners_changed.notify_all();
     }
     dp::notify_stop();
 }
 void fail(std::exception_ptr error) noexcept {
-    { std::lock_guard lock(owner_mutex); if (!first_failure) first_failure=error; }
+    {
+        std::lock_guard lock(owner_mutex);
+        if (!first_failure)
+            first_failure = error;
+    }
     request_stop();
 }
-std::exception_ptr failure() { std::lock_guard lock(owner_mutex); return first_failure; }
+std::exception_ptr failure() {
+    std::lock_guard lock(owner_mutex);
+    return first_failure;
+}
 void created(UltraThreadContext* context) {
     std::lock_guard lock(owner_mutex);
     if (stopping_flag.load()) throw ultramodern::thread_terminated{};
@@ -56,29 +67,36 @@ void creation_failed(UltraThreadContext* context) noexcept {
     if (producers.erase(context)) --created_count;
     owners_changed.notify_all();
 }
-void enqueue_completed(UltraThreadContext* context,const std::function<void()>& scheduler_exit) {
-    bool published=false;
+void enqueue_completed(UltraThreadContext* context, const std::function<void()>& scheduler_exit) {
+    bool published = false;
     {
         std::lock_guard lock(owner_mutex);
         // Serialize the last ordinary scheduler access with broadcast shutdown.
         // Otherwise a late run_next_thread could signal an already cleaned context.
         if (!stopping_flag.load()) {
-            try { scheduler_exit(); }
+            try {
+                scheduler_exit();
+            }
             catch (...) {
-                if (!first_failure) first_failure=std::current_exception();
-                stopping_flag.store(true,std::memory_order_release);
-                published=true;
-                for (auto [other,ready]:producers) if (ready) other->running.signal();
+                if (!first_failure)
+                    first_failure = std::current_exception();
+                stopping_flag.store(true, std::memory_order_release);
+                published = true;
+                for (auto [other, ready] : producers)
+                    if (ready)
+                        other->running.signal();
             }
         }
         // Remove ownership and enqueue under one lock. Stop cannot dereference a
         // context after the cleaner sees it. Quiescence follows the final enqueue.
-        if (producers.erase(context)!=1) std::terminate();
+        if (producers.erase(context) != 1)
+            std::terminate();
         ultramodern::cleanup_thread(context);
         ++enqueued_count;
         owners_changed.notify_all();
     }
-    if (published) dp::notify_stop();
+    if (published)
+        dp::notify_stop();
 }
 void deleted(UltraThreadContext*) noexcept {
     if (!enabled()) return;
@@ -96,7 +114,30 @@ bool wait_for_shutdown_quiescence(std::chrono::milliseconds timeout) {
         return stopping_flag.load(std::memory_order_acquire) && producers.empty();
     });
 }
-Counts counts() { std::lock_guard lock(owner_mutex); return {created_count,producers.size(),enqueued_count,deleted_count}; }
+void own_final_drain() {
+    std::lock_guard lock(owner_mutex);
+    final_drain_owned=true;
+}
+void admit_final_drain(bool admitted) noexcept {
+    std::lock_guard lock(owner_mutex);
+    if (final_drain_admission<0) final_drain_admission=admitted ? 1 : 0;
+    owners_changed.notify_all();
+}
+bool wait_for_final_drain(std::chrono::milliseconds timeout) {
+    {
+        std::unique_lock lock(owner_mutex);
+        if (final_drain_owned) {
+            owners_changed.wait_for(lock,timeout,[]{return final_drain_admission>=0;});
+            return final_drain_admission==1;
+        }
+    }
+    // Unowned hosts keep the existing quiescence contract.
+    return wait_for_shutdown_quiescence(timeout);
+}
+Counts counts() {
+    std::lock_guard lock(owner_mutex);
+    return {created_count, producers.size(), enqueued_count, deleted_count};
+}
 void reject_task(uint32_t type) {
     if (enabled() && reject_tasks_flag)
         throw std::runtime_error("Headless diagnostic cannot execute actual OSTask type "+std::to_string(type));

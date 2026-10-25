@@ -103,9 +103,17 @@ void draw(plume::RenderCommandList* list,plume::RenderFramebuffer* framebuffer) 
     config_status=reconcile_aspect(*owners->application->sharedQueueResources,settings_word(),publication_word());
     const int requested=requested_vsync();
     if(requested>=0) {
-        if(requested!=last_vsync) {owners->swap_chain->setVsyncEnabled(requested!=0);last_vsync=requested;}
-        sync_status=owners->swap_chain->needsResize()?Status::Pending:
-            (owners->swap_chain->isVsyncEnabled()==(requested!=0)?Status::Applied:Status::Unsupported);
+        if(requested!=last_vsync) {
+            owners->swap_chain->setVsyncEnabled(requested!=0);
+            last_vsync=requested;
+        }
+        if(owners->swap_chain->needsResize()) {
+            sync_status=Status::Pending;
+        } else if(owners->swap_chain->isVsyncEnabled()==(requested!=0)) {
+            sync_status=Status::Applied;
+        } else {
+            sync_status=Status::Unsupported;
+        }
     }
     else sync_status=Status::Applied; // Inherited backend state, no setter call.
     actual_vsync=owners->swap_chain->isVsyncEnabled();

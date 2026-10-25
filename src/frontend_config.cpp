@@ -1,6 +1,8 @@
 #include "frontend_config.hpp"
 
 #include <json/json.hpp>
+#include <climits>
+#include <cstdint>
 #include <fstream>
 #include <mutex>
 #include <type_traits>
@@ -103,13 +105,22 @@ template <typename T> T read(std::string_view id, T fallback) {
     auto it = values.find(std::string(id));
     if (it == values.end()) return fallback;
     try {
+        // The JSON library narrows with static_cast, so ranges are checked first;
+        // an out-of-range number falls back. In-range floats keep their truncation.
         if constexpr (std::is_same_v<T, int>) {
-            if (it->is_number()) return it->get<int>();
+            if (it->is_number_unsigned()) {
+                if (const auto value = it->get<std::uint64_t>(); value <= std::uint64_t(INT_MAX)) return int(value);
+            } else if (it->is_number_integer()) {
+                if (const auto value = it->get<std::int64_t>(); value >= INT_MIN && value <= INT_MAX) return int(value);
+            } else if (it->is_number_float()) {
+                if (const auto value = it->get<double>(); value >= INT_MIN && value <= INT_MAX) return int(value);
+            }
         } else if constexpr (std::is_same_v<T, double>) {
             if (it->is_number()) return it->get<double>();
         } else if constexpr (std::is_same_v<T, bool>) {
             if (it->is_boolean()) return it->get<bool>();
-            if (it->is_number_integer()) return it->get<int>()!=0;
+            if (it->is_number_unsigned()) return it->get<std::uint64_t>() != 0;
+            if (it->is_number_integer()) return it->get<std::int64_t>() != 0;
         } else if constexpr (std::is_same_v<T, std::string>) {
             if (it->is_string()) return it->get<std::string>();
         }

@@ -1,6 +1,9 @@
 #include "minimum_render.hpp"
 #include "minimum_presentation_abi.h"
 #include "widescreen.hpp"
+#if BASELINE_PLAYER
+#include "issue_evidence.hpp"
+#endif
 #include "hle/rt64_application.h"
 #include "hle/rt64_shared_queue_resources.h"
 #include <atomic>
@@ -10,6 +13,14 @@
 namespace baseline::host::render {
 namespace {
 std::atomic<uint32_t> settings{0},publication{0};
+RT64::UserConfiguration::Filtering output_filtering(int option) {
+    using Filtering=RT64::UserConfiguration::Filtering;
+    switch(option) {
+    case 1:return Filtering::Nearest;
+    case 2:return Filtering::Linear;
+    default:return Filtering::AntiAliasedPixelScaling;
+    }
+}
 bool rt64_rate(RT64::UserConfiguration& user,const ultramodern::renderer::GraphicsConfig& config) {
     if(config.rr_manual_value<20 || config.rr_manual_value>360)return false;
     using Rate=RT64::UserConfiguration::RefreshRate;
@@ -38,9 +49,12 @@ bool update_rate(RT64::UserConfiguration& app_user,RT64::SharedQueueResources& s
     RT64::UserConfiguration rate;
     if(!rt64_rate(rate,new_config))throw std::runtime_error("Invalid output-rate configuration");
     std::lock_guard lock(shared.configurationMutex);
-    shared.userConfig.refreshRate=app_user.refreshRate=rate.refreshRate;
-    shared.userConfig.refreshRateTarget=app_user.refreshRateTarget=rate.refreshRateTarget;
-    shared.userConfigChanged=true;shared.newConfigValidated=false;
+    app_user.refreshRate=rate.refreshRate;
+    shared.userConfig.refreshRate=rate.refreshRate;
+    app_user.refreshRateTarget=rate.refreshRateTarget;
+    shared.userConfig.refreshRateTarget=rate.refreshRateTarget;
+    shared.userConfigChanged=true;
+    shared.newConfigValidated=false;
     return true;
 }
 bool update_resolution(RT64::UserConfiguration& app_user,RT64::SharedQueueResources& shared,int scale) {
@@ -48,8 +62,28 @@ bool update_resolution(RT64::UserConfiguration& app_user,RT64::SharedQueueResour
     std::lock_guard lock(shared.configurationMutex);
     if(shared.userConfig.resolutionMultiplier==scale && app_user.resolutionMultiplier==scale)return false;
     // RT64's workload owner rebuilds targets after this configuration change.
-    shared.userConfig.resolutionMultiplier=app_user.resolutionMultiplier=scale;
-    shared.userConfigChanged=true;shared.fbConfigChanged=true;shared.newConfigValidated=false;
+    app_user.resolutionMultiplier=scale;
+    shared.userConfig.resolutionMultiplier=scale;
+    shared.userConfigChanged=true;
+    shared.fbConfigChanged=true;
+    shared.newConfigValidated=false;
+    return true;
+}
+bool update_filters(RT64::UserConfiguration& app_user,RT64::SharedQueueResources& shared,int texture_filter,int output_filter) {
+    if(texture_filter<0 || texture_filter>1 || output_filter<0 || output_filter>2)
+        throw std::runtime_error("Invalid filtering preference");
+    const bool three_point=texture_filter==0;
+    const auto filtering=output_filtering(output_filter);
+    std::lock_guard lock(shared.configurationMutex);
+    if(app_user.threePointFiltering==three_point && shared.userConfig.threePointFiltering==three_point &&
+       app_user.filtering==filtering && shared.userConfig.filtering==filtering)return false;
+    // Targeted fields only: a full userConfig copy would overwrite shared aspect state.
+    app_user.threePointFiltering=three_point;
+    shared.userConfig.threePointFiltering=three_point;
+    app_user.filtering=filtering;
+    shared.userConfig.filtering=filtering;
+    shared.userConfigChanged=true;
+    shared.newConfigValidated=false;
     return true;
 }
 void latch_startup(bool pillarbox_capable) {
@@ -57,36 +91,47 @@ void latch_startup(bool pillarbox_capable) {
     const auto& prefs=latched_preferences();
     uint32_t word=1u<<BASELINE_PRESENT_GENERATION_SHIFT;
     if(pillarbox_capable)word|=BASELINE_PRESENT_PILLARBOX_CAPABLE;
-    if(prefs.cutscene_aspect==0)word|=BASELINE_PRESENT_ORIGINAL_CUTSCENE;
     word|=uint32_t(prefs.native_aspect<fit_aspect?prefs.native_aspect:0)<<BASELINE_PRESENT_ASPECT_SHIFT;
     // G07 substitution is retired in this composition. Original game_wide
     // remains the projection gate; the guest alone applies the request.
     tooie::widescreen::configure_profile(true);
-    tooie::widescreen::configure_native_aspect(tooie::widescreen::NativeAspect(prefs.native_aspect));
+    // Fit is published live by host::tick; use the existing 16:9 startup fallback explicitly.
+    const auto startup_aspect=prefs.native_aspect==fit_aspect?
+        tooie::widescreen::NativeAspect::Ratio16x9:tooie::widescreen::NativeAspect(prefs.native_aspect);
+    tooie::widescreen::configure_native_aspect(startup_aspect);
     tooie::widescreen::latch_for_game_start();
     word|=BASELINE_PRESENT_ACTIVE;
-    if(prefs.wide==1)word|=BASELINE_PRESENT_WIDE; // Startup diagnostic only.
+    if(prefs.wide==1)word|=BASELINE_PRESENT_WIDE; // Retained startup compatibility layout field, not applied state.
     publication.store(0,std::memory_order_release);
     settings.store(word,std::memory_order_release);
 }
-// Startup policy is immutable after latch_startup; only the wide-request bits
-// below are sampled live. publication_word is a separate guest acknowledgement,
-// not a frame-coherent snapshot of displayed output.
+// Startup policy is immutable after latch_startup; the cutscene-aspect and
+// wide requests below are sampled live. publication_word is a separate guest
+// acknowledgement, not a frame-coherent snapshot of displayed output.
 uint32_t settings_word() noexcept {
-    return settings.load(std::memory_order_acquire) |
+    uint32_t word=settings.load(std::memory_order_acquire);
+    // Before latch the word stays zero apart from the wide request, as before.
+    if(word && requested_cutscene_aspect()==0)word|=BASELINE_PRESENT_ORIGINAL_CUTSCENE;
+    return word |
         ((uint32_t(tooie::widescreen::live_widescreen_request()+1)&BASELINE_PRESENT_WIDE_REQUEST_MASK)<<BASELINE_PRESENT_WIDE_REQUEST_SHIFT);
 }
 uint32_t publication_word() noexcept{return publication.load(std::memory_order_acquire);}
 void publish_guest(uint32_t generation,uint32_t flags) noexcept {
     publication.store((generation<<BASELINE_PUBLISH_GENERATION_SHIFT)|(flags&BASELINE_PUBLISH_FLAGS_MASK),std::memory_order_release);
+#if BASELINE_PLAYER
+    issue_evidence::PublicationRecord record{};
+    record.generation = generation; record.flags = flags;
+    issue_evidence::record(record);
+#endif
 }
 Status reconcile_aspect(RT64::SharedQueueResources& shared,uint32_t word,uint32_t guest) {
     using Aspect=RT64::UserConfiguration::AspectRatio;
     const uint32_t generation=word>>BASELINE_PRESENT_GENERATION_SHIFT;
     const bool applied=generation && generation==(guest>>BASELINE_PUBLISH_GENERATION_SHIFT);
     const bool bars=applied && (guest&BASELINE_PUBLISH_PILLARBOX);
-    const bool wide=applied && (guest&BASELINE_PUBLISH_FLAGS_MASK);
-    const Aspect wanted=wide?Aspect::Manual:Aspect::Original;
+    // Both pillarbox and widescreen publication select an explicit aspect target.
+    const bool manual_aspect=applied && (guest&BASELINE_PUBLISH_FLAGS_MASK);
+    const Aspect wanted=manual_aspect?Aspect::Manual:Aspect::Original;
     // One atomic ratio load, shared with guest projection. The two owners may
     // apply/defer/coalesce independently; no frame-lag bound is promised.
     const double target=bars?4.0/3.0:tooie::widescreen::latched_aspect_ratio();
@@ -96,9 +141,12 @@ Status reconcile_aspect(RT64::SharedQueueResources& shared,uint32_t word,uint32_
     const bool changed=config.aspectRatio!=wanted || config.extAspectRatio!=Aspect::Original ||
         (wanted==Aspect::Manual && config.aspectTarget!=target);
     if(changed) {
-        config.aspectRatio=wanted;config.extAspectRatio=Aspect::Original;
+        config.aspectRatio=wanted;
+        config.extAspectRatio=Aspect::Original;
         if(wanted==Aspect::Manual)config.aspectTarget=target;
-        shared.userConfigChanged=true;shared.fbConfigChanged=true;shared.newConfigValidated=false;
+        shared.userConfigChanged=true;
+        shared.fbConfigChanged=true;
+        shared.newConfigValidated=false;
     }
     return Status::Applied; // Shared configuration, not displayed pixels; consumers may delay/coalesce.
 }
@@ -106,6 +154,11 @@ void configure_startup(RT64::Application& app) {
     const auto& prefs=latched_preferences();
     app.userConfig.resolutionMultiplier=prefs.resolution;
 #if BASELINE_PLAYER
+    // F4 player correspondence rows (rt64_matrix_trace.hpp) feed the issue-evidence rings; inert
+    // unless the selected build includes the matrix-trace hook.
+    RT64::tooiePlayerSink.store(&issue_evidence::record_player,std::memory_order_release);
+    app.userConfig.threePointFiltering=prefs.texture_filter==0;
+    app.userConfig.filtering=output_filtering(prefs.output_filter);
     // Player presentation stays independent of the engineering RenderMode and output rate.
     app.enhancementConfig.presentation.mode=RT64::EnhancementConfiguration::Presentation::Mode::PresentEarly;
     app.enhancementConfig.textureLOD.scale=true; // Mip choice follows rendered resolution.

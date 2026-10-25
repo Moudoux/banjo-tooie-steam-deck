@@ -24,12 +24,16 @@ PRE_HELPER void tooie_pre_background_begin(u32 slot,u32 model) {
     pending->mask&=~(1u<<slot);pending->graphics=(u32)&D_80127658;pending->begin=cursor;pending->depth=1;
     cam_group_words(cursor,p->id+1u+slot,CAM_POLICY_PRE_MODEL);D_80127658=cursor+16u;c->main_begin=cursor+16u;
 }
-PRE_HELPER void tooie_pre_background_end(void) {
+/* Nonzero requires a stop: the paid push cannot close on its own list. */
+PRE_HELPER u32 tooie_pre_background_end(void) {
     struct TooieCameraControl* c=&CAM_STATE.control;struct TooiePrePending* p=&tooie_pre_background.pending;u32 cursor=D_80127658;
-    if(!p->depth)return;if(p->depth>1u){p->depth--;return;}
-    /* Prepaid POP remains owned after an unrelated latch. Failure contains a malformed frame. */
+    if(!p->depth)return 0;if(p->depth>1u){p->depth--;return 0;}
+    /* An unrelated latch does not cancel the paid POP. A changed list or an
+     * untrusted cursor cannot close it: keep the token and require a stop. */
     if(p->graphics!=(u32)&D_80127658 || c->epoch!=p->epoch || c->main_base!=p->base || D_8012D508 ||
-       (cursor&7u) || cursor<p->begin+16u || cursor<c->main_begin || cursor>c->main_end-8u)c->latch=1;
-    else {*(volatile u32*)cursor=0x6400000Du;*(volatile u32*)(cursor+4u)=1u;D_80127658=cursor+8u;c->main_begin=cursor+8u;}
-    p->graphics=0;p->depth=0;
+       (cursor&7u) || cursor<p->begin+16u || cursor<c->main_begin || cursor>c->main_end-8u){c->latch=1;return 1;}
+    /* Public count1/selector0 POP closes the PRE MODELVIEW push emitted by tooie_pre_background_begin,
+     * not its surrounding NOPUSH projection group. */
+    *(volatile u32*)cursor=0x6400000Du;*(volatile u32*)(cursor+4u)=1u;D_80127658=cursor+8u;c->main_begin=cursor+8u;
+    p->graphics=0;p->depth=0;return 0;
 }

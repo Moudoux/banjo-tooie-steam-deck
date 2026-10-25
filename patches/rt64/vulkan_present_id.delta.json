@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "name": "rt64_plume_vulkan_present_id",
+  "delta_revision": 1,
+  "upstream": {
+    "dependency": "rt64",
+    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "path": "src/contrib/plume/plume_vulkan.cpp",
+    "sha256": "70ecc88658c7231497836d15ea9f98d80861a6e991cc6128d40c7ac980193038",
+    "lines": 4641
+  },
+  "output": {
+    "filename": "plume_vulkan.cpp",
+    "sha256": "84eed93b95f94993a588c606bd820c1df0290f9bccf04bf0e02dc9a87e0e3a9b",
+    "lines": 4645
+  },
+  "operations": [
+    {
+      "original_start": 2305,
+      "original_end": 2305,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "        // Tooie candidate, default OFF, unverified: on Windows, acquire back-pressure replaces the present-wait throttle.\n",
+        "#if !(defined(_WIN64) && TOOIE_RT64_VULKAN_ACQUIRE_PACING)\n"
+      ]
+    },
+    {
+      "original_start": 2309,
+      "original_end": 2309,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "#endif\n"
+      ]
+    },
+    {
+      "original_start": 2359,
+      "original_end": 2359,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "        currentPresentId = 0; // Present IDs belong to the swap chain handle; the new one has received none.\n"
+      ]
+    }
+  ],
+  "integration_purpose": [
+    "per-swap-chain present ID reset after successful replacement (all platforms)",
+    "default-OFF unverified Windows acquire-pacing candidate (TOOIE_RT64_VULKAN_ACQUIRE_PACING)"
+  ]
+}

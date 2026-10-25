@@ -11,12 +11,14 @@
 struct OSTask { struct { uint32_t type = 2; } t; } task;
 static int ready = 0, pops = 0, runs = 0, completions = 0, failures = 0;
 static std::exception_ptr injected, retained;
-static bool throws = false, bad_alloc = false, escaping = false;
+static bool throws = false, bad_alloc = false, unsupported = false, escaping = false;
 static bool expected(std::exception_ptr error) {
     if (!error) return false;
     try { std::rethrow_exception(error); }
     catch (const std::bad_alloc&) { return bad_alloc; }
-    catch (const std::runtime_error& value) { return !bad_alloc && std::strcmp(value.what(), "SP injected") == 0; }
+    catch (const std::runtime_error& value) {
+        return !bad_alloc && std::strcmp(value.what(), unsupported ? "Unsupported RSP task" : "SP injected") == 0;
+    }
     catch (...) { return false; }
 }
 static void require(bool value) { if (!value) std::_Exit(90); }
@@ -31,7 +33,7 @@ bool run_task(uint8_t*, OSTask* value) {
     require(ready == 1 && pops == 1 && value == &task);
     ++runs;
     if (throws) { escaping = true; std::rethrow_exception(injected); }
-    return true;
+    return !unsupported;
 }
 }
 }
@@ -49,8 +51,11 @@ int main(int argc, char** argv) {
     require(argc == 2);
     const bool runtime_error = std::strcmp(argv[1], "runtime-error") == 0;
     bad_alloc = std::strcmp(argv[1], "bad-alloc") == 0;
-    require(runtime_error || bad_alloc || std::strcmp(argv[1], "success") == 0);
+    // run_task returns false: the stock worker would quick-exit (91) here.
+    unsupported = std::strcmp(argv[1], "unsupported") == 0;
+    require(runtime_error || bad_alloc || unsupported || std::strcmp(argv[1], "success") == 0);
     throws = runtime_error || bad_alloc;
+    const bool failed = throws || unsupported;
     if (throws) {
         try { if (bad_alloc) throw std::bad_alloc{}; throw std::runtime_error("SP injected"); }
         catch (...) { injected = std::current_exception(); }
@@ -74,8 +79,8 @@ int main(int argc, char** argv) {
     });
     worker.join();
     require(ready == 1 && runs == 1);
-    require(pops == (throws ? 1 : 2) && completions == (throws ? 0 : 1));
-    require(failures == (throws ? 1 : 0));
-    require(throws ? expected(retained) : !retained);
+    require(pops == (failed ? 1 : 2) && completions == (failed ? 0 : 1));
+    require(failures == (failed ? 1 : 0));
+    require(failed ? expected(retained) : !retained);
     return 0;
 }

@@ -11,6 +11,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <iterator>
 #include <mutex>
@@ -22,13 +23,15 @@ int main(int argc, char** argv) {
     try {
         if (argc != 3) throw std::runtime_error("usage: MODE NEW_OUTPUT_PATH");
         const std::string mode = argv[1];
-        if (mode != "final-write" && mode != "wait-producer" && mode != "disabled" && mode != "empty" && mode != "write-failure")
+        const bool owned = mode == "owned-admitted" || mode == "owned-refused" || mode == "startup-held" || mode == "owned-failure";
+        if (!owned && mode != "final-write" && mode != "wait-producer" && mode != "disabled" && mode != "empty" && mode != "write-failure")
             throw std::runtime_error("unknown mode");
         const std::filesystem::path output = argv[2];
         if (std::filesystem::exists(output)) throw std::runtime_error("test output must be new");
         if (mode != "write-failure") std::filesystem::create_directories(output.parent_path());
         else if (std::filesystem::exists(output.parent_path())) throw std::runtime_error("failure fixture parent must be absent");
         if (mode != "disabled") tooie::lifecycle::enable();
+        if (owned) tooie::lifecycle::own_final_drain();
         save_context.save_file_path = output;
         save_context.save_buffer.resize(2048);
         std::array<uint8_t, 2048> expected;
@@ -39,6 +42,9 @@ int main(int argc, char** argv) {
         // exit flag; it must drain only after that ownership is gone.
         if (mode == "wait-producer") tooie::lifecycle::created(nullptr);
         else tooie::lifecycle::request_stop();
+        if (mode == "owned-failure")
+            tooie::lifecycle::fail(std::make_exception_ptr(std::runtime_error("injected worker failure")));
+        if (owned && mode != "startup-held") tooie::lifecycle::admit_final_drain(mode != "owned-refused");
         exited.store(true);
         std::thread retire;
         if (mode == "wait-producer") retire=std::thread([] {
@@ -46,17 +52,38 @@ int main(int argc, char** argv) {
             tooie::lifecycle::request_stop();
             tooie::lifecycle::creation_failed(nullptr);
         });
-        save_context.saving_thread = std::thread{saving_thread_func, nullptr};
+        std::promise<void> saver_entered;
+        auto entered = saver_entered.get_future();
+        save_context.saving_thread = std::thread{[&] {
+            saver_entered.set_value();
+            saving_thread_func(nullptr); // Actual selected PI child; no replacement saver loop.
+        }};
+        if (mode == "startup-held") {
+            entered.wait();
+            // Observe a bounded pending-admission interval after native saver thread start. This is
+            // deliberately separate from guest-producer quiescence, already true above.
+            const bool premature = tooie::lifecycle::wait_for_final_drain(std::chrono::milliseconds{50}) ||
+                std::filesystem::exists(output);
+            tooie::lifecycle::admit_final_drain(true);
+            if (premature) {
+                ultramodern::join_saving_thread();
+                throw std::runtime_error("startup-held admission allowed an early final write");
+            }
+        }
         ultramodern::join_saving_thread();
         if (retire.joinable()) retire.join();
-        if (mode == "final-write" || mode == "wait-producer") {
+        if (mode == "final-write" || mode == "wait-producer" || mode == "owned-admitted" || mode == "startup-held" || mode == "owned-failure") {
             std::ifstream input(output, std::ios::binary);
             std::vector<uint8_t> actual{std::istreambuf_iterator<char>(input), {}};
             if (actual != std::vector<uint8_t>(expected.begin(), expected.end()))
                 throw std::runtime_error("final queued EEPROM bytes were not persisted before saver join");
             if (!tooie::save_persistence::complete(tooie::save_persistence::generation()))
                 throw std::runtime_error("finalized save did not acknowledge its written generation");
-            if (tooie::lifecycle::failure()) throw std::runtime_error("unexpected save failure");
+            if (bool(tooie::lifecycle::failure()) != (mode == "owned-failure")) throw std::runtime_error("unexpected lifecycle failure state");
+        } else if (mode == "owned-refused") {
+            if (std::filesystem::exists(output) || tooie::save_persistence::complete(tooie::save_persistence::generation()))
+                throw std::runtime_error("refused final-drain admission wrote or acknowledged a save");
+            if (!tooie::lifecycle::failure()) throw std::runtime_error("refused drain was not reported");
         } else if (mode == "write-failure") {
             if (tooie::save_persistence::complete(tooie::save_persistence::generation()) ||
                 !tooie::save_persistence::unsuccessful(tooie::save_persistence::generation()))

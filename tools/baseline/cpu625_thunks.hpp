@@ -9,6 +9,9 @@
 #if TOOIE_BACKPACK621_SELECTED && !TOOIE_CPU625_SELECTED
 #error Backpack621 requires the existing CPU625 transports
 #endif
+#if !defined(TOOIE_CKCOPY_SELECTED) || (TOOIE_CKCOPY_SELECTED != 0 && TOOIE_CKCOPY_SELECTED != 1)
+#error Explicit boolean TOOIE_CKCOPY_SELECTED required
+#endif
 #if TOOIE_CPU625_SELECTED
 #if TOOIE_BACKPACK621_SELECTED
 extern "C" void tooie_backpack621_begin(uint8_t*,recomp_context*);
@@ -37,16 +40,17 @@ extern "C" void baseline_cpu625_begin(uint8_t* rdram,recomp_context* ctx) {
     tooie_backpack621_begin(rdram,&next);backpack621_checked(next);
 #endif
 }
+// Original DE498 frame words via camera_clone_de498_args (camera_thunks.hpp).
+// Backpack621 gets its own fresh clone of the untouched ctx, not CPU625's output.
 extern "C" void baseline_cpu625_admit(uint8_t* rdram,recomp_context* ctx) {
-    recomp_context clone;camera_clone_context(clone,*ctx);
-    clone.r4=(gpr)(int32_t)MEM_W(0xF8,ctx->r29);
-    clone.r5=ADD32(ctx->r29,0xCC);
-    clone.r6=(gpr)(int32_t)MEM_W(0x10C,ctx->r29);
+    recomp_context clone;camera_clone_de498_args(rdram,clone,*ctx);
+#if TOOIE_CKCOPY_SELECTED
+    // P04a: this DE498's own segment-1 command pointer (sp+0xB8; stored DE8AC, read by S2 at DE8C8).
+    clone.r7=(gpr)(int32_t)MEM_W(0xB8,ctx->r29);
+#endif
     tooie_cpu625_admit(rdram,&clone);cpu625_checked(clone);
 #if TOOIE_BACKPACK621_SELECTED
-    recomp_context next;camera_clone_context(next,*ctx);
-    next.r4=(gpr)(int32_t)MEM_W(0xF8,ctx->r29);next.r5=ADD32(ctx->r29,0xCC);
-    next.r6=(gpr)(int32_t)MEM_W(0x10C,ctx->r29);
+    recomp_context next;camera_clone_de498_args(rdram,next,*ctx);
     tooie_backpack621_admit(rdram,&next);backpack621_checked(next);
 #endif
 }
@@ -78,4 +82,22 @@ extern "C" void baseline_cpu625_init(uint8_t* rdram,recomp_context* ctx) {
     tooie_backpack621_retire(rdram,&next);backpack621_checked(next);
 #endif
 }
+#if TOOIE_CKCOPY_SELECTED
+extern "C" void tooie_cpu625_attach_begin(uint8_t*,recomp_context*);
+extern "C" void tooie_cpu625_attach_end(uint8_t*,recomp_context*);
+// N3 A66BC (func_800A6250, before the direct DE448 jal; its A66C0 delay slot has not yet stored the
+// model to sp+0x10). The model is the untouched original r2; the owner is the A6250 frame word
+// sp+0x1CC; the frame itself is the lexical evidence. The original context is never modified.
+extern "C" void baseline_cpu625_attach_begin(uint8_t* rdram,recomp_context* ctx) {
+    recomp_context clone;camera_clone_context(clone,*ctx);
+    clone.r4=(gpr)(int32_t)MEM_W(0x1CC,ctx->r29);clone.r5=ctx->r2;clone.r6=ctx->r29;
+    tooie_cpu625_attach_begin(rdram,&clone);cpu625_checked(clone);
+}
+// N3 A66C4 (both the DE448 return and the A6674 skip branch). r2 is not the model here.
+extern "C" void baseline_cpu625_attach_end(uint8_t* rdram,recomp_context* ctx) {
+    recomp_context clone;camera_clone_context(clone,*ctx);
+    clone.r4=(gpr)(int32_t)MEM_W(0x1CC,ctx->r29);clone.r5=ctx->r29;
+    tooie_cpu625_attach_end(rdram,&clone);cpu625_checked(clone);
+}
+#endif
 #endif

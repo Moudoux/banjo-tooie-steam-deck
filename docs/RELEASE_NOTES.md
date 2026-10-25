@@ -1,5 +1,44 @@
 # Release notes
 
+## 0.1.0-alpha.4.4 — Banjo-Tooie: Scurvy Dog Port
+
+- Changed character interpolation to share consistent object, model-part and
+  view identities across frames.
+- Added floating-point position and motion output for CPU-deformed animation.
+- Fixed split-player animation artifacts caused by Banjo and Kazooie using the
+  wrong interpolation history.
+- Improved camera/model correspondence and initial model-detail selection.
+- Changed shadow cuts to preserve identity while skipping invalid history.
+- Improved F4 evidence for character, shadow, menu and transition investigation.
+- Added stable projection identities for animated menu models.
+- Corrected a view-index bound that excluded the fifth perspective view from
+  widescreen raster compensation.
+
+Known issues under investigation: backpack shadows and a lower-priority shadow
+issue while sliding on a slope. The menu-projection and transition-edge
+corrections have passed focused tests and await player retesting. Remaining issues are carried forward for follow-up.
+
+Upgrade: extract the full ZIP into a new folder. Existing Scurvy Dog Port saves
+and settings carry over.
+
+## 0.1.0-alpha.4.3 — Banjo-Tooie: Scurvy Dog Port
+
+- Fixed a reported distant-geometry flicker.
+- Fixed audio clicking caused by insufficient queue reserve.
+- Changed output rate and resolution scale to apply during play.
+- Added borderless fullscreen and stabilized the controls menu layout.
+- Added an optional Talon Trot movement-sound mute that applies during play.
+- Added experimental support for local RT64 `.rtz` texture packs.
+- Added F4 issue markers with timestamps and settings in `player.log`.
+- Changed texture detail scaling to follow render resolution.
+
+Known issues at release: widescreen edges and aspect sizing, Mumbo demo shadows,
+low-rate save-select animation, and controller input while unfocused. F6
+fast-forward remained unavailable; reported player-model artifacts needed retesting.
+
+Upgrade: Extract the full ZIP into a new folder. Existing Alpha 4.2 saves and
+settings carry over. See the [published 4.3 notes](https://github.com/some-scurvy-dog/banjo-tooie-scurvy-dog-port/releases/tag/v0.1.0-alpha.4.3).
+
 ## 0.1.0-alpha.4.2 - Banjo-Tooie: Scurvy Dog Port
 
 - Changed player presentation to Present Early for every output-rate option.

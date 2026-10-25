@@ -23,7 +23,6 @@ extern u8 D_80124740[];
 extern void* D_80136E70;
 void* func_80104148(s32);
 void* func_80104200(s16);
-void* func_800AE080(s16);
 
 /* Original immutable assets are a premise; this recognizes a finite producer,
  * not arbitrary display lists. No triangle/cache simulation or recursive calls. */
@@ -79,6 +78,85 @@ SI u32 palette_leaf(u32 model, u32 poses, u32 leaves[2]) {
             op==0xF2u || op==0xF3u || op==0xF5u || op==0xFCu || op==0xFDu)) return 0;
     }
     return 0;
+}
+
+/* Original actor4A8 resources80C..813: finite type3[/type12/type3] grammar.
+ * Palette state can cross ENDDL boundaries; every alternative preserves the
+ * incoming stack and the final list closes it. No recursive guest parsing. */
+SI u32 select4a8_list(u32 model,u32 node,u32 poses,u32 floor,u32* depth,u32* budget,u32* matrices) {
+    u32 list,i,w,a,op;
+    s32 index;
+    if(!palette_offset(model,node,12u,3u) || *(volatile u32*)(model+node)!=3u) return 0;
+    index=*(volatile s16*)(model+node+8u);
+    if(index<0) return 0;
+    list=*(volatile u32*)(model+12u)+8u+(u32)index*8u;
+    if(list<*(volatile u32*)(model+12u)) return 0;
+    for(i=0;i<256u && *budget;++i) {
+        --*budget;
+        if(!palette_offset(model,list,8u,7u)) return 0;
+        w=*(volatile u32*)(model+list);a=*(volatile u32*)(model+list+4u);op=w>>24;
+        if(op==0xDFu) return w==0xDF000000u && !a;
+        if(op==0xDAu) {
+            if(w!=0xDA380002u || (a>>24)!=5u || (a&63u) ||
+                (a&0xFFFFFFu)>=poses*64u || *depth>=31u) return 0;
+            ++*depth;++*matrices;
+        } else if(op==0xD8u) {
+            if(w!=0xD8380002u || !a || (a&63u) || a/64u>*depth-floor) return 0;
+            *depth-=a/64u;
+        } else if(op==0x01u) {
+            if(!*depth || (a>>24)!=1u) return 0;
+        } else if(op==0xDEu) {
+            if(w!=0xDE000000u || a!=0x03000010u) return 0;
+        } else if(!(op==0x05u || op==0x06u || op==0xD7u || op==0xD9u ||
+            op==0xE2u || op==0xE3u || op==0xE6u || op==0xE7u || op==0xF0u ||
+            op==0xF2u || op==0xF3u || op==0xF5u || op==0xFCu || op==0xFDu)) return 0;
+        list+=8u;
+    }
+    return 0;
+}
+SI u32 select4a8_leaf(u32 model,u32 poses,u32 leaves[2]) {
+    u32 root=*(volatile u32*)(model+4u),selection,count,control,children,tail,i;
+    u32 depth=0,budget=512u,matrices=0,base_depth,next;
+    if(!palette_offset(model,root,12u,3u) || *(volatile u32*)(model+root)!=3u ||
+        *(volatile s16*)(model+root+8u)) return 0;
+    next=*(volatile u32*)(model+root+4u);
+    if(!select4a8_list(model,root,poses,0u,&depth,&budget,&matrices) || !matrices) return 0;
+    leaves[0]=root;leaves[1]=0;
+    if(D_8012CA18!=0x812u && D_8012CA18>0x80Eu) return !next && !depth;
+    if(next!=16u || !depth) return 0;
+    selection=root+16u;
+    count=D_8012CA18==0x812u ? 4u : 2u;
+    control=D_8012CA18==0x812u ? 3u : D_8012CA18-0x80Bu;
+    children=(12u+count*4u+7u)&~7u;
+    next=children+count*16u;
+    if(!palette_offset(model,selection,next+12u,3u) || *(volatile u32*)(model+selection)!=12u ||
+        *(volatile u32*)(model+selection+4u)!=next ||
+        *(volatile s16*)(model+selection+8u)!=(s32)count ||
+        *(volatile s16*)(model+selection+10u)!=(s32)control) return 0;
+    base_depth=depth;
+    for(i=0;i<count;++i) {
+        u32 child=selection+children+i*16u;
+        if(*(volatile u32*)(model+selection+12u+i*4u)!=children+i*16u ||
+            *(volatile u32*)(model+child)!=3u || *(volatile u32*)(model+child+4u)) return 0;
+        depth=base_depth;
+        if(!select4a8_list(model,child,poses,base_depth,&depth,&budget,&matrices) || depth!=base_depth) return 0;
+    }
+    tail=selection+next;depth=base_depth;
+    if(*(volatile u32*)(model+tail)!=3u || *(volatile u32*)(model+tail+4u) ||
+        !select4a8_list(model,tail,poses,0u,&depth,&budget,&matrices) || depth) return 0;
+    /* Existing renewal-only word, never dereferenced: retain the exact selector
+     * so changed positive-index/negative-bitmap topology receives a fresh ID. */
+    leaves[1]=D_8012C850[control];
+    return 1;
+}
+
+/* actor4A8 callback 80801D74 owns its pose via descriptor+0x10: nonzero publishes AE080(handle)
+ * to C968 through DF72C; zero leaves C968 to DE498. Returns the renewal-only key for the pose AE598
+ * will consume, or 0: the joined direct pointer, or for shared scratch C840 the current C824 input
+ * class 1/2. Keys never name C840's address and do not prove which producer ran. AE080 is unchecked;
+ * source allocates handles 1..249 (8001B668), so other handles refuse before the call. */
+SI u32 select4a8_pose_key(u32 pose) {
+    return actor_pose_key(AC.descriptor,pose);
 }
 
 #if TOOIE_HAND862
@@ -166,13 +244,13 @@ SI u32 hand862_check(u32 model, u32* source_out, u32* controller_out) {
      * restrict the analyzed layout; neither proves producer provenance nor actor/storage identity. */
     if (*(volatile s16*)(AC.descriptor+0x10u)) return TOOIE_BRIDGE_ANIMATION;
     pose=(u32)D_8012C968;
-    if (pose!=*(volatile u32*)0x8012C840u || !silo_range(pose,0x50u,3u) ||
+    if (pose!=*(volatile u32*)&D_8012C840 || !silo_range(pose,0x50u,3u) ||
         *(volatile u32*)pose!=HAND862_POSES || *(volatile u32*)(pose+4u)<HAND862_POSES ||
         !silo_finite(pose+0x10u,(HAND862_POSES+1u)*16u) || !silo_finite((u32)D_8012CE58,16u))
         return TOOIE_BRIDGE_ANIMATION;
     /* Current input class is an opaque renewal key, not proof which construction branch ran.
      * The original null-controller scope requires zero input; positive handles retain pool checks. */
-    input=*(volatile u32*)0x8012C824u;
+    input=*(volatile u32*)&D_8012C824;
     handle=*(volatile s16*)(AC.actor+0x8Cu);
     controller=0;
     if (handle) {
@@ -194,7 +272,7 @@ SI u32 hand862_check(u32 model, u32* source_out, u32* controller_out) {
 PALETTE u32 tooie_actor_palette_begin(struct TooieRenderBuffers* b,
     u32* local_gfx_cursor, u32 model, u32 camera_id) {
     u32 base, current, mtxbase, mtx, pose, poses, controller=0, class_slot, actor_data;
-    u32 i, role, leaves[2], renew, seen, view_bit, mode, static_list, controller_pool;
+    u32 i, role, leaves[2], renew, seen, view_bit, mode, static_list, controller_pool, select_props=0;
     s32 pose_handle, controller_handle, stride, capacity;
     volatile struct TooieActorPaletteSlot* e;
     if (!AC.actor || AC.admitted || SS.silo_depth!=1u || AC.buffers!=(u32)b) return 0;
@@ -210,7 +288,7 @@ PALETTE u32 tooie_actor_palette_begin(struct TooieRenderBuffers* b,
         D_8007BCE8[0] || D_8007BCE8[1] || D_8007BCF0[0] || D_8007BCF0[1]) REFUSE(TOOIE_BRIDGE_POOL);
     if (!silo_range((u32)local_gfx_cursor,4u,3u)) REFUSE(TOOIE_BRIDGE_RANGE);
     base=D_8007BCD0[D_8007BEDA]; current=*local_gfx_cursor;
-    if (!silo_range(base,0x8FC0u,7u) || current<base || current>base+0x8FC0u || (current&7u))
+    if (!silo_range(base,TOOIE_BRIDGE_LOWER_LIST_BYTES,7u) || current<base || current>base+TOOIE_BRIDGE_LOWER_LIST_BYTES || (current&7u))
         REFUSE(TOOIE_BRIDGE_RANGE);
     if (current<SS.last_end) {
         SS.poisoned=1; silo_count(&SS.poison_count); REFUSE(TOOIE_BRIDGE_CURSOR_DROP);
@@ -240,12 +318,20 @@ PALETTE u32 tooie_actor_palette_begin(struct TooieRenderBuffers* b,
     actor_data=(u32)func_80100368((Actor*)AC.actor);
     if (!silo_range(actor_data,0x3Cu,3u) || *(volatile u32*)(actor_data+0x38u)!=0x80107C2Cu)
         REFUSE(TOOIE_BRIDGE_BIRTH);
+    select_props=*(volatile u32*)actor_data==0x015804A8u &&
+        D_8012CA18>=0x80Cu && D_8012CA18<=0x813u;
     pose=(u32)D_8012C968;
     if (!silo_range(pose,0x50u,3u)) REFUSE(TOOIE_BRIDGE_ANIMATION);
     poses=*(volatile u32*)pose;
     if (!poses || poses>32u || *(volatile u32*)(pose+4u)<poses ||
         !silo_finite(pose+0x10u,(poses+1u)*16u) || !silo_finite((u32)D_8012CE58,16u))
         REFUSE(TOOIE_BRIDGE_ANIMATION);
+    if (select_props) {
+        /* Actor-owned pose; no class-registry join and no controller key on this route. */
+        pose=select4a8_pose_key(pose);
+        if (!pose) REFUSE(TOOIE_BRIDGE_ANIMATION);
+        goto select4a8_owned;
+    }
     controller_pool=(u32)D_80136E70;
     if (!silo_range(controller_pool,4u,3u)) REFUSE(TOOIE_BRIDGE_ANIMATION);
     stride=*(volatile s16*)controller_pool; capacity=*(volatile s16*)(controller_pool+2u);
@@ -265,7 +351,8 @@ PALETTE u32 tooie_actor_palette_begin(struct TooieRenderBuffers* b,
             !silo_range(controller,0x30u,3u)) REFUSE(TOOIE_BRIDGE_ANIMATION);
     }
     if (!controller) REFUSE(TOOIE_BRIDGE_ANIMATION);
-    role=palette_leaf(model,poses,leaves);
+select4a8_owned:
+    role=select_props ? select4a8_leaf(model,poses,leaves) : palette_leaf(model,poses,leaves);
     if (!role) REFUSE(TOOIE_BRIDGE_MODEL_DATA);
     /* DE498 binds segment3 from this original table; E7FF8 owns segment7.
      * Both possible culling lists and the selected material list must terminate. */
@@ -273,20 +360,27 @@ PALETTE u32 tooie_actor_palette_begin(struct TooieRenderBuffers* b,
     if (mode>4u) REFUSE(TOOIE_BRIDGE_MODEL_DATA);
     static_list=*(volatile u32*)(0x80122DC8u+mode*8u+(D_8012C948[23]==255u ? 0u : 4u));
     if (!silo_range(static_list,0x50u,7u) || !silo_shared(static_list+0x40u,0xE2u) ||
-        !silo_shared(0x80123418u,0xD9u) || !silo_shared(0x80123428u,0xD9u)) REFUSE(TOOIE_BRIDGE_MODEL_DATA);
+        !silo_shared(0x80123418u,0xD9u) || !silo_shared(0x80123428u,0xD9u) ||
+        (select_props && !silo_shared(static_list+0x10u,0xE2u))) REFUSE(TOOIE_BRIDGE_MODEL_DATA);
 #if TOOIE_HAND862
 hand862_admit:
 #endif
     mtxbase=D_8007BCD8[D_8007BEDA]; mtx=(u32)b->mtx;
     if (!silo_range(mtxbase,0x12C00u,7u) || mtx<mtxbase || mtx>mtxbase+0x12C00u ||
         ((mtx-mtxbase)&63u) || mtxbase+0x12C00u-mtx<(poses+2u)*64u ||
-        SS.extra_bytes>6368u || base+0x8FC0u-current<96u) REFUSE(TOOIE_BRIDGE_CAPACITY);
+        SS.extra_bytes>6368u || base+TOOIE_BRIDGE_LOWER_LIST_BYTES-current<96u) REFUSE(TOOIE_BRIDGE_CAPACITY);
     e=&SS.palette[AC.slot];
     renew=!(e->block_and_valid&TOOIE_BRIDGE_BLOCK_VALID) || e->birth!=AC.birth || e->pair!=AC.pair ||
         e->flags!=TOOIE_BRIDGE_PALETTE_ROUTE || e->model!=model || e->controller!=controller ||
         e->pose!=pose || e->effective_selector!=D_8012CA18 ||
         e->leaf_offset[0]!=leaves[0] || e->leaf_offset[1]!=leaves[1];
-    seen=1u<<(AC.view*7u+AC.phase); view_bit=1u<<AC.view;
+    seen=1u<<(AC.view*7u+AC.phase);
+    /* Once this owner was admitted in the epoch, changed topology/identity
+     * refuses across every view/phase; renewal must not erase seen/cut history. */
+    if(select_props && (e->block_and_valid&TOOIE_BRIDGE_BLOCK_VALID) &&
+        e->flags==TOOIE_BRIDGE_PALETTE_ROUTE && e->birth==AC.birth && e->pair==AC.pair &&
+        e->stamp==SS.epoch && (renew || (e->leaf0_seen&seen))) REFUSE(TOOIE_BRIDGE_DUPLICATE);
+    view_bit=1u<<AC.view;
     if (!renew) {
         if (e->stamp!=SS.epoch) {
             e->stamp=SS.epoch; e->leaf0_seen=e->leaf1_seen=0; e->camera_cut_views=0;
@@ -333,12 +427,16 @@ hand862_admit:
 PALETTE u32 tooie_actor_cpu_root_begin(struct TooieRenderBuffers* b,
     u32* local_gfx_cursor, u32 model, u32 camera_id) {
     u32 base, current, actor_data, renew, seen, view_bit, i;
+    u32 title=0, key=0, route=TOOIE_BRIDGE_CPU_ROOT_ROUTE;
+#if TOOIE_NPC665
+    title=D_8012C948[24]==0x801017D0u && AC.pair==0x065E0000u;
+#endif
     volatile struct TooieActorPaletteSlot* e;
     GfxCommand* cursor;
 
     /* Nonclass draws preserve both the original stream and existing counters. */
     if (!AC.actor || AC.admitted || SS.silo_depth != 1u || AC.buffers != (u32)b ||
-        D_8012C948[24] != 0x801015D0u || D_8012CA18 != 0x65Eu ||
+        (D_8012C948[24] != 0x801015D0u && !title) || D_8012CA18 != 0x65Eu ||
         !silo_range(model, 14952u, 7u) || *(volatile u16*)(model + 10u) != 0u)
         return 0;
     silo_count(&SS.silo_calls);
@@ -357,8 +455,8 @@ PALETTE u32 tooie_actor_cpu_root_begin(struct TooieRenderBuffers* b,
     if (!silo_range((u32)local_gfx_cursor, 4u, 3u)) REFUSE(TOOIE_BRIDGE_RANGE);
     base = D_8007BCD0[D_8007BEDA];
     current = *local_gfx_cursor;
-    if (!silo_range(base, 0x8FC0u, 7u) || current < base ||
-        current > base + 0x8FC0u || (current & 7u)) REFUSE(TOOIE_BRIDGE_RANGE);
+    if (!silo_range(base, TOOIE_BRIDGE_LOWER_LIST_BYTES, 7u) || current < base ||
+        current > base + TOOIE_BRIDGE_LOWER_LIST_BYTES || (current & 7u)) REFUSE(TOOIE_BRIDGE_RANGE);
     if (current < SS.last_end) {
         SS.poisoned = 1;
         silo_count(&SS.poison_count);
@@ -381,12 +479,44 @@ PALETTE u32 tooie_actor_cpu_root_begin(struct TooieRenderBuffers* b,
     if (!silo_range(actor_data, 0x3Cu, 3u) ||
         *(volatile u32*)(actor_data + 0x38u) != 0x80107C2Cu)
         REFUSE(TOOIE_BRIDGE_BIRTH);
-    if (SS.extra_bytes > 6368u || base + 0x8FC0u - current < 96u)
+#if TOOIE_NPC665
+    if(title) {
+        u32 private_data, pose=(u32)D_8012C968;
+        u32 mtxbase=D_8007BCD8[D_8007BEDA], mtx=(u32)b->mtx;
+        u32 vertex_offset=*(volatile u32*)(model+16u);
+        s32 handle=*(volatile s16*)(AC.actor+0x86u);
+        if(!title53_owner(AC.actor,AC.pair,actor_data)) REFUSE(TOOIE_BRIDGE_BIRTH);
+        if(handle<1 || handle>=250) REFUSE(TOOIE_BRIDGE_ANIMATION);
+        private_data=(u32)func_80100094((Actor*)AC.actor,2u);
+        if(!silo_range(private_data,0x10Cu,3u) || *(volatile s16*)(private_data+0xC6u))
+            REFUSE(TOOIE_BRIDGE_OVERRIDE);
+        if((u32)func_800A89F8()!=AC.view) REFUSE(TOOIE_BRIDGE_VIEW);
+        if((u32)func_800EB854()!=AC.phase) REFUSE(TOOIE_BRIDGE_PHASE);
+        if(vertex_offset>14952u-16u || D_8012C948[7]!=model+vertex_offset)
+            REFUSE(TOOIE_BRIDGE_MODEL_DATA);
+        if(!silo_range(pose,0x50u+19u*64u,3u) || *(volatile u32*)pose!=19u ||
+           *(volatile u32*)(pose+4u)<19u || !silo_finite(pose+0x50u,19u*16u) ||
+           !silo_finite((u32)D_8012CE58,16u) || !(key=actor_pose_key(AC.descriptor,pose)))
+            REFUSE(TOOIE_BRIDGE_ANIMATION);
+        /* 184 original bytes plus32 public bytes; original root needs one64-byte matrix. */
+        if(base+TOOIE_BRIDGE_LOWER_LIST_BYTES-current<216u || !silo_range(mtxbase,0x12C00u,7u) ||
+           mtx<mtxbase || mtx>mtxbase+0x12C00u || ((mtx-mtxbase)&63u) ||
+           mtxbase+0x12C00u-mtx<64u) REFUSE(TOOIE_BRIDGE_CAPACITY);
+        route=TOOIE_BRIDGE_TITLE53_ROUTE;
+    }
+#endif
+    if (SS.extra_bytes > 6368u || base + TOOIE_BRIDGE_LOWER_LIST_BYTES - current < 96u)
         REFUSE(TOOIE_BRIDGE_CAPACITY);
     e = &SS.palette[AC.slot];
     renew = !(e->block_and_valid & TOOIE_BRIDGE_BLOCK_VALID) ||
         e->birth != AC.birth || e->pair != AC.pair ||
-        e->flags != TOOIE_BRIDGE_CPU_ROOT_ROUTE || e->model != model;
+        e->flags != route || e->model != model || (title && e->pose!=key);
+    /* A new class cannot erase this owner's current-epoch seen/cut history. */
+#if TOOIE_NPC665
+    if((title || e->flags==TOOIE_BRIDGE_TITLE53_ROUTE) &&
+       (e->block_and_valid&TOOIE_BRIDGE_BLOCK_VALID) && e->birth==AC.birth &&
+       e->pair==AC.pair && e->stamp==SS.epoch && renew) REFUSE(TOOIE_BRIDGE_DUPLICATE);
+#endif
     seen = 1u << (AC.view * 7u + AC.phase);
     view_bit = 1u << AC.view;
     if (!renew) {
@@ -406,7 +536,13 @@ PALETTE u32 tooie_actor_cpu_root_begin(struct TooieRenderBuffers* b,
         e->birth = AC.birth;
         e->pair = AC.pair;
         e->model = model;
-        e->flags = TOOIE_BRIDGE_CPU_ROOT_ROUTE;
+        /* @recomp This route keeps no animation-controller key. Clear the union word a
+         * previous palette/NPC/Silo occupant of this slot may have left, so that
+         * occupant's controller setters cannot retire this owner in silo_invalidate.
+         * The skeletal route zeroes its whole record for the same reason. */
+        e->controller = 0;
+        e->flags = route;
+        if(title) e->pose=key; /* Producer pointer/input class, never numerical pose values. */
         e->stamp = SS.epoch;
         e->leaf0_seen = e->leaf1_seen = e->camera_cut_views = 0;
         for (i = 0; i < 4u; ++i) e->camera_id[i] = 0;
@@ -421,7 +557,7 @@ PALETTE u32 tooie_actor_cpu_root_begin(struct TooieRenderBuffers* b,
     AC.pool_index = (u32)D_8007BEDA;
     AC.gfx_begin = current;
     AC.leaf_role = 1u;
-    AC.admitted = TOOIE_BRIDGE_CPU_ROOT_ADMITTED;
+    AC.admitted = title ? TOOIE_BRIDGE_TITLE53_ADMITTED : TOOIE_BRIDGE_CPU_ROOT_ADMITTED;
     AC.open_group = 1u;
     SS.extra_bytes += 32u;
     if (SS.extra_bytes > SS.extra_highwater) SS.extra_highwater = SS.extra_bytes;
@@ -478,8 +614,8 @@ PALETTE u32 tooie_actor_feather_leaf_id(struct TooieRenderBuffers* b,
         REFUSE(TOOIE_BRIDGE_POOL);
     base = D_8007BCD0[D_8007BEDA];
     current = (u32)b->gfx;
-    if (!silo_range(base, 0x8FC0u, 7u) || current < base ||
-        current > base + 0x8FC0u || (current & 7u)) REFUSE(TOOIE_BRIDGE_RANGE);
+    if (!silo_range(base, TOOIE_BRIDGE_LOWER_LIST_BYTES, 7u) || current < base ||
+        current > base + TOOIE_BRIDGE_LOWER_LIST_BYTES || (current & 7u)) REFUSE(TOOIE_BRIDGE_RANGE);
     if (current < SS.last_end) {
         SS.poisoned = 1;
         silo_count(&SS.poison_count);
@@ -507,7 +643,7 @@ PALETTE u32 tooie_actor_feather_leaf_id(struct TooieRenderBuffers* b,
         D_8012C850[2] != 1u) REFUSE(TOOIE_BRIDGE_SELECTOR);
     for (i = 1u; i <= 8u; ++i)
         if (i != 2u && D_8012C850[i]) REFUSE(TOOIE_BRIDGE_SELECTOR);
-    if (SS.extra_bytes > 6368u || base + 0x8FC0u - current < 40u)
+    if (SS.extra_bytes > 6368u || base + TOOIE_BRIDGE_LOWER_LIST_BYTES - current < 40u)
         REFUSE(TOOIE_BRIDGE_CAPACITY);
 
     e = &SS.palette[AC.slot];
@@ -537,7 +673,9 @@ PALETTE u32 tooie_actor_feather_leaf_id(struct TooieRenderBuffers* b,
     if (e->camera_id[AC.view] && e->camera_id[AC.view] != camera_id)
         e->camera_cut_views |= view_bit;
     e->camera_id[AC.view] = camera_id;
-    if (e->camera_cut_views & view_bit) REFUSE(TOOIE_BRIDGE_VIEW);
+    /* @recomp N1: billboards face the camera, so a cut view no longer refuses to the
+     * bottom AUTO group. The occurrence is admitted and paid as usual; func_800DD024
+     * emits it under the same ID with every component skipped for this view and epoch. */
     role_seen = role == 1u ? &e->leaf0_seen :
         role == 2u ? &e->leaf1_seen : &e->leaf_offset[0];
     if (*role_seen & seen) REFUSE(TOOIE_BRIDGE_DUPLICATE);
@@ -553,10 +691,15 @@ PALETTE u32 tooie_actor_feather_leaf_id(struct TooieRenderBuffers* b,
 PALETTE void tooie_actor_palette_end(struct TooieRenderBuffers* b) {
     u32 current, base, pool;
 #if TOOIE_ACTOR_PALETTE
-    u32 route;
+    u32 route, title=0;
+#if TOOIE_NPC665
+    title=AC.admitted==TOOIE_BRIDGE_TITLE53_ADMITTED;
+#endif
     if ((AC.admitted != TOOIE_BRIDGE_PALETTE_ADMITTED &&
-        AC.admitted != TOOIE_BRIDGE_CPU_ROOT_ADMITTED) || !AC.open_group || SS.silo_depth != 1u) return;
-    route = AC.admitted == TOOIE_BRIDGE_CPU_ROOT_ADMITTED ?
+        AC.admitted != TOOIE_BRIDGE_CPU_ROOT_ADMITTED && !title) ||
+        !AC.open_group || SS.silo_depth != 1u) return;
+    if(title) route=TOOIE_BRIDGE_TITLE53_ROUTE;
+    else route = AC.admitted == TOOIE_BRIDGE_CPU_ROOT_ADMITTED ?
         TOOIE_BRIDGE_CPU_ROOT_ROUTE : TOOIE_BRIDGE_PALETTE_ROUTE;
 #else
     if (AC.admitted!=TOOIE_BRIDGE_PALETTE_ADMITTED || !AC.open_group || SS.silo_depth!=1u) return;
@@ -575,10 +718,13 @@ PALETTE void tooie_actor_palette_end(struct TooieRenderBuffers* b) {
     }
     /* The saved pool and occurrence own the pop after original scalar cleanup. */
     if (AC.buffers!=(u32)b || pool>1u || D_8007BEDA!=(s32)pool || base!=AC.gfx_base || AC.epoch!=SS.epoch ||
-        !silo_range(base,0x8FC0u,7u) || AC.gfx_begin<base || AC.gfx_begin>base+0x8FC0u-96u ||
+        !silo_range(base,TOOIE_BRIDGE_PHYSICAL_LIST_BYTES,7u) || AC.gfx_begin<base || AC.gfx_begin>base+TOOIE_BRIDGE_LOWER_LIST_BYTES-96u ||
         current<AC.gfx_begin+24u ||
-        current>base+0x8FC0u-8u || (current&7u)) {
+        current>base+TOOIE_BRIDGE_PHYSICAL_LIST_BYTES-8u || (current&7u)) {
         silo_count(&SS.tripwire_count); SS.poisoned=1;
+#if TOOIE_BRIDGE_REQUIRED_STOP
+        tooie_bridge_required_stop(2u);
+#endif
     } else {
         /* A successful occurrence owns its prepaid pop, even after poisoning. */
         GfxCommand* cursor=(GfxCommand*)current;

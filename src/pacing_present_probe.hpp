@@ -40,3 +40,22 @@ extern "C" void tooie_rt64_present_trace(std::uint64_t present_id,
     std::uint32_t vi_v, std::uint32_t index, std::uint32_t count,
     std::uint32_t source_hz, std::uint32_t target_hz, bool successful,
     bool vsync_actual) noexcept;
+
+namespace tooie::pacing {
+// Present-owner stack values, in steady-clock nanoseconds. Mask bits mark
+// executed measurements: interp1/acquire2/worker4/sleep8/presentWait16/call32/phase64.
+struct PresentStageTimes {
+    std::uint64_t interp_ns = 0, acquire_ns = 0, worker_ns = 0;
+    std::uint64_t sleep_ns = 0, present_wait_ns = 0, present_ns = 0, phase_ns = 0;
+    std::uint32_t measured = 0;
+};
+}
+extern "C" bool tooie_rt64_present_trace_enabled() noexcept;
+extern "C" std::uint64_t tooie_rt64_present_trace_clock_ns() noexcept;
+extern "C" void tooie_rt64_present_trace_staged(std::uint64_t present_id,
+    std::uint64_t workload_id, std::uint32_t mode, std::uint32_t vi_origin,
+    std::uint32_t vi_framebuffer, std::uint32_t color_framebuffer,
+    std::uint32_t vi_x, std::uint32_t vi_y, std::uint32_t vi_h,
+    std::uint32_t vi_v, std::uint32_t index, std::uint32_t count,
+    std::uint32_t source_hz, std::uint32_t target_hz, bool successful,
+    bool vsync_actual, const tooie::pacing::PresentStageTimes* stages) noexcept;

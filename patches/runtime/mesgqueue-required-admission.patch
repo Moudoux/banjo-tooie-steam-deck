@@ -1,0 +1,23 @@
+--- a/mesgqueue.cpp
++++ b/mesgqueue.cpp
+@@ -21,3 +21,4 @@
+ void ultramodern::enqueue_external_message(PTR(OSMesgQueue) mq, OSMesg msg, bool jam, bool requeue_if_blocked) {
+-    external_messages.enqueue({mq, msg, jam, requeue_if_blocked});
++    const bool queued = external_messages.enqueue({mq, msg, jam, requeue_if_blocked});
++    if (!queued && requeue_if_blocked) ULTRAMODERN_QUICK_EXIT();
+ }
+@@ -35,3 +36,3 @@
+     for (QueuedMessage& cur_mesg : requeued_messages) {
+-        external_messages.enqueue(cur_mesg);
++        ultramodern::enqueue_external_message(cur_mesg.mq, cur_mesg.mesg, cur_mesg.jam, cur_mesg.requeue_if_blocked);
+     }
+@@ -55,3 +56,3 @@
+     if (!do_send(PASS_RDRAM to_send.mq, to_send.mesg, to_send.jam, false) && to_send.requeue_if_blocked) {
+-        external_messages.enqueue(to_send);
++        ultramodern::enqueue_external_message(to_send.mq, to_send.mesg, to_send.jam, to_send.requeue_if_blocked);
+     }
+@@ -63,3 +64,3 @@
+         if (!do_send(PASS_RDRAM to_send.mq, to_send.mesg, to_send.jam, false) && to_send.requeue_if_blocked) {
+-            external_messages.enqueue(to_send);
++            ultramodern::enqueue_external_message(to_send.mq, to_send.mesg, to_send.jam, to_send.requeue_if_blocked);
+         }

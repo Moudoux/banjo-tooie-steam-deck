@@ -4,7 +4,7 @@
 -#include <cstdio>
 +#include <cstdio>
 +#include "runtime_lifecycle.hpp"
-@@ -554,8 +555,8 @@
+@@ -554,8 +556,16 @@
 -void ultramodern::quit() {
 -    exited.store(true);
 -    GameStatus desired = GameStatus::None;
@@ -13,7 +13,15 @@
 -    std::lock_guard<std::mutex> lock(current_game_mutex);
 -    current_game.reset();
 -}
++static std::chrono::steady_clock::time_point quit_origin{};
++static bool closure_established = false; // Fence caller thread: set before start returns.
++bool tooie::lifecycle::terminal_closed() noexcept { return closure_established; }
++static long long quit_elapsed_ms() {
++    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - quit_origin).count();
++}
 +void ultramodern::quit() {
++    // Terminal budgets count from the first quit, before stop admission and every join.
++    if (!exited.load()) quit_origin = std::chrono::steady_clock::now();
 +    tooie::lifecycle::request_stop();
 +    fprintf(stderr, "baseline terminal-fence stop-before-exited=%d\n", !exited.load());
 +    exited.store(true);
@@ -21,11 +29,12 @@
 +    game_status.compare_exchange_strong(desired, GameStatus::Quit);
 +    game_status.notify_all();
 +}
-@@ -871,1 +872,2 @@
+@@ -871,1 +880,3 @@
 -    recomp::register_heap_exports();
 +    tooie::lifecycle::enable(false);
++    tooie::lifecycle::own_final_drain();
 +    recomp::register_heap_exports();
-@@ -897,19 +899,27 @@
+@@ -897,19 +908,36 @@
 -    game_thread.join();
 -    ultramodern::join_event_threads();
 -    ultramodern::join_thread_cleaner_thread();
@@ -46,29 +55,38 @@
 -    }
 -}
 +    game_thread.join();
-+    fprintf(stderr, "baseline terminal-fence startup-joined=1\n");
-+    if (!tooie::lifecycle::wait_for_shutdown_quiescence(std::chrono::seconds{3})) {
++    fprintf(stderr, "baseline terminal-fence startup-joined=1 elapsed_ms=%lld\n", quit_elapsed_ms());
++    // Producer phase: its single budget counts from quit, never from this join.
++    const auto quiescence_left = std::chrono::duration_cast<std::chrono::milliseconds>(
++        quit_origin + std::chrono::seconds{3} - std::chrono::steady_clock::now());
++    if (!tooie::lifecycle::wait_for_shutdown_quiescence(quiescence_left.count() > 0 ? quiescence_left : std::chrono::milliseconds{0})) {
++        tooie::lifecycle::admit_final_drain(false);
 +        const auto counts = tooie::lifecycle::counts();
 +        tooie::lifecycle::fail(std::make_exception_ptr(std::runtime_error("Terminal guest fence timed out")));
-+        fprintf(stderr, "baseline terminal-fence timeout retained=1 created=%zu producers=%zu enqueued=%zu deleted=%zu failure=1\n",
-+            counts.created, counts.producers, counts.enqueued, counts.deleted);
++        fprintf(stderr, "baseline terminal-fence timeout retained=1 created=%zu producers=%zu enqueued=%zu deleted=%zu failure=1 elapsed_ms=%lld\n",
++            counts.created, counts.producers, counts.enqueued, counts.deleted, quit_elapsed_ms());
 +        return;
 +    }
-+    fprintf(stderr, "baseline terminal-fence guest-quiescent=1\n");
++    fprintf(stderr, "baseline terminal-fence guest-quiescent=1 elapsed_ms=%lld\n", quit_elapsed_ms());
++    // Startup is joined and producers are quiescent: admit the saver's final drain. It holds
++    // no guest or renderer state, so it finishes before the renderer and cleaner joins.
++    tooie::lifecycle::admit_final_drain(true);
++    ultramodern::join_saving_thread();
 +    ultramodern::join_event_threads();
 +    ultramodern::join_thread_cleaner_thread();
-+    ultramodern::join_saving_thread();
 +    const auto counts = tooie::lifecycle::counts();
-+    if (tooie::lifecycle::failure() || counts.producers || counts.created != counts.enqueued || counts.created != counts.deleted) {
++    // A recorded runtime failure with exact worker ownership still completes closure.
++    if (counts.producers || counts.created != counts.enqueued || counts.created != counts.deleted) {
 +        tooie::lifecycle::fail(std::make_exception_ptr(std::runtime_error("Terminal guest fence final ownership failed")));
-+        fprintf(stderr, "baseline terminal-fence failed retained=1 created=%zu producers=%zu enqueued=%zu deleted=%zu failure=1\n",
-+            counts.created, counts.producers, counts.enqueued, counts.deleted);
++        fprintf(stderr, "baseline terminal-fence failed retained=1 created=%zu producers=%zu enqueued=%zu deleted=%zu failure=1 elapsed_ms=%lld\n",
++            counts.created, counts.producers, counts.enqueued, counts.deleted, quit_elapsed_ms());
 +        return;
 +    }
 +    tooie::lifecycle::stop_and_join_timer();
 +    std::lock_guard<std::mutex> lock(current_game_mutex);
 +    current_game.reset();
-+    fprintf(stderr, "baseline terminal-fence success events=1 cleaner=1 saver=1 reset=1 retained=1 created=%zu producers=%zu enqueued=%zu deleted=%zu failure=0\n",
-+        counts.created, counts.producers, counts.enqueued, counts.deleted);
++    closure_established = true;
++    fprintf(stderr, "baseline terminal-fence success events=1 cleaner=1 saver=1 reset=1 retained=1 created=%zu producers=%zu enqueued=%zu deleted=%zu failure=%d elapsed_ms=%lld\n",
++        counts.created, counts.producers, counts.enqueued, counts.deleted, tooie::lifecycle::failure() ? 1 : 0, quit_elapsed_ms());
 +    // One-session baseline retains RDRAM until terminal process exit.
 +}

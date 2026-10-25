@@ -8,13 +8,24 @@ typedef u32 TooieCameraWord;
 #include <stddef.h>
 typedef uint32_t TooieCameraWord;
 #endif
+/* Two original slots plus three float/list slots per perspective: derived 5/2 arena bound. */
+#define TOOIE_CAMERA_MAIN_MATRIX_BYTES 0x2EE00u
 #define TOOIE_CAMERA_MAGIC 0x43414D32u
 #define TOOIE_CAMERA_LAYOUT 2u
 #define TOOIE_CAMERA_STATE_BYTES 1380u
 #define TOOIE_CAMERA_RECORDS 8u
 #define TOOIE_CAMERA_ID_FIRST 0xA0000000u
 #define TOOIE_CAMERA_ID_END 0xB0000000u
-#define TOOIE_CAMERA_M_BYTES 0xA8C0u
+/* MAIN pool partition (PC8 R24): original allowance, shared nonplayer bridge ledger, protected
+ * primary (32 slot/view entries x 3792) and secondary (64 occurrences x 3312, inactive until
+ * qualified) player reserves, then the camera tail. The lower span excludes the camera tail. */
+#define TOOIE_BRIDGE_ORIGINAL_MAIN_BYTES 0x76C0u
+#define TOOIE_BRIDGE_SHARED_BYTES 6400u
+#define TOOIE_BRIDGE_PRIMARY_BYTES (32u*3792u)
+#define TOOIE_BRIDGE_SECONDARY_BYTES (64u*3312u)
+#define TOOIE_BRIDGE_LOWER_BYTES (TOOIE_BRIDGE_ORIGINAL_MAIN_BYTES+TOOIE_BRIDGE_SHARED_BYTES+ \
+    TOOIE_BRIDGE_PRIMARY_BYTES+TOOIE_BRIDGE_SECONDARY_BYTES)
+#define TOOIE_CAMERA_M_BYTES (TOOIE_BRIDGE_LOWER_BYTES+TOOIE_CAMERA_EXTRA_BYTES)
 #define TOOIE_CAMERA_R_BYTES 0x76C0u
 #define TOOIE_CAMERA_EXTRA_BYTES 6400u
 #define TOOIE_CAMERA_POOL_ALIGN 16u
@@ -22,6 +33,13 @@ typedef uint32_t TooieCameraWord;
 #define TOOIE_CAMERA_HEAP_R_BYTES 0x5DC0u
 #define TOOIE_CAMERA_WORLD_INITIAL 1u
 #define TOOIE_CAMERA_PRE_WORLD 2u
+/* Native authenticated transition call scope; uses the existing role word, no ABI extension.
+ * Five views and one fresh-lifetime cut bit. Projection IDs are distinct from model IDs. */
+#define TOOIE_CAMERA_TRANSITION_ROLE_FIRST 0x100u
+#define TOOIE_CAMERA_TRANSITION_ROLE_SKIP 0x10u
+#define TOOIE_CAMERA_TRANSITION_VIEWS 5u
+#define TOOIE_CAMERA_TRANSITION_ID_FIRST 0x30070000u
+#define TOOIE_CAMERA_TRANSITION_ID_END 0x30070005u
 struct TooieCameraRecord {
     TooieCameraWord pointer,birth,revision,valid;
     TooieCameraWord view_id[4],view_scale[4],seen_epoch[4],seen_role[4];
@@ -52,7 +70,7 @@ struct TooieCameraDiagnostics {
     TooieCameraWord calls,productions,refusals,first_reason;
     TooieCameraWord raw0,raw1,raw2,raw3;
     TooieCameraWord tokenless,mismatch,reentry,overflow;
-    TooieCameraWord births,revisions,id_highwater,pool_highwater;
+    TooieCameraWord births,revisions,id_highwater,pool_highwater; /* pool_highwater: reserved; no producer currently updates it. */
 };
 struct TooieCameraHeapPlaceholders {
     TooieCameraWord main0,main1,redirected0,redirected1;

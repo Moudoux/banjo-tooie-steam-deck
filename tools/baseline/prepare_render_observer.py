@@ -11,7 +11,7 @@ def sha(p): return hashlib.sha256(p.read_bytes()).hexdigest()
 def materialize(source, patch, observer, output):
     assert sha(source) == '6e53030e8899c42347b51e67879fcb9679ad487ac067c192612c432d85bca4a4', 'queue input pin'
     assert sha(patch) == 'aa062e613fdd373c494a393d8c893477dae40d75de174740b3a6c41067010b1f', 'patch pin'
-    assert sha(observer) == 'd62d8826c0ed1dbee4dd5158097d01d09e5b4446d2733ca03e3b85e821562752', 'observer pin'
+    assert sha(observer) == 'b39d0fc819f6b33f3e054938c6360c7bf4306601c52288df0cf9dc6be3fb6051', 'observer pin'
     lines=source.read_text().splitlines(keepends=True)
     delta=patch.read_text().splitlines(keepends=True)
     result=[]; cursor=0; hunks=0; i=2

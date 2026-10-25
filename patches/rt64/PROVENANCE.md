@@ -1,4 +1,92 @@
-# RT64 overlay provenance
+# Selected baseline RT64 repairs
+
+The baseline player selects five core repair recipes through
+`cmake/Baseline.cmake` under `TOOIE_BASELINE_RT64_GENERIC_FIXES`. They target
+RT64 commit `6f1c2d99a4ea571c139f449c326fd176ba8f3496`, licensed under the MIT
+License by the RT64 contributors. Each recipe records its upstream input,
+authored spans and materialized output hashes; the dependency checkout is not
+edited. The selected materialized sources live under the build directory's
+`baseline/rt64_generic/`.
+
+| Recipe | Selected consumer and purpose |
+| --- | --- |
+| `owner_index_guard` revision 2 | `src/hle/rt64_game_frame.cpp`, scene/workload mapping and `matchScene`: keep workload-local indices with their owning workload and reuse only compatible projection anchors. |
+| `transform_upload_guard` revision 1 | `src/render/rt64_transform_processor.cpp`, `TransformProcessor::upload`: select interpolated arrays only when the current workload has a mapped predecessor, matching `process`. |
+| `rotation_interpolation` revision 2 | `src/common/rt64_math.cpp`, quaternion interpolation: retain the caller's endpoint convention and supply the two independent spherical coefficients omitted by the pinned helper. |
+| `pop_matrix_group_projection` revision 1 | `src/gbi/rt64_gbi_extended.cpp`, `GBI_EXTENDED::popMatrixGroupV1`: read the public projection selector from command word 1, matching the public encoding. |
+| `projection_residual` revision 1 | `src/render/rt64_projection_processor.cpp`, `ProjectionProcessor::process`: preserve source combined matrices and mapped endpoint decomposition residuals. |
+
+This selection does not include `game_frame_matching.delta.json` or the complete
+`projection_preservation.delta.json` product bundle. The product-overlay history
+below remains provenance for other configurations, not current baseline policy.
+Recipe selection and source verification do not establish a live workload hit,
+GPU delivery or visual acceptance.
+
+## Presentation recipes
+
+Two additional recipes target the same RT64 pin and record exact upstream,
+authored-span and output hashes:
+
+- `present_trace` revision 2 instruments `src/hle/rt64_present_queue.cpp`
+  with bounded, opt-in presentation-stage evidence. Selection is controlled by
+  `TOOIE_BASELINE_PRESENT_TRACE`; the trace is not scanout or visual proof.
+- `vulkan_present_id` revision 1 materializes
+  `src/contrib/plume/plume_vulkan.cpp`. It resets the present ID after a
+  successful swap-chain replacement. On Windows, the separately selected
+  `TOOIE_BASELINE_RT64_VULKAN_ACQUIRE_PACING` option uses acquire back-pressure
+  instead of the present-wait throttle. The option defaults off; the Alpha 4.4
+  Windows package explicitly selects it. This is a platform-specific pacing
+  adaptation, not a game simulation-rate change.
+
+The Alpha 4.4 package allowlist records both selected options. Local player
+feedback supports smooth output; this is not a guarantee for every GPU,
+driver or display configuration.
+
+## Selected projection anchors
+
+The owner-index guard admits scene candidates only with the mapped predecessor
+of the current first workload. Inside `matchScene`, workload-local projection
+indices remain restricted to their owning first workload. IGNORE projections do
+not inherit a mapping. The first reusable projection anchor must have the same
+effective projection key: equal ID, and, for explicit IDs, equal decomposition
+and position/rotation/scale/skew/perspective component policies. AUTO retains its
+AUTO-compatible behavior. Explicit current-to-previous mapping still requires
+equal IDs.
+
+Thus a WORLD camera and a later IGNORE or differently identified projection in
+one scene do not share the WORLD camera's mapping merely because it was first.
+This guard does not establish semantic scene assignment: candidate ranking is
+still nearest-matrix and greedy. A crossed candidate can consume a rightful
+predecessor before a later explicit-ID check refuses mapping. This is a source
+limitation, not evidence that a reported wall-camera event reaches it.
+
+## Selected transform upload
+
+`TransformProcessor::process` clears its interpolation/previous arrays and fills
+them only when a previous frame exists and this workload is mapped. The upload
+guard uses that same predicate. With a previous frame but an unmapped current
+workload, upload must select the N original matrices, rather than an empty
+interpolation array with an N-element upload range. `BufferUploader::Upload`
+checks a nonnull source and nonempty range; it does not check the source vector's
+logical length. This repairs a conditional producer/consumer disagreement, not
+an inevitable crash or an established Tooie artifact cause.
+
+## Selected projection-pop decoder exception
+
+The pinned public `gEXPopMatrixGroup` encoding puts count in command word 1
+bits 0..7 and the boolean projection selector in word 1 bit 8. The upstream
+decoder reads count correctly but reads the selector from word 0 bit 8. The
+one-line recipe corrects only that selector read; public-command correctness
+belongs in RT64 rather than game-owned identity policy.
+
+The reviewed current authored projection groups use NOPUSH, and their group
+pops target MODELVIEW: PRE's paid push/pop is also MODELVIEW. No authored
+projection-group POP consumer was found in those selected guest emitters, so
+the projection-specific correction is dormant for that reviewed scope. Retain
+it as a pinned generic correctness exception; this is not a runtime hit,
+current Tooie visual requirement, mod-command inventory or retirement claim.
+
+# Historical product-overlay provenance
 
 `game_frame_matching.delta.json` applies only to RT64 commit
 `6f1c2d99a4ea571c139f449c326fd176ba8f3496`, licensed under the MIT License

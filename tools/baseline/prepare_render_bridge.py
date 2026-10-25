@@ -317,6 +317,8 @@ def prepare_image(root, output, run):
 
 
 def main():
+    if not __debug__:  # also false when PYTHONOPTIMIZE is set
+        raise SystemExit('prepare_render_bridge.py: required validation uses assert; run without -O and with PYTHONOPTIMIZE unset')
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root',type=Path,default=Path.cwd())
     parser.add_argument('--raw',action='store_true');parser.add_argument('--image',action='store_true');parser.add_argument('--camera',action='store_true')
@@ -330,7 +332,10 @@ def main():
     parser.add_argument('--actor-palette',action='store_true',help='Explicit held engineering actor route; camera image only')
     parser.add_argument('--shadow-observer',action='store_true',help='Finite observation-only shadow raw hooks; camera raw only')
     parser.add_argument('--shadow-coefficients',action='store_true',help='Player-accepted shadow route coefficient policy; 621 camera image only')
+    parser.add_argument('--flap-flip-landing',action='store_true',help='Guest Flap Flip grounded landing correction')
+    parser.add_argument('--first-person-aim',action='store_true',help='Five-body optional modern FPS component; selected HOST/621/Trot composition')
     args=parser.parse_args();assert args.raw or args.image
+    assert not args.flap_flip_landing or (args.camera and args.first_person_aim), 'Landing correction requires the qualified player composition'
     assert not args.minimum_host or (args.camera and args.actor_palette and args.pre_background), "HOST requires actor/PRE camera carrier"
     assert not args.npc665 or (args.camera and args.actor_palette and args.pre_background), "NPC665 requires actor/PRE camera carrier"
     assert not args.cpu625 or (args.camera and args.actor_palette and args.pre_background), "CPU625 requires actor/PRE camera carrier"
@@ -349,7 +354,7 @@ def main():
         with (output/label).open('w') as log:subprocess.run(list(map(str,command)),cwd=root,stdout=log,stderr=subprocess.STDOUT,check=True)
     if args.camera:
         import prepare_camera_bridge
-        prepare_camera_bridge.prepare(root,output,run,args.raw,args.image,actor_palette=args.actor_palette,shadow_observer=args.shadow_observer,demo_timing=args.demo_timing,shadow_fix=args.shadow_fix,pre_background=args.pre_background,cpu625=args.cpu625,minimum_host=args.minimum_host,npc665=args.npc665,backpack621=args.backpack621,shadow_coefficients=args.shadow_coefficients)
+        prepare_camera_bridge.prepare(root,output,run,args.raw,args.image,actor_palette=args.actor_palette,shadow_observer=args.shadow_observer,demo_timing=args.demo_timing,shadow_fix=args.shadow_fix,pre_background=args.pre_background,cpu625=args.cpu625,minimum_host=args.minimum_host,npc665=args.npc665,backpack621=args.backpack621,shadow_coefficients=args.shadow_coefficients,first_person_aim=args.first_person_aim,flap_flip_landing=args.flap_flip_landing)
         return
     if args.raw:
         receipt=prepare_raw(root,output,run)

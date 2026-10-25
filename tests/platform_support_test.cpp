@@ -4,6 +4,8 @@
 #include <stdexcept>
 #include <vector>
 #ifdef _WIN32
+#include <atomic>
+#include <thread>
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #else
@@ -30,6 +32,23 @@ int main(int argc,char** argv) {
         const std::vector<uint8_t> abc={'a','b','c'};
         require(platform::digest(abc,false)=="a9993e364706816aba3e25717850c26c9cd0d89d","abc SHA1 mismatch");
         require(platform::digest(abc,true)=="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","abc SHA256 mismatch");
+        // FIPS 180 one-million-'a' vectors; Windows uses the one-shot span path.
+        const std::vector<uint8_t> million(1000000,'a');
+        const std::string million_sha1="34aa973cd4c4daa4f61eeb2bdbad27316534016f";
+        const std::string million_sha256="cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0";
+        require(platform::digest(million,false)==million_sha1,"Million-a SHA1 mismatch");
+        require(platform::digest(million,true)==million_sha256,"Million-a SHA256 mismatch");
+#ifdef _WIN32
+        // Alternate algorithms concurrently; only immutable pseudo-handles are shared.
+        std::atomic_bool mismatch{false};
+        std::vector<std::thread> workers;
+        for (int t=0;t<4;++t) workers.emplace_back([&] {
+            for (int i=0;i<16;++i)
+                if (platform::digest(million,i&1)!=((i&1)?million_sha256:million_sha1)) mismatch=true;
+        });
+        for (auto& worker:workers) worker.join();
+        require(!mismatch,"Concurrent SHA1/SHA256 mismatch");
+#endif
         std::filesystem::path directory=argv[1];
         std::filesystem::create_directories(directory);
         std::vector<uint8_t> content(3*65536+17);

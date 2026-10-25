@@ -4,13 +4,6 @@
 
 #define TOOIE_RECOMP_PATCH __attribute__((section(".recomp_patch")))
 
-/* Only the consumed offsets are named; this is not a reconstructed viewport. */
-typedef struct {
-    u8 unused_at_0[8];
-    s16 signed_at_8;
-    s16 signed_at_A;
-} TooieAspectInputs;
-
 extern s16 widescreen_enabled;
 extern f32 D_80041710;
 
@@ -22,6 +15,7 @@ _Static_assert(__builtin_offsetof(TooieAspectInputs, signed_at_8) == 8 &&
                sizeof(TooieAspectInputs) == 12,
                "projection authenticated input offsets");
 
+/* func_80015D14: original signed-field ratio and game-wide scale reconstructed below. */
 TOOIE_RECOMP_PATCH f32 func_80015D14(const TooieAspectInputs* input) {
     s16 game_wide = widescreen_enabled;
     f32 original = (f32)input->signed_at_8 / (f32)input->signed_at_A;
@@ -34,6 +28,7 @@ TOOIE_RECOMP_PATCH f32 func_80015D14(const TooieAspectInputs* input) {
     if (game_wide != 0) {
         original = original * D_80041710;
     }
+    /* @recomp Host settings admission; original game 4:3 remains authoritative. */
     settings = tooie_get_latched_widescreen_settings();
     if (game_wide == 0 ||
         (settings & (TOOIE_WIDESCREEN_SETTINGS_ACTIVE |
@@ -43,6 +38,7 @@ TOOIE_RECOMP_PATCH f32 func_80015D14(const TooieAspectInputs* input) {
         return original;
     }
 
+    /* @recomp Live HOST Fit scale. */
 #if defined(TOOIE_BASELINE_HOST) && TOOIE_BASELINE_HOST
     if (settings & TOOIE_WIDESCREEN_SETTINGS_FIT) {
         union { u32 bits; f32 value; } fit;
@@ -51,7 +47,7 @@ TOOIE_RECOMP_PATCH f32 func_80015D14(const TooieAspectInputs* input) {
     }
 #endif
 
-    /* Exact binary64 values of the accepted host expression
+    /* @recomp Exact binary64 values of the accepted host expression
        (double(n) / d) / (16.0 / 9.0); 21:9 must not become 21/16. */
     aspect = (settings >> TOOIE_WIDESCREEN_SETTINGS_ASPECT_SHIFT) &
              TOOIE_WIDESCREEN_SETTINGS_ASPECT_MASK;

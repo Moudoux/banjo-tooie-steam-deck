@@ -3,12 +3,21 @@ GLOBAL_FUNCTION='func_80800034_glglobalsettings'
 CUTSCENE_FUNCTION='func_80800018_glcutDll'
 PROJECTION_FUNCTION='func_80015D14'
 CUTSCENE_TEXT='baseline_cutscene_command(rdram, ctx);'
+# chintroticker descriptor +0x0C update at its original actor+0x79 consumer
+# (lbu v0,0x79(s3)), and +0x28 destruction entry dispatched once by FF3EC.
+TICKER_UPDATE_FUNCTION='func_808005AC_chintroticker'
+TICKER_DESTROY_FUNCTION='func_808003BC_chintroticker'
+HOOKS=((CUTSCENE_FUNCTION,0x80800018,CUTSCENE_TEXT),
+       (TICKER_UPDATE_FUNCTION,0x80800614,'baseline_cutscene_ticker_update(rdram, ctx);'),
+       (TICKER_DESTROY_FUNCTION,0x808003BC,'baseline_cutscene_ticker_destroy(rdram, ctx);'))
+# The thunk passes s3 as the actor; require that exact original consumer.
+TICKER_ACTOR_ANCHOR='    // 0x80800614: lbu         $v0, 0x79($s3)\n'
 
 def add_hooks(hooks,selected):
     assert type(selected) is bool
     if not selected:return
     assert not any(h['func']==GLOBAL_FUNCTION and h.get('before_vram')==0x80800044 for h in hooks), 'Retired G07 query hook'
-    for func,pc,text in ((CUTSCENE_FUNCTION,0x80800018,CUTSCENE_TEXT),):
+    for func,pc,text in HOOKS:
         assert not any(h['func']==func and h.get('before_vram')==pc for h in hooks),(func,hex(pc))
         hooks.append(dict(func=func,before_vram=pc,text=text))
 
@@ -16,10 +25,11 @@ def strip_and_verify(bodies,selected):
     """Return mechanical inverse for the existing camera/raw proof, not a writer."""
     result=dict(bodies)
     assert 'tooie_widescreen_latched_settings_word(' not in result[GLOBAL_FUNCTION], 'Retired G07 query substitution'
-    for func,pc,text in ((CUTSCENE_FUNCTION,0x80800018,CUTSCENE_TEXT),):
+    for func,pc,text in HOOKS:
         call='    '+text+'\n'
         assert result[func].count(call)==int(selected),(func,hex(pc))
         if selected:
             assert call+'    // 0x%08X:'%pc in result[func],(func,hex(pc))
+            assert func!=TICKER_UPDATE_FUNCTION or result[func].count(call+TICKER_ACTOR_ANCHOR)==1,(func,hex(pc))
             result[func]=result[func].replace(call,'')
     return result

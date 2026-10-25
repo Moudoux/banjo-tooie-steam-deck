@@ -2,14 +2,19 @@
 #include "minimum_presentation_abi.h"
 #include "widescreen.hpp"
 #include "common/rt64_user_configuration.h"
+#include "hle/rt64_application.h"
 #include "hle/rt64_shared_queue_resources.h"
 #include <cassert>
 #include <cmath>
 #include <stdexcept>
+#include <tuple>
+#include <utility>
 
 namespace baseline::host {
 Preferences test_preferences;
+int test_cutscene_aspect = 0;
 const Preferences& latched_preferences() noexcept { return test_preferences; }
+int requested_cutscene_aspect() noexcept { return test_cutscene_aspect; }
 }
 
 int main() {
@@ -17,6 +22,15 @@ int main() {
     using namespace baseline::host::render;
     using namespace ultramodern::renderer;
     using Rate=RT64::UserConfiguration::RefreshRate;
+    tooie::widescreen::set_live_widescreen_request(-1);
+    assert(settings_word()==0u);
+    test_cutscene_aspect=1;
+    assert(settings_word()==0u);
+    test_cutscene_aspect=0;
+    assert(settings_word()==0u); // An Original request must not impersonate a latched game.
+    tooie::widescreen::set_live_widescreen_request(1);
+    assert(settings_word()==(BASELINE_PRESENT_FORCE_ON<<BASELINE_PRESENT_WIDE_REQUEST_SHIFT));
+    tooie::widescreen::set_live_widescreen_request(-1);
     GraphicsConfig config{};
     config.developer_mode=true;config.res_option=Resolution::Original2x;
     config.wm_option=WindowMode::Windowed;config.ar_option=AspectRatio::Expand;
@@ -38,6 +52,11 @@ int main() {
 
     RT64::UserConfiguration app;
     RT64::SharedQueueResources shared;
+    assert(app.threePointFiltering && shared.userConfig.threePointFiltering);
+    assert(app.filtering==RT64::UserConfiguration::Filtering::AntiAliasedPixelScaling);
+    shared.userConfigChanged=false;shared.newConfigValidated=true;
+    assert(!update_filters(app,shared,0,0)); // Port defaults match the RT64 constructor.
+    assert(!shared.userConfigChanged && shared.newConfigValidated);
     preference_rate(config,0,60);
     app.refreshRate=shared.userConfig.refreshRate=Rate::Original;
     app.refreshRateTarget=shared.userConfig.refreshRateTarget=60;
@@ -48,12 +67,57 @@ int main() {
     assert(reconcile_aspect(shared,wide,applied_wide)==Status::Applied);
     assert(shared.userConfig.aspectRatio==RT64::UserConfiguration::AspectRatio::Manual);
     assert(shared.userConfig.aspectTarget==16.0/9.0 && shared.fbConfigChanged);
+    assert(app.aspectRatio==RT64::UserConfiguration::AspectRatio::Original);
+    using Filtering=RT64::UserConfiguration::Filtering;
+    for(const auto [texture,output,expected]:{std::tuple{1,1,Filtering::Nearest},
+            std::tuple{0,2,Filtering::Linear},std::tuple{0,0,Filtering::AntiAliasedPixelScaling}}) {
+        auto expected_shared=shared.userConfig,expected_app=app;
+        expected_shared.threePointFiltering=expected_app.threePointFiltering=texture==0;
+        expected_shared.filtering=expected_app.filtering=expected;
+        const bool pending=shared.fbConfigChanged,rt_changed=shared.rtConfigChanged,swap_changed=shared.swapChainSizeChanged;
+        shared.userConfigChanged=false;shared.newConfigValidated=true;
+        assert(update_filters(app,shared,texture,output));
+        assert(json(shared.userConfig)==json(expected_shared) && json(app)==json(expected_app));
+        assert(shared.userConfigChanged && !shared.newConfigValidated);
+        assert(shared.fbConfigChanged==pending && shared.rtConfigChanged==rt_changed && shared.swapChainSizeChanged==swap_changed);
+        shared.userConfigChanged=false;shared.newConfigValidated=true;
+        assert(!update_filters(app,shared,texture,output));
+        assert(!shared.userConfigChanged && shared.newConfigValidated && shared.fbConfigChanged==pending);
+    }
+    for(const auto [texture,output]:{std::pair{-1,0},std::pair{2,0},std::pair{0,-1},std::pair{0,3}}) {
+        const json before_shared=shared.userConfig,before_app=app;
+        const bool pending=shared.fbConfigChanged;
+        bool threw=false;
+        try { update_filters(app,shared,texture,output); } catch(const std::runtime_error&) { threw=true; }
+        assert(threw && json(shared.userConfig)==before_shared && json(app)==before_app);
+        assert(!shared.userConfigChanged && shared.newConfigValidated && shared.fbConfigChanged==pending);
+    }
+    RT64::ApplicationConfiguration startup_config;
+    startup_config.detectDataPath=false;startup_config.useConfigurationFile=false;
+    RT64::Application startup_app({},startup_config); // No setup/device/window creation.
+    for(const auto [texture,output,expected]:{std::tuple{0,0,Filtering::AntiAliasedPixelScaling},
+            std::tuple{1,1,Filtering::Nearest},std::tuple{0,2,Filtering::Linear}}) {
+        test_preferences.texture_filter=texture;test_preferences.output_filter=output;
+        configure_startup(startup_app);
+        assert(startup_app.userConfig.threePointFiltering==(texture==0));
+        assert(startup_app.userConfig.filtering==expected);
+    }
+    test_preferences.texture_filter=0;test_preferences.output_filter=0;
     test_preferences.wide=-1;
     test_preferences.native_aspect=fit_aspect;
+    test_preferences.cutscene_aspect=1; // Live request, not this startup copy, owns the bit.
     latch_startup(true);
     assert(tooie::widescreen::latched_settings_word()==3u); // Use-game projection follows guest halfword.
     assert(((settings_word() >> BASELINE_PRESENT_ASPECT_SHIFT) & 15u)==0u);
     const auto startup_settings=settings_word();
+    assert(startup_settings&BASELINE_PRESENT_ORIGINAL_CUTSCENE);
+    for(int request:{1,0}) {
+        test_cutscene_aspect=request;
+        assert(bool(settings_word()&BASELINE_PRESENT_ORIGINAL_CUTSCENE)==(request==0));
+        assert((settings_word()&~BASELINE_PRESENT_ORIGINAL_CUTSCENE)==
+            (startup_settings&~BASELINE_PRESENT_ORIGINAL_CUTSCENE));
+        assert(test_preferences.cutscene_aspect==1);
+    }
     for(int request:{-1,0,1}) {
         tooie::widescreen::set_live_widescreen_request(request);
         assert(((settings_word()>>BASELINE_PRESENT_WIDE_REQUEST_SHIFT)&BASELINE_PRESENT_WIDE_REQUEST_MASK)==uint32_t(request+1));

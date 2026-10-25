@@ -1,0 +1,65 @@
+--- a/mesgqueue.cpp
++++ b/mesgqueue.cpp
+@@ -1,1 +1,5 @@
++#ifdef TOOIE_PERSISTENT_RUNTIME_EXPERIMENT
++#include "persistent_state_scheduler.hpp"
++#endif
++#include "runtime_lifecycle.hpp"
+ #include <thread>
+@@ -38,1 +42,13 @@
+-    external_messages.wait_dequeue(to_send);
++    if (tooie::lifecycle::enabled()) {
++        while (!external_messages.wait_dequeue_timed(to_send, std::chrono::milliseconds{10})) {
++            tooie::lifecycle::poll();
++#ifdef TOOIE_PERSISTENT_RUNTIME_EXPERIMENT
++            // No message was dequeued: safe to park without losing a native
++            // QueuedMessage local. Never place this after a successful dequeue.
++            tooie::persistent_state::scheduler::before_external_wait();
++#endif
++        }
++        tooie::lifecycle::poll();
++    } else {
++        external_messages.wait_dequeue(to_send);
++    }
+@@ -204,2 +220,41 @@
+     return received ? 0 : -1;
+ }
++
++#ifdef TOOIE_PERSISTENT_RUNTIME_EXPERIMENT
++extern "C" bool tooie_persistent_external_export(std::vector<tooie::persistent_state::ExternalMessage>* output) noexcept {
++    if(!output || external_messages.size_approx()>4096)return false;
++    std::vector<QueuedMessage> temporary;
++    try {
++        // Complete allocations before the first destructive dequeue.
++        temporary.reserve(4097);output->clear();output->reserve(4097);
++    } catch(...) {return false;}
++    try {
++        QueuedMessage value;
++        while(external_messages.try_dequeue(value)) {
++            temporary.push_back(value);
++            if(temporary.size()>4096)break;
++            output->push_back({value.mq,value.mesg,value.jam,value.requeue_if_blocked});
++        }
++        for(const auto& message:temporary)
++            if(!external_messages.enqueue(message))throw std::runtime_error("external FIFO requeue allocation failed");
++        if(temporary.size()>4096)throw std::runtime_error("external FIFO changed during frozen export");
++        return true;
++    } catch(...) {
++        // A partial requeue cannot be rolled back through this queue API.
++        // Do not return to gameplay or attempt a second duplicate requeue.
++        tooie::lifecycle::fail(std::current_exception());
++        tooie::persistent_state::devices::terminal_abort(tooie::persistent_state::devices::producer_epoch());
++        return false;
++    }
++}
++extern "C" bool tooie_persistent_external_import(const std::vector<tooie::persistent_state::ExternalMessage>* input) noexcept {
++    if(!input||input->size()>4096)return false;
++    try {
++        QueuedMessage value;
++        while(external_messages.try_dequeue(value)) {}
++        for(const auto& message:*input)
++            if(!external_messages.enqueue({message.queue,message.message,message.jam,message.requeue_if_blocked}))return false;
++        return true;
++    } catch(...) {return false;}
++}
++#endif

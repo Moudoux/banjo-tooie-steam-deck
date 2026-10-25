@@ -6,6 +6,12 @@
 #if TOOIE_BACKPACK621
 #include "../backpack621-candidate/backpack621_owner.h"
 #endif
+#if !defined(TOOIE_BK_PIPELINE) || (TOOIE_BK_PIPELINE != 0 && TOOIE_BK_PIPELINE != 1)
+#error Explicit boolean TOOIE_BK_PIPELINE selection required
+#endif
+#if TOOIE_BK_PIPELINE
+#include "bk_pipeline.h"
+#endif
 #define PATCH __attribute__((section(".recomp_patch")))
 typedef SiloBuffers BoneBuffers;
 extern void* volatile D_8012C968;
@@ -18,8 +24,49 @@ void mlMtxPop(void);
 _Static_assert(sizeof(void*) == 4 && sizeof(BoneBuffers) == 8 &&
     __builtin_offsetof(BoneBuffers, mtx) == 4 && sizeof(Gfx) == 8 && sizeof(Mtx) == 64,
     "original bone handler guest ABI");
+#if TOOIE_BK_PIPELINE
+/* B4 (BK selection): the BK bone group (func_803387F8) is this handler's only label. The Silo role
+ * and the player, NPC665 and Backpack621 bone tokens are retired here; the BK-OFF body below is
+ * the original row handler, unchanged. */
 PATCH void func_800DCF48(BoneBuffers* buffers, u8* node) {
     void* animation = D_8012C968;
+    u32 bkGroup=0;
+    /* @recomp BK: increment the transform ID offset at every bone command and set the flag. */
+    tooie_bk_state.cur_model_transform_id_offset+=1u;
+    tooie_bk_state.cur_model_uses_bones=1u;
+    if (animation) {
+        void* matrix = func_800ADE2C(animation, *(volatile s8*)(node + 9));
+        func_80019AA0(D_8012CE58, matrix);
+        Mtx* applied=buffers->mtx;
+        mlMtxApply(applied);
+        Gfx* cursor = buffers->gfx;
+        buffers->gfx = cursor + 1;
+        /* Original 800DCF48 gSPMatrix: MODELVIEW/LOAD/PUSH of this 64-byte slot.
+         * F3DEX2 encodes parameters XOR G_MTX_PUSH; low bit alone is misleading. */
+        ((volatile u32*)cursor)[0] = 0xDA380002u;
+        ((volatile u32*)cursor)[1] = (u32)buffers->mtx;
+        buffers->mtx = (Mtx*)((u8*)buffers->mtx + 64);
+        /* @recomp BK: create a matrix group for this bone. */
+        bkGroup=tooie_bk_set_model_matrix_group((Gfx**)&buffers->gfx,(u32)node,0u);
+    }
+    u32 child = *(volatile u8*)(node + 8);
+    if (child) func_800DE2A4(buffers, node + child);
+    if (D_8012C968) {
+        mlMtxPop();
+        Gfx* cursor = buffers->gfx;
+        buffers->gfx = cursor + 1;
+        /* Original gSPPopMatrixN(...,1): word1 counts 64 bytes for one matrix. */
+        ((volatile u32*)cursor)[1] = 0x40u;
+        ((volatile u32*)cursor)[0] = 0xD8380002u;
+    }
+    /* @recomp BK: pop the bone group. @tooie Balanced with the actual push, not the re-read. */
+    if(bkGroup) tooie_bk_pop_model_matrix_group((Gfx**)&buffers->gfx);
+}
+#else
+PATCH void func_800DCF48(BoneBuffers* buffers, u8* node) {
+    void* animation = D_8012C968;
+    /* @recomp Silo-role and backpack/NPC/player tokens each bracket the original
+     * matrix/child/pop commands with their own public group push and pop. */
     u32 role=silo_begin((SiloBuffers*)buffers,node),didPush=0,playerBoneToken=0;
 #if TOOIE_NPC665
     u32 npcBoneToken=0;
@@ -46,6 +93,8 @@ PATCH void func_800DCF48(BoneBuffers* buffers, u8* node) {
         playerBoneToken=tooie_player_bone_push((SiloBuffers*)buffers,*(volatile s8*)(node+9));
         Gfx* cursor = buffers->gfx;
         buffers->gfx = cursor + 1;
+        /* Original 800DCF48 gSPMatrix: MODELVIEW/LOAD/PUSH of this 64-byte slot.
+         * F3DEX2 encodes parameters XOR G_MTX_PUSH; low bit alone is misleading. */
         ((volatile u32*)cursor)[0] = 0xDA380002u;
         ((volatile u32*)cursor)[1] = (u32)buffers->mtx;
         buffers->mtx = (Mtx*)((u8*)buffers->mtx + 64);
@@ -56,6 +105,7 @@ PATCH void func_800DCF48(BoneBuffers* buffers, u8* node) {
         mlMtxPop();
         Gfx* cursor = buffers->gfx;
         buffers->gfx = cursor + 1;
+        /* Original gSPPopMatrixN(...,1): word1 counts 64 bytes for one matrix. */
         ((volatile u32*)cursor)[1] = 0x40u;
         ((volatile u32*)cursor)[0] = 0xD8380002u;
     }
@@ -68,6 +118,7 @@ PATCH void func_800DCF48(BoneBuffers* buffers, u8* node) {
     if(backpack621BoneToken) tooie_backpack621_bone_pop((SiloBuffers*)buffers,backpack621BoneToken);
 #endif
 }
+#endif
 
 __attribute__((noinline, section(".text.silo_preflight"))) u32 tooie_silo_preflight(SiloBuffers* b,u8* node) {
     u32 i,base,current,end,mtxbase,mtx,flags,renew,actor_data;
@@ -81,9 +132,9 @@ __attribute__((noinline, section(".text.silo_preflight"))) u32 tooie_silo_prefli
     if(SC.view>3 || !(SC.phase==0||SC.phase==1||SC.phase==2||SC.phase==5||SC.phase==6)) return 5;
     if(D_8007BEDA<0 || D_8007BEDA>1 || D_8007BCE8[0] || D_8007BCE8[1] || D_8007BCF0[0] || D_8007BCF0[1]) return 6;
     base=D_8007BCD0[D_8007BEDA]; current=(u32)b->gfx;
-    if(!silo_range(base,0x8FC0u,7u) || current<base || current>base+0x8FC0u || (current&7u)) return 7;
+    if(!silo_range(base,TOOIE_BRIDGE_LOWER_LIST_BYTES,7u) || current<base || current>base+TOOIE_BRIDGE_LOWER_LIST_BYTES || (current&7u)) return 7;
     if(current<SS.last_end) { SS.poisoned=1; silo_count(&SS.poison_count); return 8; }
-    end=base+0x8FC0u;
+    end=base+TOOIE_BRIDGE_LOWER_LIST_BYTES;
     mtxbase=D_8007BCD8[D_8007BEDA]; mtx=(u32)b->mtx;
     if(!silo_range(mtxbase,0x12C00u,7u) || mtx<mtxbase || mtx>mtxbase+0x12C00u || ((mtx-mtxbase)&63u) || mtxbase+0x12C00u-mtx<576u) return 9;
     if(SS.extra_bytes>6176u || end-current<224u) return 10;

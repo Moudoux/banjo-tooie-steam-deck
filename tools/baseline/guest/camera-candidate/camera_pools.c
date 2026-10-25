@@ -1,4 +1,5 @@
-/* Original allocator traffic is retained. Only published command-buffer ownership changes. */
+/* Retain allocator/free ownership. Ordinary matrix arenas include the three additional
+ * float-camera slots per original two; command-buffer ownership remains resident. */
 #include "camera_internal_02.h"
 void* heap_alloc(s32);u32 heap_free(void*);
 u32 func_8001A570(void);u32 func_800A9800(void);u32 func_8001A63C(void);
@@ -9,6 +10,7 @@ extern volatile u8 D_8011A760[],D_8011A7C0[];
 s32 func_800EA05C(void);u32 func_800B5680(s32);
 u32 func_800EF410(void*,void*);f32 func_800EEAA4(void*,void*);
 u32 func_800EFA20(void*,void*,f32);u32 func_800EE7F8(void*,void*);
+/* Authored helpers: map a published resident pool pointer back to its retained heap allocation. */
 CAM_INLINE u32 cam_main_free_arg(u32 pointer,u32 slot) {
     if(pointer==(u32)&tooie_camera_main[slot][0])
         return slot?CAM_STATE.heap.main1:CAM_STATE.heap.main0;
@@ -21,9 +23,10 @@ CAM_INLINE u32 cam_redirected_free_arg(u32 pointer,u32 slot) {
 }
 CAM_PATCH u32 func_8001A3A0(void) {
     if(!D_8007BCD0){
+        /* @recomp Retain both original MAIN allocations; publish the resident pools instead. */
         CAM_STATE.heap.main0=(u32)heap_alloc(0x8FC0);D_8007BCD0=(u32)&tooie_camera_main[0][0];
         CAM_STATE.heap.main1=(u32)heap_alloc(0x8FC0);D_8007BCD4=(u32)&tooie_camera_main[1][0];
-        D_8007BCD8=(u32)heap_alloc(0x12C00);D_8007BCDC=(u32)heap_alloc(0x12C00);
+        D_8007BCD8=(u32)heap_alloc(TOOIE_CAMERA_MAIN_MATRIX_BYTES);D_8007BCDC=(u32)heap_alloc(TOOIE_CAMERA_MAIN_MATRIX_BYTES);
         D_8007BCE0=(u32)heap_alloc(0x1AE0);D_8007BCE4=(u32)heap_alloc(0x1AE0);
         func_8001A570();
     }
@@ -32,10 +35,12 @@ CAM_PATCH u32 func_8001A3A0(void) {
 CAM_PATCH u32 func_8001A324(void) {
     u32 pointer=D_8007BCD0;
     if(pointer){
+        /* @recomp Free the retained MAIN allocations, not the published resident pointers. */
         heap_free((void*)cam_main_free_arg(pointer,0));
         heap_free((void*)cam_main_free_arg(D_8007BCD4,1));
         heap_free((void*)D_8007BCD8);heap_free((void*)D_8007BCDC);
         heap_free((void*)D_8007BCE0);heap_free((void*)D_8007BCE4);
+        /* @recomp Original D_8007BCD0 clear, then private heap and control ownership are dropped. */
         D_8007BCD0=0;CAM_STATE.heap.main0=0;CAM_STATE.heap.main1=0;
         CAM_STATE.control.active=0;
     }
@@ -51,6 +56,7 @@ CAM_PATCH u32 func_800BC690(void) {
     {s16 first=*(volatile s16*)(config+2),second=*(volatile s16*)(config+4);
      s[0xD]=1;s[0x10]=1;s[0xE]=0;s[0xF]=0;
      *(volatile s16*)(s+0x12)=first;s[0x11]=(u8)second;}
+    /* @recomp Retain both original redirected allocations; publish the resident pools instead. */
     CAM_STATE.heap.redirected0=(u32)heap_alloc(0x5DC0);*(volatile u32*)(s+0)=(u32)&tooie_camera_redirected[0][0];
     CAM_STATE.heap.redirected1=(u32)heap_alloc(0x5DC0);*(volatile u32*)(s+4)=(u32)&tooie_camera_redirected[1][0];
     func_800EF410(vector,(void*)(config+0x14));x=vector[0];y=vector[1];z=vector[2];
@@ -76,6 +82,8 @@ CAM_PATCH u32 func_800BC690(void) {
 CAM_PATCH u32 func_800BC8A0(void) {
     volatile u8* s=D_801282E0;
     if(s[0xD]){
+        /* @recomp Free the retained redirected allocations; after the original clears,
+           drop private heap, fill and paid-token state. */
         heap_free((void*)cam_redirected_free_arg(*(volatile u32*)(s+0),0));
         heap_free((void*)cam_redirected_free_arg(*(volatile u32*)(s+4),1));
         *(volatile u32*)(s+4)=0;*(volatile u32*)(s+0)=0;s[0xD]=0;

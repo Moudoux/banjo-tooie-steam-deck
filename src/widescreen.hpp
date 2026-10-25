@@ -14,6 +14,9 @@ enum class NativeAspect : std::uint32_t {
 
 // Legacy profile stays startup-latched. Baseline publishes a live wide request;
 // the guest halfword owns application and presentation acknowledges it.
+// The "latched_" names are historical: enabled/override are latched at game
+// start, but aspect/fit bits are seeded there and then follow
+// set_live_aspect_bits (live publication). Names are kept for existing users.
 void configure_profile(bool enabled) noexcept;
 void configure_native_aspect(NativeAspect aspect) noexcept;
 void latch_for_game_start() noexcept;

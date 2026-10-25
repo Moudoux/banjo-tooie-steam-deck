@@ -1,0 +1,17 @@
+--- a/events.cpp
++++ b/events.cpp
+@@ -216,3 +216,5 @@
++        { // Q-VI-LOCK: shared seed/update ownership, released before delivery/callback.
++        std::lock_guard state_lock{ events_context.message_mutex };
+         // If the game hasn't started yet, set a dummy VI mode and origin.
+         if (!ultramodern::is_game_started()) {
+             static bool odd = false;
+@@ -229,2 +231,3 @@
+         // Update VI registers and swap VI modes.
+         events_context.vi.update_vi();
++        }
+@@ -556,3 +559,4 @@
+ extern "C" PTR(void) osViGetCurrentFramebuffer() {
++    std::lock_guard lock{ events_context.message_mutex };
+     return events_context.vi.get_cur_state()->framebuffer;
+ }

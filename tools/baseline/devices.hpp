@@ -23,7 +23,7 @@ void expect_first_graphics(uint32_t start, uint32_t size);
 bool first_graphics_processed();
 bool quit_was_requested();
 #ifdef BASELINE_TERMINAL_FENCE
-// The runtime error owner admitted a first report whose handler has not returned.
-bool runtime_error_report_pending() noexcept;
+// The runtime error owner retained a first report; main shows it after terminal closure.
+bool runtime_error_retained() noexcept;
 #endif
 }

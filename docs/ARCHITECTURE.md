@@ -1,5 +1,7 @@
 # Architecture
 
+Current shared renderer details are in [Rendering](RENDERING.md). The sections below identify its selected responsibilities alongside startup, overlays and the build pipeline.
+
 This page explains how the selected Windows player source is built and who owns each behavior. Read it before you change code.
 
 This project is a work in progress. The design is not final, and improvements are continually evaluated.
@@ -37,7 +39,7 @@ Guest ABI and actual execution are different things:
 
 ## Naming in the source
 
-Names record what is known. Do not rename sources to guess at meaning.
+Names record what is known. Do not rename sources to guess at meaning. Numbered route names below are retained identifiers, not the coverage boundary of the current shared renderer. See [Rendering](RENDERING.md).
 
 - **`func_<address>`** is the original function address. It preserves the link to the ROM and the decompilation.
 - **Overlay suffixes**, such as `_chhoneycarrier`, name the overlay. Together with the address, they identify one function.
@@ -60,7 +62,7 @@ These concepts recur below.
 - **Slot**: a descriptor's index in the original pool `D_80132ED0[200]`.
 - **Birth**: a number that distinguishes allocation occurrences of one slot. A reused slot gets a new birth.
 - **Epoch**: a number that distinguishes frame construction passes.
-- **ID block**: a reserved range of renderer labels for one slot and birth.
+- **ID window**: the shared renderer reserves labels for an owner sample and its traversal. Historical palette code also uses allocated blocks; those are a different mechanism.
 - **Poisoned**: a flag that records an invariant failure. Admission paths that check it refuse while it is set. `silo_epoch` in [silo_bridge.h](../tools/baseline/guest/silo-candidate/silo_bridge.h) clears it when the epoch changes.
 
 ## Why the design changed in Alpha 4
@@ -92,10 +94,10 @@ Looking back, much of that code was AI slop. It was produced quickly and in volu
 |---|---|---|
 | Text edits to generated C | Declared N64Recomp configuration (`ignored`, `hook`, `instruction`) plus guest patches | [baseline_raw_condition.toml](../tools/baseline/baseline_raw_condition.toml), `prepare_raw` in [prepare_camera_bridge.py](../tools/baseline/prepare_camera_bridge.py) |
 | Game policy in native code | Selected game and render owners moved to guest C; native exceptions remain below | [tools/baseline/guest](../tools/baseline/guest/) |
-| Private renderer policy | Guest code emits extended GBI commands. Five named generic RT64 recipes remain | [actor_palette.c](../tools/baseline/guest/silo-candidate/actor_palette.c), [Baseline.cmake](../cmake/Baseline.cmake) |
+| Private renderer policy | Guest code emits extended GBI commands. Five named generic RT64 recipes remain | [bk_pipeline.c](../tools/baseline/guest/silo-candidate/bk_pipeline.c), [Rendering](RENDERING.md), [Baseline.cmake](../cmake/Baseline.cmake) |
 | Custom engine start-up | `recomp::register_game`, `recomp::overlays::register_overlays`, `recomp::start` | [main.cpp](../tools/baseline/main.cpp) |
 | Per-rate logic | RT64 `UserConfiguration` refresh-rate settings | [minimum_presentation.cpp](../tools/baseline/minimum_presentation.cpp) |
-| Large custom frontend | A small ImGui menu. It is still custom and Windows-only | [minimum_menu.cpp](../tools/baseline/minimum_menu.cpp) |
+| Large custom frontend | A small custom ImGui menu | [minimum_menu.cpp](../tools/baseline/minimum_menu.cpp) |
 
 One concrete replacement: the earlier composition used two instruction edits in `func_8001A3A0`. The camera composition removes them. `camera_pools.c` defines that function in guest C instead.
 
@@ -105,7 +107,7 @@ The guest side owns game behavior:
 
 - gameplay, actor lifetimes, and descriptor allocation and free;
 - draw order and game data;
-- render identity: side tables, births, ID blocks and extended GBI emission.
+- render identity: descriptor births, drawn-player roster identity, owner/sample windows, bounded graph history and extended GBI emission. Native submit hooks provide the exact-root acknowledgement needed for source-data reuse.
 
 The native side owns the platform and runtime:
 
@@ -149,7 +151,8 @@ Native code must not decide game semantics. It must not silently own guest lifet
   The old global-settings query override is retired from the selected player.
 - Gameplay aspect uses one atomic encoded ratio for guest projection and RT64.
   Each owner applies it at its next boundary; no exact frame delay is promised.
-  Only the cutscene-aspect policy remains startup-latched.
+  Cutscene aspect is sampled live by `settings_word()` in `minimum_presentation.cpp`;
+  the guest widescreen helper consumes it before camera refresh.
 - Name overlay functions with their overlay suffix.
 - Declare every native access to guest memory. Name the function, the offsets and the reason.
 - Regenerate after each guest edit. Update image pins only after you review the change.
@@ -170,15 +173,21 @@ Native code must not decide game semantics. It must not silently own guest lifet
 These are open cleanup items, not finished architecture.
 
 - **Native hooks.** The maintained raw condition declares start-up, overlay, audio and scheduler hooks into native code.
-- **Render hooks.** The selected render hooks include `func_800A7840` at `0x800A7888` and `0x800A7900`, and `func_800DE498` at `0x800DEFA0` and `0x800DEFB0`. Shadow, background, demo-timing, CPU625, NPC665 and minimum-host hooks are added by flag.
+- **Render hooks.** The selected recipes include shared frame/root/submit, geometry, selector, camera, shadow, menu and transition boundaries. Read [bk_pipeline_hooks.py](../tools/baseline/bk_pipeline_hooks.py), [prepare_camera_bridge.py](../tools/baseline/prepare_camera_bridge.py) and their selected recipe imports; the older numbered-route list alone does not describe this composition.
 - **Register writes from hooks.** One hook in `func_80082088` assigns `r21` from the original ROM-key word through `baseline_overlay_hardware_word`.
 - **Instruction edits.** `baseline_raw_condition.toml` declares nine instruction replacements, including two PI-status reads replaced by `0x340A0000` (`ori $t2,$zero,0`). Other replacements include `0x03E00008` (`jr $ra`) and `0`.
 - **Native player checks.** `baseline_render_construction_begin` in [adapters.cpp](../tools/baseline/adapters.cpp) publishes the player-boundary build flag once and reads the player tripwire. The selected camera composition advances its frame counter in guest `tooie_camera_construction_begin`. Bridge-only engineering compositions keep the native increment.
 - **Native reads of guest memory.** `adapters.cpp` also holds start-up observers, thread admission checks, rejected-function providers, an SI adapter and core1/core2 publication.
 - **Raw offsets.** Guest patches still use offsets such as `player_body(self)+0x11` and fixed addresses such as `0x80122DC8`.
+- **Original-address registry restoration.** The selected camera build derives its 11 core2 restoration rows from `selected.syms.toml`. Boot, core1, heap and ROM-PIO retain explicit rows. Honey and `bsbtrot` retain their later overlay-registration stage. Each insertion checks the original omission, provider membership and section bounds. The tables are sorted by offset. The non-camera engineering fallback still carries its own core2 rows.
+- **CMake renames.** `BaselineBootPatch` is compiled with `osVirtualToPhysical` and `osWritebackDCache` defined to their `*_recomp` names.
+- **Thunk stack offsets.** Native thunks read qualified guest frames. Exact generated hook inverses, linker/layout checks and actual-helper fixtures verify specific bindings; they do not establish arbitrary ABI changes or gameplay acceptance. Review each helper against its selected original callsite rather than treating a synthetic fixture as provenance.
+- **Generated patch C after preparation.** The selected player pins the image, layout and the exact `boot.c`, `recomp_overlays.inl` and `funcs.h` bytes. Configure checks the source directory used by `BaselineBootPatch` and those hashes. Changes trigger configure again before compilation. Repeated pinned-recompiler runs established these byte identities; a receipt cannot approve its own output. Older engineering selections do not gain this check automatically.
+- **Python-authored runtime text.** Some selected runtime children still come from Python text recipes rather than tracked patches. See [patches/runtime/PROVENANCE.md](../patches/runtime/PROVENANCE.md).
+- **Optimized Python.** Several preparers check identity with `assert`. Their entry points refuse to run under `python -O` or with `PYTHONOPTIMIZE` set.
 - **Carried upstream patches.** See [Pinned upstream and carried patches](#pinned-upstream-and-carried-patches).
-- **Windows-only shell.** The player uses a small ImGui menu, not a shared cross-platform frontend.
-- **Texture packs (local, unreleased).** The player accepts RT64 `.rtz` packs through the runtime's mod manifest/order service. Code mods and ROM patches remain unsupported; no guest mod API is exported. The engineering baseline keeps an empty mod game ID.
+- **Custom shell.** The player uses a small ImGui menu, not a shared frontend.
+- **Texture packs (experimental since Alpha 4.3).** The player accepts RT64 `.rtz` packs through the runtime's mod manifest/order service. Code mods and ROM patches remain unsupported; no guest mod API is exported. The engineering baseline keeps an empty mod game ID.
 - **Old source.** The old engine and unselected experiments remain in the tree.
 
 ## What is built
@@ -203,9 +212,9 @@ Directory names do not select anything. `silo-candidate`, `camera-candidate` and
 
 1. **Preset.** Read the `windows-player` `cacheVariables` in `CMakePresets.json`. Note each `TOOIE_BASELINE_*` value.
 2. **Native sources.** In `cmake/Baseline.cmake`, find each `target_sources(TooieBaseline …)`. Check the `if(...)` around it against the preset values.
-3. **Guest flags.** Read `SELECTION` in [prepare_player_guest.py](../tools/baseline/prepare_player_guest.py). It is `--actor-palette --demo-timing --shadow-fix --pre-background --cpu625 --minimum-host --npc665 --backpack621 --shadow-coefficients`.
+3. **Guest flags.** Read `SELECTION` in [prepare_player_guest.py](../tools/baseline/prepare_player_guest.py). That source owns the complete selected flag list.
 4. **Flags to files.** Read `prepare_image` in [prepare_camera_bridge.py](../tools/baseline/prepare_camera_bridge.py). Step 5 lists what it compiles.
-5. **What `prepare_image` compiles:**
+5. **Main composition owners** (use `prepare_image` for the complete selected input list):
    - Always: `camera_lifecycle`, `camera_ncpod`, `camera_pools`, `camera_emitters`, `camera_replay`, `camera_hook_leaves` and `camera_state` from `camera-candidate/`.
    - `--demo-timing` adds `demo_timing.c`.
    - `--shadow-fix` adds `shadow_projection.c`.
@@ -214,6 +223,7 @@ Directory names do not select anything. `silo-candidate`, `camera-candidate` and
    - `--cpu625`, `--npc665`, `--backpack621` and `--minimum-host` add objects from `prepare_cpu625.py`, `prepare_npc665.py`, `prepare_backpack621.py` and `prepare_minimum_host.py`.
    - `prepare_honey_containment` derives `camera_honey_bridge.c` from [guest/render_bridge.c](../tools/baseline/guest/render_bridge.c) by exact, pinned insertions. The derivative is build output.
    - The link input list is the `inputs=` line before the `ld.lld` call.
+   - `--bk-pipeline` adds the shared pipeline and selects `TOOIE_BK_PIPELINE` branches inside retained objects. An object name such as `actor`, `leaf` or `npc665` does not establish that its legacy label path executes.
 6. **Confirm locally.** After preparation, `composition-v2/receipt.json` lists every input file and hash. `composition-v2/boot.c` lists every `RECOMP_FUNC` definition. Both are local build output. Do not commit them.
 
 ## Build pipeline
@@ -231,10 +241,10 @@ The executable holds two kinds of recompiled code and one data image. Guest patc
 
 Raw game code follows a separate path:
 
-- `tools/prepare_codegen.py` and `prepare_baseline_raw.py` produce ROM-derived inputs.
+- `tools/prepare_codegen.py` and `prepare_baseline_raw.py` produce ROM-derived inputs. The player needs only four `prepare_codegen.py` products: `config/selected.syms.toml`, `config/overlay-ids.txt`, `generated/core2-expected.bin` and `generated/heap-patch-products/heap.o`. `--player-inputs` prepares them in a fresh `.codegen/player-inputs-*` scratch root with the existing heap pipeline and validators. It installs each product only if absent, refuses if an existing file differs, and writes no corpus, lifter output or codegen receipt. Downstream preparers still pin `selected.syms.toml`, `core2-expected.bin` and `heap.o`. `overlay-ids.txt` has no individual pin; `raw-receipt.json` only records its hash.
 - N64Recomp applies the declared hooks and instruction edits from its configuration. It writes `raw/funcs_*.c`.
 - `clang-cl` compiles that output as emitted, as `BaselineRecompiledFuncs`. No later text or regex step rewrites it.
-- Functions in the `ignored` list are left out, so that guest patches provide them.
+- Functions in the `ignored` list are excluded from raw translation. Selected guest replacements or declared native providers supply them.
 - `prepare_raw` removes each inserted hook line from a changed function and compares the result with the parent output. That check covers its own stage against the declared parent condition. It does not prove that ROM semantics are untouched.
 
 `authenticate_function_table` in [prepare_render_bridge.py](../tools/baseline/prepare_render_bridge.py) orders declared registry entries against the linked ELF. This recipe changes generated registry metadata, not raw function bodies.
@@ -245,24 +255,24 @@ Keep three outputs apart:
 - **Recompiled patch code** (`boot.c`): PC-executable code built from guest C. Calls into patch functions run this code.
 - **Patch data image** (`boot.bin`): bytes mapped into guest memory from `0x80801000`, outside the original 8 MiB RDRAM.
 
-The selected image is 299,640 bytes, SHA-256 `b7241959…`. It contains:
+The selected image contains boot and heap code, composed guest-owner state and static camera pools.
 
-- the 2,760-byte boot and heap image at its start;
-- `tooie_render_bridge_state` (18,844 bytes);
-- `tooie_camera_state` (1,380 bytes);
-- static camera pools (147,200 bytes).
+- [prepare_player_guest.py](../tools/baseline/prepare_player_guest.py) owns the selected image and layout identities.
+- [Baseline.cmake](../cmake/Baseline.cmake) independently checks the image before embedding it.
+- The preparation receipt and generated `*_layout.h` files record the composed inputs, image size and state locations.
 
 Scripts that produce each stage:
 
 ```text
-tools/prepare_codegen.py          ROM + decomp → config/selected.syms.toml, overlay-ids, heap patch object
+tools/prepare_codegen.py [--player-inputs]
+                                  ROM + decomp → config/selected.syms.toml, overlay-ids, core2-expected.bin, heap.o
 tools/baseline/prepare_player_guest.py --rom … (WSL)
   ├─ prepare_baseline_raw.py      baseline_raw_condition.toml → build/…/baseline/raw
   ├─ prepare_boot_heap.py         boot-initializer/*.c + heap.o → heap-patch/boot.bin (2,760 B)
   ├─ prepare_silo_bridge.py       silo-candidate/*.c → Silo raw + image
   └─ prepare_render_bridge.py --camera --raw --image <SELECTION>
                                   → composition-v2/{raw/, boot.c, boot.bin, recomp_overlays.inl, *_layout.h}
-cmake --preset windows-player     checks guest image SHA-256 b7241959…; composes the runtime sources
+cmake --preset windows-player     checks the source-owned guest image pin; composes the runtime sources
   BaselineRecompiledFuncs  ← composition-v2/raw/funcs_*.c   (raw recompiled game code)
   BaselineBootPatch        ← composition-v2/boot.c          (recompiled guest patches)
   TooieBaseline            ← boot.bin via file_to_c → register_boot_patch → recomp::overlays::register_patches
@@ -275,8 +285,8 @@ cmake --preset windows-player     checks guest image SHA-256 b7241959…; compos
 | Start-up and runtime | Boot `0x80000400`; initializers `boot_osInitialize` (`0x800016F0`), `tooie_core1_osInitialize` (core1 `osInitialize`, `0x8002D7B0`) | [main.cpp](../tools/baseline/main.cpp) `main`; guest [boot-initializer](../tools/baseline/guest/boot-initializer/) | `recomp::register_game`, `recomp::start` |
 | Overlays and guest memory | core1 `0x80012030`, ROM `0x01E29B60`, size `0x31350`; core2 `0x800815C0`, ROM `0x01E5AEB0`, size `0xA5170` | [adapters.cpp](../tools/baseline/adapters.cpp) `register_boot_patch`, `baseline_observe_and_publish_core1/2` | `recomp::overlays::register_overlays`, `register_patches`, `load_overlays` |
 | Actor and descriptor lifetime | Descriptor allocation `func_800EBED4`; pool `D_80132ED0[200]` of `0x30`-byte entries; player init and free `func_80092898`, `func_800F3880` | [render_bridge.c](../tools/baseline/guest/render_bridge.c), [player_lifecycle.c](../tools/baseline/guest/silo-candidate/player_lifecycle.c), [camera_lifecycle.c](../tools/baseline/guest/camera-candidate/camera_lifecycle.c) | Guest patch mode |
-| Pose and animation | Pose `D_8012C968`; bone, leaf and pair draw `func_800DCF48`, `func_800DD998`, `func_80101808`/`func_800DE448` | [actor_palette.c](../tools/baseline/guest/silo-candidate/actor_palette.c), [npc665_owner.c](../tools/baseline/guest/silo-candidate/npc665_owner.c), [cpu625.c](../tools/baseline/guest/cpu625-candidate/cpu625.c), backpack621 owner | Guest patch mode |
-| Renderer labels, camera, shadow | Draw `func_800DE498`; frame construction `func_800A7840`; projection emitters `func_800E42F0`, `func_800E44FC`, `func_800E4640`; shadow path `func_800A6250`, `func_800A6B24`, `func_800A5EC4` | [draw_boundaries.c](../tools/baseline/guest/silo-candidate/draw_boundaries.c), [camera_emitters.c](../tools/baseline/guest/camera-candidate/camera_emitters.c), [camera_hook_leaves.c](../tools/baseline/guest/camera-candidate/camera_hook_leaves.c), [shadow_projection.c](../tools/baseline/guest/camera-candidate/shadow_projection.c), [camera_state.c](../tools/baseline/guest/camera-candidate/camera_state.c) | RT64 extended GBI |
+| Pose and animation | Original pose and deformation producers; shared bone/list traversal | [bk_float.inc](../tools/baseline/guest/silo-candidate/bk_float.inc), [bk_graph.inc](../tools/baseline/guest/silo-candidate/bk_graph.inc), [bk_select.inc](../tools/baseline/guest/silo-candidate/bk_select.inc), [leaf_handler.c](../tools/baseline/guest/silo-candidate/leaf_handler.c) | Guest patch mode; original attribute production retained |
+| Renderer labels, camera, shadow | Draw owner, root/graph, view and shadow producer | [bk_pipeline.c](../tools/baseline/guest/silo-candidate/bk_pipeline.c), [bk_attach.inc](../tools/baseline/guest/silo-candidate/bk_attach.inc), [bk_shadow_attach.inc](../tools/baseline/guest/silo-candidate/bk_shadow_attach.inc), [camera_emitters.c](../tools/baseline/guest/camera-candidate/camera_emitters.c) | Public RT64 commands; see [Rendering](RENDERING.md) |
 | Input and settings | Game reads controller port 0 | [minimum_host.cpp](../tools/baseline/minimum_host.cpp), [minimum_menu.cpp](../tools/baseline/minimum_menu.cpp), [minimum_presentation.cpp](../tools/baseline/minimum_presentation.cpp), [devices.cpp](../tools/baseline/devices.cpp); `src/frontend_config.cpp`, `src/frontend_input_preference.cpp` | `ultramodern::input::callbacks_t`, RT64 `UserConfiguration` |
 | Audio | Core1 audio microcode task | [src/tooie_audio_rsp.cpp](../src/tooie_audio_rsp.cpp) plus generated RSP code | `recomp::rsp::callbacks_t` |
 | Saves | 16 Kbit EEPROM | `GameEntry{.save_type = Eep16k, .game_id = u8"bt.n64.us.1.0"}` in `main.cpp`; [src/runtime_save_root.cpp](../src/runtime_save_root.cpp) (`<profile>/saves`); import in [player_startup.cpp](../tools/baseline/player_startup.cpp) | Runtime PI and save code, with the save-writing patch below |
@@ -303,43 +313,23 @@ cmake --preset windows-player     checks guest image SHA-256 b7241959…; compos
 - It is valid only inside the pool on a `0x30` boundary.
 - Otherwise the owner refuses.
 
-**ID blocks** ([actor_palette.c](../tools/baseline/guest/silo-candidate/actor_palette.c))
+**Shared owner/sample identity**
 
-- The Honey carrier's `bind_block` keeps its block while `birth` and the selector pair match.
-- The actor palette also requires matching route, model, controller, pose, effective selector and leaf offsets.
-- Otherwise the owner takes `next_block`.
-- In `actor_palette.c` and `render_bridge.c`, `next_block` only increases.
-- When it reaches `TOOIE_BRIDGE_BLOCK_COUNT`, those owners refuse new blocks.
+[bk_pipeline.h](../tools/baseline/guest/silo-candidate/bk_pipeline.h) defines finite actor, player, attachment, view and phase domains. Actor IDs use validated creation generations; player IDs use the drawn roster slot, including separate split-player histories. This is arithmetic sample identity, not the old `next_block` palette allocator. Its generation reduction and roster reuse still have finite lifetime obligations.
 
-**Per-draw context** ([draw_boundaries.c](../tools/baseline/guest/silo-candidate/draw_boundaries.c))
+**Per-draw and root state**
 
-- `func_80101808` fills `SC` only when no outer actor is active and nesting depth is 0.
-- `SC` records slot, birth, selector pair, epoch, view and phase.
-- `func_80101808` clears `SC` after `func_800DE448` returns.
-- `func_800DE448` increments `SS.silo_depth`. Owners act only at depth 1.
+The selected branches in [draw_boundaries.c](../tools/baseline/guest/silo-candidate/draw_boundaries.c) call shared owner begin/end helpers. Scope tokens restore the enclosing owner and transform base. Root helpers in [bk_pipeline.c](../tools/baseline/guest/silo-candidate/bk_pipeline.c) save and restore traversal offset, bone state and cut policy. The root closes at the qualified normal return or bit40 join; late closure is diagnostic failure, not a substitute accepted route.
 
-**Poisoning and pops**
+[bk_float.inc](../tools/baseline/guest/silo-candidate/bk_float.inc) restores nested float streams and suspends foreign inherited streams. Its 1024-record owner lookup protects current/adjacent-frame records, with stale-only reuse and explicit capacity refusal. [bk_select.inc](../tools/baseline/guest/silo-candidate/bk_select.inc) reserves supported branch spans and separately applies the conservative player branch-discontinuity guard. Those mechanisms are distinct from historical palette poisoning.
 
-- Admission paths in `actor_palette.c` check `SS.poisoned` and refuse while it is set.
-- `tooie_actor_palette_end` writes the pop only if buffer, pool, epoch and range checks pass.
-- If those checks fail, it counts a tripwire, sets `poisoned` and writes no pop.
-- `silo_epoch` clears `poisoned` at the next epoch.
-- This page does not claim that every failure path leaves balanced output.
+**Camera construction and storage**
 
-**Camera construction** ([camera_hook_leaves.c](../tools/baseline/guest/camera-candidate/camera_hook_leaves.c))
+Construction boundaries remain qualified hooks. Camera identity state is stored in the patch image, while qualified float projection/view matrices and restore commands use the original matrix allocation route expanded by [camera_pools.c](../tools/baseline/guest/camera-candidate/camera_pools.c). [camera_emitters.c](../tools/baseline/guest/camera-candidate/camera_emitters.c) handles emission and restoration. Do not describe all camera storage as the old static identity arrays.
 
-- `tooie_camera_construction_begin` sets `owner_frame` from the hook at `0x800A7888`.
-- `tooie_camera_construction_end` clears it from the hook at `0x800A7900`.
-- Re-entry latches and is counted.
-- The camera pools are static arrays in the patch image ([camera_state.c](../tools/baseline/guest/camera-candidate/camera_state.c)).
+**Player lifecycle and retained routes**
 
-**Player lifecycle** ([player_lifecycle.c](../tools/baseline/guest/silo-candidate/player_lifecycle.c))
-
-- `func_80092898` first retires CPU625 and backpack621 IDs.
-- It then clears the player boundary, runs the original body and marks the boundary complete.
-- `func_800F3880` retires the same IDs and clears the boundary.
-- It then runs the original `func_80098E64` and `heap_free`.
-- If a group is still open, the boundary is not cleared and the state is poisoned.
+[player_lifecycle.c](../tools/baseline/guest/silo-candidate/player_lifecycle.c) retains original lifecycle work and compatibility paths for numbered producers. Retirement of CPU625/backpack621 labels alone does not describe all shared histories. Current ownership follows the actual drawn roster binding; unusual same-slot/model reuse requires separate evidence. Historical `actor_palette.c` allocated-block and poison/pop behavior remains relevant only when its nonshared branch is selected. See [Rendering](RENDERING.md) for current limits.
 
 **Threads**
 
@@ -354,51 +344,18 @@ A raw address is **not** unique. Many overlays are linked at the same VRAM range
 
 Overlay functions therefore carry their overlay in the symbol name. Examples are `func_80800380_chhoneycarrier`, `func_80800D8C_chnests` and `func_80800034_glglobalsettings`.
 
-The generated registry identifies functions by their N64Recomp section entry (`recomp_overlays.inl`, ordered by `config/overlay-ids.txt`), not by address alone. Honey and the selected `bsbtrot` sound replacement each use an exact native splice into their original overlay function table.
+The generated registry identifies functions by their N64Recomp section entry (`recomp_overlays.inl`, ordered by `config/overlay-ids.txt`), not by address alone. Honey and the selected `bsbtrot` sound replacement each use an exact native splice into their original overlay function table. Boot, core1 and core2 replacements are spliced the same way (see [What is still not in that shape](#what-is-still-not-in-that-shape)).
 
 ## Traces
 
 ### Actor draw
 
-**Step 1: entry**
-
-- The game calls `func_80101808(actor, callback)`, the original actor-draw boundary.
-- The raw code leaves this function out.
-- The selected body is the guest patch in `draw_boundaries.c`.
-
-**Step 2: identity binding**
-
-- The patch runs the original calls in order.
-- It checks that `actor->unk0` (the descriptor) lies inside `D_80132ED0` on a `0x30` boundary.
-- If so, it records `slot`, `birth = SS.births[slot]` and the selector pair (`unk14`/`unk16`) in `SC`.
-
-**Step 3: inner draw**
-
-- `func_800DE448` (also patched) tracks nesting depth.
-- When `D_8012C948[24] == 0x80092234` (the player check), it calls `tooie_player_begin`.
-- It then calls the original `func_800DE498`.
-
-**Step 4: hook in the original body**
-
-- `func_800DE498` is raw game code.
-- At `0x800DEFB0`, an N64Recomp hook calls a native thunk.
-- The thunk forwards to the selected guest helper.
-- With the shadow fix compiled, that helper is `tooie_shadow_de498` in `shadow_projection.c`.
-- Without it, the helper is `tooie_camera_de498_ignore`.
-
-**Step 5: admission**
-
-- The helper asks `tooie_actor_palette_begin` (`actor_palette.c`) to admit the draw.
-- The pose, model and pool checks must all pass.
-- On success, `tooie_actor_palette_begin` emits the actor's modelview group.
-- The helper then emits a projection group with `cam_projection_policy(…, CAM_POLICY_WORLD)`.
-- On failure, the helper emits `CAM_POLICY_IGNORE`.
-
-**Step 6: unwinding**
-
-- On the way out, `func_800DE448` calls `tooie_actor_palette_end`.
-- It then calls `tooie_player_end`.
-- `func_80101808` then clears `SC`.
+1. The selected [draw_boundaries.c](../tools/baseline/guest/silo-candidate/draw_boundaries.c) preserves the actor's original argument resolution and draw order. Under `TOOIE_BK_PIPELINE`, it opens an owner scope with `tooie_bk_actor_draw_begin` and restores that scope afterward.
+2. `tooie_bk_de448_begin` handles direct-world/player routes and nested attachments. Player identity is resolved from the staged draw callback and its actual roster-bound owner, not the controlled-player index.
+3. Qualified hooks within `func_800DE498` invoke the shared root helpers. Normal and projection-only roots keep their original matrix roles. Root selection, cut policy and float production are established before graph emission.
+4. Supported graph helpers emit matrix groups and preserve stable node correspondence. CPU-written leaf vertices temporarily suspend the earlier float stream. In the selected leaf handler, deformation callbacks run before that suspension bracket; inside it are only command writes and address conversion.
+5. Normal root return or the bit40 join closes the matching root and restores enclosing traversal/float state. `tooie_bk_de448_end` then restores the owner scope. A missing expected close is counted as a defect.
+6. At submission, the exact display-list root is registered for runtime acknowledgement; its data is not reused until the acknowledgement arrives. Suppressed constructions do not wait. See [Rendering](RENDERING.md) for the distinct construction and submitted-history rules.
 
 ### A setting: output frame rate
 
@@ -410,7 +367,9 @@ The generated registry identifies functions by their N64Recomp section entry (`r
 The **Fullscreen** checkbox in `minimum_menu.cpp` requests borderless desktop
 fullscreen through SDL in `minimum_host.cpp`. The menu reflects actual window
 flags; a failed change shows an error and is not saved. VSync also applies
-during play. Resolution and aspect choices remain latched until the next launch.
+during play. Resolution requests pass through `devices.cpp::update_screen` to
+`minimum_presentation.cpp::update_resolution` under the RT64 configuration lock.
+Gameplay aspect and cutscene aspect use the live guest/renderer boundaries described above.
 
 At player startup, `minimum_presentation.cpp` enables RT64's existing
 `textureLOD.scale` setting so mip choice follows rendered resolution. This is
@@ -419,31 +378,21 @@ visually accepted.
 
 ### Renderer label owner
 
-To find who emitted a matrix-group ID:
+Use the selected definitions rather than historical palette formulas:
 
-- **Actor IDs** are `TOOIE_BRIDGE_ID_BASE + block*512 + view*128 + phase*16 + role`.
-- Actor IDs come from `tooie_actor_palette_begin`, `tooie_actor_cpu_root_begin` and `tooie_actor_feather_leaf_id` in [actor_palette.c](../tools/baseline/guest/silo-candidate/actor_palette.c).
-- Each block is bound to a slot's `birth` and selector pair.
-- **Honey exception:** the Honey carrier alone uses `bind_block` (`… + 1`) in [render_bridge.c](../tools/baseline/guest/render_bridge.c).
-- **Camera and projection IDs** come from `tooie_camera_state` (`camera_state.c`, `.control.next_id`). `camera_emitters.c` emits them.
-- **Shadow** uses `PC.idbase + SHADOW_ROLE_FIRST` (480) in `shadow_projection.c`.
-- The shadow policy differs from `CAM_POLICY_WORLD` only in the decompose bit.
-- `TOOIE_SHADOW_COEFFICIENTS=1` selects the shipped shadow route policy.
-- **Feather leaves** (route `0x6EA`) use `tooie_actor_feather_leaf_id`. The patched `func_800DD024` in `camera_hook_leaves.c` emits them.
+- Actor and player sample windows: `bk_actor_id`, `bk_player_id` and owner scopes in [bk_pipeline.c](../tools/baseline/guest/silo-candidate/bk_pipeline.c), with domains and bounds in [bk_pipeline.h](../tools/baseline/guest/silo-candidate/bk_pipeline.h).
+- Graph offsets and selector spans: [bk_graph.inc](../tools/baseline/guest/silo-candidate/bk_graph.inc), [bk_sort.inc](../tools/baseline/guest/silo-candidate/bk_sort.inc) and [bk_select.inc](../tools/baseline/guest/silo-candidate/bk_select.inc).
+- Sequential player attachment: [bk_attach.inc](../tools/baseline/guest/silo-candidate/bk_attach.inc).
+- Shadow identity and lifetime: [bk_shadow_attach.inc](../tools/baseline/guest/silo-candidate/bk_shadow_attach.inc) and [shadow_projection.c](../tools/baseline/guest/camera-candidate/shadow_projection.c). Cuts keep identity while changing interpolation policy.
+- Camera/view/projection identity: [camera_state.c](../tools/baseline/guest/camera-candidate/camera_state.c) and [camera_emitters.c](../tools/baseline/guest/camera-candidate/camera_emitters.c).
+- Menu occurrence windows: [menu_scope.hpp](../tools/baseline/menu_scope.hpp) and the selected menu hook/thunk recipe. Transition projection roles are separately scoped; neither proves pixel-level edge correctness.
 
-```sh
-rg -n "TOOIE_BRIDGE_ID_BASE|TOOIE_CAMERA_ID_FIRST|SHADOW_ROLE_FIRST" tools/baseline/guest
-rg -n "gEXMatrixGroup|gEXPopMatrixGroup|cam_projection_policy" tools/baseline/guest
-rg -n "PATCH .*func_80101808" tools/baseline/guest
-rg -n "0x800DEFB0|before_vram" tools/baseline/prepare_camera_bridge.py
-rg -n "_chhoneycarrier|_glglobalsettings" tools/baseline
-rg -n "target_sources\(TooieBaseline" cmake/Baseline.cmake
-```
+Legacy palette, NPC665 and feather ID formulas are not a map of the current shared domains. Determine which compile-time branch executes before using them to interpret a trace. Root-ID ordinal zero can occur more than once; a label alone is not a unique matrix or exact guest-frame join.
 
 ### Adding a guest patch
 
 1. Write the C function in the right `tools/baseline/guest/` file, in `.recomp_patch`. Follow [Rules for changes](#rules-for-changes).
-2. Add the function to the composition lists in `prepare_silo_bridge.py` and `prepare_camera_bridge.py`.
+2. Update the owning preparation script and the composition provider/import lists. Follow the selected owner from `prepare_camera_bridge.py`; for example, minimum-host object checks live in `prepare_minimum_host.py`.
 3. For camera providers, also update `camera-candidate/camera_hook_contract.json`.
 4. Regenerate. The object, import, relocation and image checks fail until all lists agree.
 5. Review the change. Then update the image pins (see [Windows build guide](WINDOWS.md#reusing-or-regenerating-a-build), "Guest C edits").
@@ -455,10 +404,11 @@ The project maintains these source changes against pinned upstream versions.
 **Runtime**
 
 - N64ModernRuntime is pinned at `ca568b6a…`.
-- At configure time, `tools/prepare_runtime_baseline_selected.py` derives child sources for `events`, `threads`, `threadqueue` and `mesgqueue` (ultramodern).
-- It also derives `dp`, `recomp` and `pi` (librecomp).
-- The patches in `patches/runtime/` are `events-next-framebuffer`, `events-dp-freeze`, `threads-suspended-stop`, `producer-quiescent-cleanup`, `threadqueue-removal`, `dp-freeze` and `recomp-terminal-fence`.
+- At configure time, [prepare_runtime_baseline_selected.py](../tools/prepare_runtime_baseline_selected.py) composes child sources for `events`, `timer`, `threads`, `threadqueue` and `mesgqueue` (ultramodern), plus `dp`, `recomp` and `pi` (librecomp).
+- Its `PATCHES` table names the maintained patches in `patches/runtime/`, including `events-q-vi-lock`, `timer-guest-clock` and `mesgqueue-required-admission`.
+- Its `RECIPES` and `EXPECTED` tables pin the supporting producers and selected child outputs.
 - Each input and output is checked against a pinned hash.
+- [patches/runtime/PROVENANCE.md](../patches/runtime/PROVENANCE.md) lists each child's derivation, including the edits still made by Python recipes.
 
 **RT64**
 
@@ -524,12 +474,7 @@ This section separates three sources:
 
 **Tooie choice**
 
-- Each in-pool allocation takes the next birth.
-- A reused slot gets a new birth while the birth counter has capacity.
-- A later admitted draw can acquire a new block; allocation alone does not assign one.
-- In the cited files, the block counter only increases.
-- When blocks run out, those owners refuse.
-- The cited files contain no map-load block reset and no skip frame.
+Creation stamping is retained, but the selected shared renderer computes owner/sample windows directly instead of allocating a palette block for every admitted binding. Player identity is roster-based. Float history uses bounded stale-only storage; cuts and model/adjacency checks govern reuse. Neither an unlimited identity guarantee nor identical map-reset policy is claimed. The old monotonically increasing palette-block description applies to retained nonshared routes only.
 
 ### Poses and traversal
 
@@ -549,15 +494,7 @@ This section separates three sources:
 
 **Tooie choice**
 
-- The selected routes do not provide BK-style general traversal tagging.
-- Recognized producer routes emit tags: the actor palette, the player, NPC665, CPU625, backpack621 and feather leaves.
-- Each route checks pose, model data and capacity.
-- Other draws are refused and left to RT64's default handling.
-
-**Trade-off**
-
-- BK's shared traversal offers broader, reusable tag placement.
-- Tooie's route coverage remains limited to the routes written and checked so far.
+The selected renderer now has shared root, bone, list and billboard tagging, stable sorted traversal and type13 bounding-box traversal. Supported type12 alternatives reserve fixed spans. The actual Tooie grammar, handler identities and finite ID windows are checked rather than copied from another game's layout. Unsupported cases keep their original drawing path, with explicit correspondence limits. Float deformation, split-player scopes and branch-discontinuity policy are described in [Rendering](RENDERING.md).
 
 ### Overlay identity
 
@@ -584,15 +521,7 @@ This section separates three sources:
 
 **Tooie choice**
 
-- The actor modelview push starts from a hook inside raw `func_800DE498`.
-- A projection group with `WORLD` or `IGNORE` policy follows.
-- The pop comes after `func_800DE498` returns, at depth 1 in `func_800DE448`.
-- The pop is checked. A failed check poisons the state and writes no pop.
-
-**Difference**
-
-- BK emits from guest patch bodies of named functions.
-- Tooie still enters part of its scope through a native thunk.
+Qualified native hooks enter guest root helpers, and selected guest draw boundaries carry lexical owner tokens. Normal root return and the projection-only join restore enclosing traversal, cut and float state. A cut preserves a stable object's ID while withholding interpolation. The old depth-one palette-pop/poison sequence is not the selected shared root contract. Native hook ABI and exact original instruction ordering remain qualification obligations.
 
 ### Mod consequences
 
@@ -628,6 +557,6 @@ These assumptions do not transfer:
 
 - BK's marker pool, bitmap and `unk5C` counter.
 - BK's geometry-command layout and traversal offsets.
-- BK's transform ID ranges, such as 256 IDs per marker.
+- BK's complete ID-domain allocation: Tooie adopts 256-ID sample windows but adds its own actor/player/view/phase/attachment domains and finite bounds.
 - BK's native provider and its reset policy.
 - BK's overlay table and names.

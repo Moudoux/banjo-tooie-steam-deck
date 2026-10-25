@@ -12,6 +12,7 @@ bool update_rate(RT64::UserConfiguration&,RT64::SharedQueueResources&,
     const ultramodern::renderer::GraphicsConfig& old_config,const ultramodern::renderer::GraphicsConfig& new_config);
 void publish_renderer(RT64::Application&,SDL_Window*);
 bool update_resolution(RT64::UserConfiguration&,RT64::SharedQueueResources&,int scale);
+bool update_filters(RT64::UserConfiguration&,RT64::SharedQueueResources&,int texture_filter,int output_filter);
 void latch_startup(bool pillarbox_capable);
 Status reconcile_aspect(RT64::SharedQueueResources&,uint32_t settings,uint32_t publication);
 Status vsync_status() noexcept;

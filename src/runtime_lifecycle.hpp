@@ -25,9 +25,19 @@ bool wait_for_producers(std::chrono::milliseconds timeout);
 // A saver can observe ultramodern::exited before the continuous host has
 // admitted shutdown. Wait for that admission boundary and producer drain.
 bool wait_for_shutdown_quiescence(std::chrono::milliseconds timeout);
+// Selected terminal fence only: registered before any worker starts. The saver's final
+// tail drain then waits for the fence's single admission (startup joined and producers
+// quiescent) instead of bare quiescence; a recorded failure does not revoke it.
+void own_final_drain();
+void admit_final_drain(bool admitted) noexcept;
+// Final tail drain admission: the fence's verdict when owned, else shutdown quiescence.
+bool wait_for_final_drain(std::chrono::milliseconds timeout);
 Counts counts();
 void reject_task(uint32_t type);
 // Implemented in the materialized timer.cpp; interrupts a host wait, never
 // manufactures a guest OS message or task completion.
 void stop_and_join_timer();
+// Implemented in the materialized recomp.cpp terminal fence; read by recomp::start's caller
+// after it returns: every worker, the saver and the timer were joined and the game reset.
+bool terminal_closed() noexcept;
 }

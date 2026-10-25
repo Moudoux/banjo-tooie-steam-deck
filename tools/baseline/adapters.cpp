@@ -6,6 +6,8 @@
 #endif
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #ifdef BASELINE_VI_CONTROLLER_CYCLE
 #include <atomic>
@@ -14,6 +16,9 @@ extern std::atomic_bool exited;
 #include "si_adapter.hpp"
 #include "devices.hpp"
 #include "platform_support.hpp"
+// The plain fields below are used only by hooks/providers called from recompiled guest code.
+// ultramodern runs one guest thread at a time; each handoff goes through the target
+// context's running semaphore (threads.cpp resume_thread/wait_for_resumed).
 namespace { std::atomic<bool> vi_prefix_checked{false}; std::atomic<unsigned> vi_worker_returns{0}, thread_status_seen{0}; bool core2_pre_admitted = false; unsigned scheduler_initial_returns = 0, joy_stop_count = 0, joy_receive_arrivals = 0; bool scheduler_receive_observed = false; unsigned scheduler_completed_handlers = 0, pfs_absence_calls = 0; }
 namespace {
 std::atomic<bool> first_sync_entered{false}, tidy_promoted{false}, active_sync{false};
@@ -66,7 +71,7 @@ constexpr char core2_reference_sha256[] = "6522eefee489b670fb24e594642c5bfb693e6
 
 namespace {
 [[noreturn]] void rejected_body(const char* name) {
-    std::fprintf(stderr, "baseline rejected-generation provider reached: %s; no service/completion supplied\n", name);
+    std::fprintf(stderr, "baseline required stop: %s\n", name);
     std::fflush(stderr);
     std::quick_exit(EXIT_FAILURE);
 }
@@ -75,6 +80,14 @@ namespace {
     std::fflush(stderr);
     std::quick_exit(EXIT_FAILURE);
 }
+// Registration only: main's startup catch owns this, before devices, guest workers or
+// saves exist; it presents the error and returns 1, like BK's startup failures.
+// Shared boot/publication checks keep rejected_body.
+[[noreturn]] void rejected_registration(const char* name) {
+    std::fprintf(stderr, "baseline required stop: %s\n", name);
+    std::fflush(stderr);
+    throw std::runtime_error(std::string("registration check failed: ") + name);
+}
 }
 
 
@@ -82,13 +95,31 @@ namespace {
 #include "cpu625_selection_layout.h"
 #include "backpack621_selection_layout.h"
 #include "npc665_selection_layout.h"
+#include "ckcopy_selection_layout.h"
+#include "secondary_selection_layout.h"
+#include "bk_pipeline_selection_layout.h"
 #endif
 #include "camera_thunks.hpp"
 #if BASELINE_CAMERA_IDENTITY
 #include "cpu625_thunks.hpp"
+#include "ckcopy_thunks.hpp"
+#include "secondary_thunks.hpp"
+#if TOOIE_BK_PIPELINE_SELECTED
+static void baseline_bk_menu_submitted(uint8_t* rdram);
+#endif
+#include "bk_pipeline_thunks.hpp"
+#include "bk_graph_thunks.hpp"
+#include "bk_sort_thunks.hpp"
+#include "bk_attach_thunks.hpp"
+#include "bk_shadow_attach_thunks.hpp"
+#include "bk_menu_thunks.hpp"
 #if TOOIE_BASELINE_HOST
 #include "minimum_render.hpp"
 #include "minimum_cutscene_thunks.hpp"
+#include "sound_trace_thunks.hpp"
+#if BASELINE_FIRST_PERSON_AIM
+#include "modern_fps_thunks.hpp"
+#endif
 #endif
 #include "npc665_thunks.hpp"
 #endif
@@ -150,11 +181,11 @@ void validate_bridge_image(const char* bytes, size_t size) {
 #endif
 #if BASELINE_CAMERA_IDENTITY && TOOIE_MINIMUM_HOST_SELECTED
     constexpr uint32_t offset=TOOIE_MINIMUM_HOST_STATE-0x80801000u;
-    if(TOOIE_MINIMUM_HOST_STATE_BYTES!=8u || offset>size || size-offset<8u || TOOIE_MINIMUM_HOST_STATE<TOOIE_PRE_STATE+124u)rejected_body("HOST state extent/overlap");
+    if(TOOIE_MINIMUM_HOST_STATE_BYTES!=12u || offset>size || size-offset<12u || TOOIE_MINIMUM_HOST_STATE<TOOIE_PRE_STATE+124u)rejected_body("HOST state extent/overlap");
 #if TOOIE_CPU625_SELECTED
     if(TOOIE_MINIMUM_HOST_STATE<TOOIE_CPU625_STATE+464u)rejected_body("HOST/CPU state overlap");
 #endif
-    for(uint32_t i=0;i<8u;++i)if(uint8_t(bytes[offset+i]))rejected_body("HOST zero initial state");
+    for(uint32_t i=0;i<12u;++i)if(uint8_t(bytes[offset+i]))rejected_body("HOST zero initial state");
 #endif
 #if BASELINE_CAMERA_IDENTITY && TOOIE_NPC665_SELECTED
     constexpr uint32_t npc_offset=TOOIE_NPC665_STATE-0x80801000u;
@@ -178,6 +209,17 @@ void validate_bridge_image(const char* bytes, size_t size) {
         constexpr uint8_t header[8]={0x36,0x32,0x35,0x31,0,0,0,1};
         if(uint8_t(bytes[cpu_offset+i])!=(i<8?header[i]:0))
             rejected_body("CPU625 initialized magic/layout/state");
+    }
+#endif
+#if BASELINE_CAMERA_IDENTITY && TOOIE_CKCOPY_SELECTED
+    constexpr uint32_t ck_offset=TOOIE_CKCOPY_STATE-0x80801000u;
+    if(!TOOIE_CPU625_SELECTED || TOOIE_CKCOPY_STATE_BYTES!=122960u || ck_offset>size || size-ck_offset<122960u ||
+       uint64_t(TOOIE_CKCOPY_STATE)+122960u>0x81000000ull || TOOIE_CKCOPY_IMAGE_END!=TOOIE_CKCOPY_STATE+122960u)
+        rejected_body("ckpack copy storage image state extent/overlap");
+    for(uint32_t i=0;i<122960u;++i) {
+        constexpr uint8_t header[8]={0x43,0x4B,0x43,0x50,0,0,0,2};
+        if(uint8_t(bytes[ck_offset+i])!=(i<8?header[i]:0))
+            rejected_body("ckpack copy storage initialized magic/layout/state");
     }
 #endif
     if (size != TOOIE_BRIDGE_IMAGE_BYTES ||
@@ -259,7 +301,7 @@ extern "C" void baseline_render_construction_begin(uint8_t* rdram, recomp_contex
 #if BASELINE_PLAYER_BOUNDARY
         static_assert(__builtin_offsetof(TooieRenderBridgeState, player) == 18740 &&
             __builtin_offsetof(TooieRenderBridgeState, player) + __builtin_offsetof(TooiePlayerBoundary, tripwires) == 18824 &&
-            sizeof(TooiePlayerBoundary) == 104 && TOOIE_BRIDGE_STATE_BYTES == 18844);
+            sizeof(TooiePlayerBoundary) == 104 && TOOIE_BRIDGE_STATE_BYTES == 23036);
         MEM_W(18740, gpr(int32_t(TOOIE_BRIDGE_STATE_VRAM))) = 1;
 #endif
         receipt.checked = true;
@@ -278,7 +320,7 @@ extern "C" void baseline_render_construction_begin(uint8_t* rdram, recomp_contex
         __builtin_offsetof(TooieSiloOccurrence, model) == 16 &&
         __builtin_offsetof(TooieSiloOccurrence, role_mask) == 32 &&
         __builtin_offsetof(TooieRenderBridgeState, epoch) == 8 &&
-        TOOIE_BRIDGE_LAYOUT == 3 && TOOIE_BRIDGE_STATE_BYTES == 18844);
+        TOOIE_BRIDGE_LAYOUT == 5 && TOOIE_BRIDGE_STATE_BYTES == 23036);
     struct SiloAcquisitionReceipt {
         uint64_t begins = 0, summary_begin = 0;
         uint32_t rows = 0, shared_rows = 0, reasons = 0, refusal_rows = 0;
@@ -587,14 +629,14 @@ namespace baseline {
 // Restore one omitted original address entry and register the proved patch route.
 void register_boot_patch(SectionTableEntry* base, size_t count) {
     if (!count || base[0].rom_addr != 0x1000 || base[0].ram_addr != 0x80000400)
-        rejected_body("boot section identity changed");
+        rejected_registration("boot section identity changed");
 #ifdef BASELINE_CORE1_PUBLICATION
     if (count < 3 || base[1].rom_addr != 0x01E29B60 || base[1].ram_addr != 0x80012030 ||
         base[1].size != 0x31350 || base[1].index != 1 || base[1].num_relocs || base[1].relocs ||
         !base[1].num_funcs || base[1].funcs[0].offset != 0 || base[2].rom_addr != 0x01E5AEB0 ||
         std::any_of(base[1].funcs, base[1].funcs + base[1].num_funcs,
             [](const auto& entry) { return entry.offset == 0x8002D7B0 - 0x80012030; }))
-        rejected_body("core1 publication registry/omitted initializer identity changed");
+        rejected_registration("core1 publication registry/omitted initializer identity changed");
     // Capture slots before register_overlay_metadata checks strict, unique ROM order.
     // Runtime init_overlays later sorts this same table; the admitted order is
     // already sorted, so the final slots retain these section identities.
@@ -603,7 +645,7 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
     static std::vector<FuncEntry> entries(base[0].funcs, base[0].funcs + base[0].num_funcs);
     constexpr uint32_t offset = 0x800016F0 - 0x80000400;
     if (std::any_of(entries.begin(), entries.end(), [](const auto& entry) { return entry.offset == offset; }))
-        rejected_body("original boot initializer was not excluded");
+        rejected_registration("original boot initializer was not excluded");
     entries.push_back({.func = boot_osInitialize, .offset = offset, .rom_size = 0x2A8});
     std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) { return a.offset < b.offset; });
     base[0].funcs = entries.data(); base[0].num_funcs = entries.size();
@@ -613,7 +655,7 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
 #elif BASELINE_RENDER_SILO
     // Exact measured three-section carrier; the default replacement-only registry stays strict.
     if (ARRLEN(baseline_boot_patch_registry::section_table) != 3)
-        rejected_body("selected Silo helper registry section count changed");
+        rejected_registration("selected Silo helper registry section count changed");
     const auto& replacement_section = baseline_boot_patch_registry::section_table[0];
     const auto& helper_section = baseline_boot_patch_registry::section_table[1];
     const auto& player_section = baseline_boot_patch_registry::section_table[2];
@@ -646,15 +688,17 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
         uint64_t(player_section.ram_addr) + player_section.size != TOOIE_BRIDGE_STATE_VRAM ||
         std::any_of(replacement_section.funcs, replacement_section.funcs + replacement_section.num_funcs,
             [](const auto& entry) { return entry.func == baseline_boot_patch_registry::tooie_silo_preflight; }))
-        rejected_body("selected Silo helper registry identity/extent changed");
+        rejected_registration("selected Silo helper registry identity/extent changed");
 #else
     if (ARRLEN(baseline_boot_patch_registry::section_table) != 1)
-        rejected_body("selected guest initializer registry section count changed");
+        rejected_registration("selected guest initializer registry section count changed");
 #endif
     if (
         baseline_boot_patch_registry::section_table[0].ram_addr != 0x80801000 ||
-#if BASELINE_CAMERA_IDENTITY && TOOIE_ACTOR_PALETTE_SELECTED
-        baseline_boot_patch_registry::section_table[0].num_funcs != 39+TOOIE_MINIMUM_HOST_SELECTED+TOOIE_BACKPACK621_SELECTED+BASELINE_QUIET_TROT+(3+1)*BASELINE_TROT_TOGGLE ||
+#if BASELINE_CAMERA_IDENTITY && TOOIE_PRE_SELECTED
+        baseline_boot_patch_registry::section_table[0].num_funcs != camera_pre_replacement_count ||
+#elif BASELINE_CAMERA_IDENTITY && TOOIE_ACTOR_PALETTE_SELECTED
+        baseline_boot_patch_registry::section_table[0].num_funcs != 39+TOOIE_MINIMUM_HOST_SELECTED+TOOIE_BACKPACK621_SELECTED+BASELINE_QUIET_TROT+TOOIE_TROT_BODIES*BASELINE_TROT_TOGGLE+TOOIE_MODERN_FPS_BODIES*BASELINE_FIRST_PERSON_AIM+BASELINE_FLAP_FLIP ||
 #else
         baseline_boot_patch_registry::section_table[0].num_funcs != (BASELINE_CAMERA_IDENTITY ? 38 : BASELINE_RENDER_BRIDGE ? (BASELINE_RENDER_SILO ? 13 : 8) : (BASELINE_HONEY_PATCH ? 4 : (BASELINE_HEAP_PATCH ? 3 : 2))) ||
 #endif
@@ -662,18 +706,18 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
         baseline_boot_patch_registry::section_table[0].funcs[0].offset != 0 ||
         baseline_boot_patch_registry::section_table[0].funcs[1].func != tooie_core1_osInitialize ||
         baseline_boot_patch_registry::section_table[0].funcs[1].offset < 1180)
-        rejected_body("selected guest initializer registry changed");
+        rejected_registration("selected guest initializer registry changed");
     static std::vector<FuncEntry> core1_entries(base[1].funcs, base[1].funcs + base[1].num_funcs);
 #ifdef BASELINE_ROM_PIO_BRIDGE
     if (std::any_of(core1_entries.begin(), core1_entries.end(), [](const auto& entry) { return entry.offset == 0xC1E0; }))
-        rejected_body("original ROM-PIO body/address was not excluded");
+        rejected_registration("original ROM-PIO body/address was not excluded");
     core1_entries.push_back({.func = rom_read_word, .offset = 0xC1E0, .rom_size = 0x8C});
 #endif
 #if BASELINE_HEAP_PATCH
     if (baseline_boot_patch_registry::section_table[0].funcs[2].func != heap_realloc ||
         baseline_boot_patch_registry::section_table[0].funcs[2].offset < 2360 ||
         std::any_of(core1_entries.begin(), core1_entries.end(), [](const auto& entry) { return entry.offset == 0x91D8; }))
-        rejected_body("selected heap provider/original address was not excluded");
+        rejected_registration("selected heap provider/original address was not excluded");
     core1_entries.push_back({.func = heap_realloc, .offset = 0x91D8, .rom_size = 0x180});
 #endif
 #if BASELINE_HONEY_PATCH || BASELINE_RENDER_BRIDGE
@@ -681,22 +725,22 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
     const auto* honey_entry = std::find_if(patch_section.funcs, patch_section.funcs + patch_section.num_funcs,
         [](const auto& entry) { return entry.func == func_80800380_chhoneycarrier; });
     if (honey_entry == patch_section.funcs + patch_section.num_funcs)
-        rejected_body("selected Honey symbol missing");
+        rejected_registration("selected Honey symbol missing");
     const auto& honey = *honey_entry;
     if (honey.func != func_80800380_chhoneycarrier || honey.offset < 2760 ||
         uint64_t(honey.offset) + honey.rom_size > baseline_boot_patch_bin_size)
-        rejected_body("selected Honey patch provider/extent changed");
+        rejected_registration("selected Honey patch provider/extent changed");
 #endif
 #if BASELINE_QUIET_TROT
     const auto& quiet_section = baseline_boot_patch_registry::section_table[0];
     if (std::count_if(quiet_section.funcs, quiet_section.funcs + quiet_section.num_funcs,
             [](const auto& entry) { return entry.func == func_808000DC_bsbtrot; }) != 1)
-        rejected_body("selected quiet Trot provider missing/duplicate");
+        rejected_registration("selected quiet Trot provider missing/duplicate");
     const auto* quiet_entry = std::find_if(quiet_section.funcs, quiet_section.funcs + quiet_section.num_funcs,
         [](const auto& entry) { return entry.func == func_808000DC_bsbtrot; });
     if (quiet_entry->offset < 2760 || !quiet_entry->rom_size ||
         uint64_t(quiet_entry->offset) + quiet_entry->rom_size > TOOIE_BRIDGE_STATE_IMAGE_OFFSET)
-        rejected_body("selected quiet Trot provider/extent changed");
+        rejected_registration("selected quiet Trot provider/extent changed");
 #endif
 #if BASELINE_TROT_TOGGLE
     // Four providers in .recomp_patch; two helpers are checked by camera registry.
@@ -704,12 +748,12 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
         const auto& selected = baseline_boot_patch_registry::section_table[0];
         if (std::count_if(selected.funcs, selected.funcs + selected.num_funcs,
                 [provider](const auto& entry) { return entry.func == provider; }) != 1)
-            rejected_body("selected Trot provider missing/duplicate");
+            rejected_registration("selected Trot provider missing/duplicate");
         const auto* entry = std::find_if(selected.funcs, selected.funcs + selected.num_funcs,
             [provider](const auto& entry) { return entry.func == provider; });
         if (entry->offset < 2760 || !entry->rom_size ||
             uint64_t(entry->offset) + entry->rom_size > TOOIE_BRIDGE_STATE_IMAGE_OFFSET)
-            rejected_body("selected Trot provider extent changed");
+            rejected_registration("selected Trot provider extent changed");
     }
 #endif
 #if BASELINE_RENDER_BRIDGE
@@ -718,7 +762,7 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
         [](const auto& entry) { return entry.func == func_800EBED4; });
     if (birth_entry == patch_section.funcs + patch_section.num_funcs || birth_entry->offset < 2760 ||
         uint64_t(birth_entry->offset) + birth_entry->rom_size > TOOIE_BRIDGE_STATE_IMAGE_OFFSET || count <= 2)
-        rejected_body("selected EBED4 provider/extent");
+        rejected_registration("selected EBED4 provider/extent");
     const auto* bone_entry = std::find_if(patch_section.funcs, patch_section.funcs + patch_section.num_funcs,
         [](const auto& entry) { return entry.func == func_800DCF48; });
     const auto* owner_entry = std::find_if(patch_section.funcs, patch_section.funcs + patch_section.num_funcs,
@@ -734,7 +778,7 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
         std::count_if(patch_section.funcs, patch_section.funcs + patch_section.num_funcs,
             [](const auto& entry) { return entry.func == func_800DCF48 || entry.func == func_800EBED4 ||
                                           entry.func == func_80101808 || entry.func == func_800DE448; }) != 4)
-        rejected_body("selected core2 patch providers/extent/uniqueness");
+        rejected_registration("selected core2 patch providers/extent/uniqueness");
     bridge_birth_patch_address = patch_section.ram_addr + birth_entry->offset;
     bridge_bone_patch_address = patch_section.ram_addr + bone_entry->offset;
     bridge_owner_patch_address = patch_section.ram_addr + owner_entry->offset;
@@ -750,21 +794,38 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
         uint64_t(transition_entry->offset) + transition_entry->rom_size > TOOIE_BRIDGE_STATE_IMAGE_OFFSET ||
         std::count_if(patch_section.funcs, patch_section.funcs + patch_section.num_funcs,
             [](const auto& entry) { return entry.func == func_8008B10C || entry.func == anctrl_setSmoothTransition; }) != 2)
-        rejected_body("held Silo setter providers/extent/uniqueness");
+        rejected_registration("held Silo setter providers/extent/uniqueness");
     const auto* leaf_entry = std::find_if(patch_section.funcs, patch_section.funcs + patch_section.num_funcs,
         [](const auto& entry) { return entry.func == func_800DD998; });
     if (leaf_entry == patch_section.funcs + patch_section.num_funcs || leaf_entry->offset < 2760 ||
         uint64_t(leaf_entry->offset) + leaf_entry->rom_size > TOOIE_BRIDGE_STATE_IMAGE_OFFSET ||
         std::count_if(patch_section.funcs, patch_section.funcs + patch_section.num_funcs,
             [](const auto& entry) { return entry.func == func_800DD998; }) != 1)
-        rejected_body("selected DD998 provider/extent/uniqueness");
+        rejected_registration("selected DD998 provider/extent/uniqueness");
     bridge_silo_reset_patch_address = patch_section.ram_addr + reset_entry->offset;
     bridge_silo_transition_patch_address = patch_section.ram_addr + transition_entry->offset;
 #endif
     static std::vector<FuncEntry> core2_entries(base[2].funcs, base[2].funcs + base[2].num_funcs);
+#if BASELINE_CAMERA_IDENTITY
+    // Selected composition: identities generated from selected.syms (camera_registry_data.hpp).
+    // The expected count is the native selection, not the generated array's own length.
+    constexpr size_t core2_restored = 4 + BASELINE_RENDER_SILO * (3 + TOOIE_ACTOR_PALETTE_SELECTED) + 3 * BASELINE_TROT_TOGGLE;
+    if (std::size(camera_core2_aliases) != core2_restored) rejected_registration("generated core2 restoration selection");
+    for (const auto& alias : camera_core2_aliases) {
+        if (base[2].rom_addr != alias.rom || base[2].ram_addr != alias.ram || base[2].size != alias.section_size ||
+            uint64_t(alias.offset) + alias.extent > alias.section_size ||
+            std::any_of(core2_entries.begin(), core2_entries.end(), [&](const auto& entry) { return entry.offset == alias.offset; })) {
+            std::fprintf(stderr, "baseline core2 original offset=%05x\n", alias.offset);
+            rejected_registration("original core2 provider address was not omitted or section differs");
+        }
+        core2_entries.push_back({.func = alias.func, .offset = alias.offset, .rom_size = alias.extent});
+    }
+#else
+    // Bridge/Silo engineering compositions have no generated registry header.
+    static_assert(!BASELINE_TROT_TOGGLE, "Trot core restoration is generated with the camera composition");
     if (std::any_of(core2_entries.begin(), core2_entries.end(), [](const auto& entry) {
             return entry.offset == 0x6A914 || entry.offset == 0x5B988 || entry.offset == 0x80248 || entry.offset == 0x5CE88; }))
-        rejected_body("original core2 patch body/address was not excluded");
+        rejected_registration("original core2 patch body/address was not excluded");
     core2_entries.push_back({.func = func_800EBED4, .offset = 0x6A914, .rom_size = 0xB8});
     core2_entries.push_back({.func = func_800DCF48, .offset = 0x5B988, .rom_size = 0xDC});
     core2_entries.push_back({.func = func_80101808, .offset = 0x80248, .rom_size = 0x68});
@@ -772,39 +833,21 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
 #if BASELINE_RENDER_SILO
     if (std::any_of(core2_entries.begin(), core2_entries.end(), [](const auto& entry) {
             return entry.offset == 0x9B4C || entry.offset == 0x9BE0 || entry.offset == 0x5C3D8; }))
-        rejected_body("original Silo setter addresses were not excluded");
+        rejected_registration("original Silo setter addresses were not excluded");
     core2_entries.push_back({.func = func_800DD998, .offset = 0x5C3D8, .rom_size = 0x1A0});
-#if BASELINE_CAMERA_IDENTITY && TOOIE_ACTOR_PALETTE_SELECTED
-    if (std::any_of(core2_entries.begin(), core2_entries.end(), [](const auto& entry) {
-            return entry.offset == 0x5BA64; }))
-        rejected_body("original DD024 patch address was not excluded");
-    core2_entries.push_back({.func = baseline_boot_patch_registry::func_800DD024, .offset = 0x5BA64, .rom_size = 0x58});
-#endif
     core2_entries.push_back({.func = func_8008B10C, .offset = 0x9B4C, .rom_size = 0x28});
     core2_entries.push_back({.func = anctrl_setSmoothTransition, .offset = 0x9BE0, .rom_size = 0x1C});
-#if !BASELINE_CAMERA_IDENTITY
     if (std::any_of(core2_entries.begin(), core2_entries.end(), [](const auto& entry) {
             return entry.offset == 0x112D8 || entry.offset == 0x722C0; }))
-        rejected_body("original player lifecycle providers were not excluded");
+        rejected_registration("original player lifecycle providers were not excluded");
     core2_entries.push_back({.func = func_80092898, .offset = 0x112D8, .rom_size = 0x184});
     core2_entries.push_back({.func = func_800F3880, .offset = 0x722C0, .rom_size = 0x28});
 #endif
 #endif
-#if BASELINE_TROT_TOGGLE
-    // Original core2 base is 0x800815C0; original declared extents are unchanged.
-    if (std::any_of(core2_entries.begin(), core2_entries.end(), [](const auto& entry) {
-            return entry.offset == 0x8009E5C8u-0x800815C0u ||
-                   entry.offset == 0x8009819Cu-0x800815C0u ||
-                   entry.offset == 0x800F86D8u-0x800815C0u; }))
-        rejected_body("original Trot core providers were not omitted");
-    core2_entries.push_back({.func=bs_setState, .offset=0x8009E5C8u-0x800815C0u, .rom_size=0xAC});
-    core2_entries.push_back({.func=bainput_update, .offset=0x8009819Cu-0x800815C0u, .rom_size=0x6C});
-    core2_entries.push_back({.func=func_800F86D8, .offset=0x800F86D8u-0x800815C0u, .rom_size=0x58});
-#endif
     std::sort(core2_entries.begin(), core2_entries.end(), [](const auto& a, const auto& b) { return a.offset < b.offset; });
     if (std::adjacent_find(core2_entries.begin(), core2_entries.end(),
             [](const auto& a, const auto& b) { return a.offset == b.offset; }) != core2_entries.end())
-        rejected_body("duplicate core2 original address offsets");
+        rejected_registration("duplicate core2 original address offsets");
     base[2].funcs = core2_entries.data(); base[2].num_funcs = core2_entries.size();
 #endif
     core1_entries.push_back({.func = tooie_core1_osInitialize, .offset = 0x8002D7B0 - 0x80012030, .rom_size = 0x2A8});
@@ -919,7 +962,9 @@ extern "C" void baseline_stop_after_cic_reads(uint8_t* rdram, recomp_context* ct
 #endif
 
 #ifdef BASELINE_ROM_PIO_BRIDGE
+// Used only by rom_read_word and the two later prefix hooks; same guest-thread ordering as above.
 namespace { uint32_t pio_copies = 0, pio_offset = 0, pio_destination = 0; }
+// Replacement provider for the ignored rom_read_word (not a hook).
 // Preserve original cart OR semantics; the public service synchronously copies four bytes.
 extern "C" void rom_read_word(uint8_t* rdram, recomp_context* ctx) {
     const uint32_t cart = 0xB0000000u | uint32_t(ctx->r4), offset = cart - 0xB0000000u;
@@ -1171,7 +1216,8 @@ extern "C" void baseline_stop_before_scheduler_receive(uint8_t* rdram, recomp_co
         {0x80078438, 0}, {0x8007843C, 0}, {0x80078440, 0}, {0x80078444, 0}, {0x80078448, 10}, {0x8007844C, 0x80078450},
         {0x80078F90, 0x800783D0}, {0x80078F94, 5}, {0x80078F98, 0}, {0x80078FA0, 0}, {0x80078FA8, 0},
         {0x80078FB0, 0}, {0x80078FB8, 0}, {0x80078FC0, 0}, {0x80078FC8, 0}, {0x8007D834, 0x80078C98},
-        {0x80079138, expected}, {0x80079030, 0}, {0x80079034, 0}, {0x80079038, expected},
+        // Counter equals p0; the consumerless 60-slot outbound queue saturates (nonblocking sends).
+        {0x80079138, expected}, {0x80079030, 0}, {0x80079034, 0}, {0x80079038, std::min(expected, 60u)},
         {0x8007903C, 0}, {0x80079040, 60}, {0x80079044, 0x80079048}};
     for (const auto& witness : witnesses) {
         const uint32_t actual = word(witness[0]);
@@ -1214,6 +1260,7 @@ extern "C" void baseline_stop_after_scheduler_vi(uint8_t* rdram, recomp_context*
         std::fflush(stderr);
     }
 }
+// Hook at 800142F0, scheduler thread only (id 5, priority 60): logs the first two arrivals, then continues.
 extern "C" void baseline_observe_graphics_dp(uint8_t* rdram, recomp_context* ctx) {
     const auto thread = ultramodern::this_thread();
     if (uint32_t(thread) != 0x80078C98 || osGetThreadId(rdram, thread) != 5 || osGetThreadPri(rdram, thread) != 60 ||
@@ -1227,6 +1274,7 @@ extern "C" void baseline_observe_graphics_dp(uint8_t* rdram, recomp_context* ctx
         word(0x80078EA8), word(0x80078EAC), word(0x80079018));
     std::fflush(stderr);
 }
+// Hook at 80016840, scheduler thread (id 5): checks the stopped joy worker is unlinked, then continues.
 extern "C" void baseline_observe_joy_stopped(uint8_t* rdram, recomp_context* ctx) {
     ++joy_stop_count;
     const auto thread = ultramodern::this_thread();
@@ -1254,6 +1302,7 @@ extern "C" void baseline_observe_joy_stopped(uint8_t* rdram, recomp_context* ctx
     std::fflush(stderr);
 #endif
 }
+// Hook at 80016668, joy thread (id 7, priority 40): counts the original receive, then continues.
 extern "C" void baseline_observe_joy_receive(uint8_t* rdram, recomp_context* ctx) {
     const auto thread = ultramodern::this_thread();
     if (uint32_t(thread) != 0x80079BA8 || osGetThreadId(rdram, thread) != 7 || osGetThreadPri(rdram, thread) != 40 ||
@@ -1262,19 +1311,24 @@ extern "C" void baseline_observe_joy_receive(uint8_t* rdram, recomp_context* ctx
         rejected_body("controller-cycle original joy receive continuation");
     ++joy_receive_arrivals;
 }
+// Historical name (raw hook text): observes at 80012334 on main (id 6, priority 20) and continues.
+// Finite witnesses: seven thread seeds, four PFS calls, counter == N and N - p0 == M.
+// N itself is not bounded: VI messages follow host time while main runs (priority 20) only
+// after VI (80) and scheduler (60) drain delivered messages, so the 60-slot outbound queue
+// with no consumer before first sync holds min(N, 60).
 extern "C" void baseline_stop_before_audio(uint8_t* rdram, recomp_context* ctx) {
     const auto thread = ultramodern::this_thread();
     const unsigned n = vi_worker_returns.load(std::memory_order_acquire), m = scheduler_completed_handlers;
     if (uint32_t(thread) != 0x80045788 || osGetThreadId(rdram, thread) != 6 || osGetThreadPri(rdram, thread) != 20 ||
         uint32_t(ctx->r29) != 0x80045728 || ctx->status_reg != 0xFF01 || ctx->mips3_float_mode != 0 || ctx->f_odd != &ctx->f0.u32h ||
         thread_status_seen.load(std::memory_order_acquire) != 0x7F || pfs_absence_calls != 4 || !scheduler_receive_observed ||
-        n > 8 || n < scheduler_initial_returns || n - scheduler_initial_returns != m)
-        rejected_body("input-prefix main/context/seven seeds/four no-pak calls/N/p0/M admission");
+        n < scheduler_initial_returns || n - scheduler_initial_returns != m)
+        rejected_body("input-prefix main/context/seven seeds/four accessory calls/N/p0/M admission");
     const uint32_t witnesses[][2] = {{0x80078F58, 1}, {0x80079B60, 0x80079BA8}, {0x80079B68, 0},
         {0x80079F78, 1}, {0x80079F7C, 1}, {0x80079BA0, 0}, {0x8007AEF0, 0x8007AF10}, {0x8007AEF8, 0},
         {0x80078F90, 0x800783D0}, {0x80078F94, 5}, {0x80078F98, 0x8007AEF0}, {0x80078F9C, 0},
         {0x80078FA0, 0}, {0x80078FA8, 0}, {0x80078FB0, 0}, {0x80078FB8, 0}, {0x80078FC0, 0}, {0x80078FC8, 0},
-        {0x800783D0, 0x80078C98}, {0x800783D8, 0}, {0x80079138, n}, {0x80079038, n}};
+        {0x800783D0, 0x80078C98}, {0x800783D8, 0}, {0x80079138, n}, {0x80079038, std::min(n, 60u)}};
     for (const auto& witness : witnesses) {
         const uint32_t actual = MEM_W(0, static_cast<gpr>(static_cast<int32_t>(witness[0])));
         if (actual != witness[1]) {
@@ -1287,6 +1341,7 @@ extern "C" void baseline_stop_before_audio(uint8_t* rdram, recomp_context* ctx) 
         unsigned(MEM_BU(0, static_cast<gpr>(static_cast<int32_t>(0x80079D68)))), unsigned(MEM_BU(0, static_cast<gpr>(static_cast<int32_t>(0x80079B93)))), unsigned(MEM_BU(0, static_cast<gpr>(static_cast<int32_t>(0x80079B97)))), unsigned(MEM_BU(0, static_cast<gpr>(static_cast<int32_t>(0x80079B9B)))), unsigned(MEM_BU(0, static_cast<gpr>(static_cast<int32_t>(0x80079B9F)))));
     std::fflush(stderr);
 }
+// Historical name (raw hook text): observes at 8001233C on main after audio init and continues; it does not hold.
 extern "C" void baseline_hold_after_audio_init(uint8_t* rdram, recomp_context* ctx) {
     const auto thread = ultramodern::this_thread();
     const auto word = [&](uint32_t a) { return uint32_t(MEM_W(0, static_cast<int32_t>(a))); };
@@ -1300,6 +1355,7 @@ extern "C" void baseline_hold_after_audio_init(uint8_t* rdram, recomp_context* c
 
     std::fprintf(stderr, "baseline audio-main-continued PC=8001233c heap_current=%08x queues_equal=1 original125B0_returned=1\n", word(0x80046A7C)); std::fflush(stderr);
 }
+// Hook at 80012A54, guest audio thread (id 4, priority 50): hashes the first completed PCM buffer once, then continues.
 extern "C" void baseline_completed_pcm(uint8_t* rdram, recomp_context* ctx) {
     static bool observed = false;
     if (observed) return;
@@ -1327,6 +1383,8 @@ extern "C" void baseline_completed_pcm(uint8_t* rdram, recomp_context* ctx) {
 #endif
 
 // Link-only child, separate from rejected guest generation bodies.
+// TOOIE_BASELINE_FATAL_IMPORTS selects declared providers, not only fatal stubs:
+// recomp_syscall_handler selects this real overlay-alias registration path.
 #if (BASELINE_HONEY_PATCH || BASELINE_RENDER_BRIDGE) && !defined(BASELINE_IMPORT_recomp_syscall_handler)
 #error Honey patch requires the original-overlay alias registration path
 #endif
@@ -1505,6 +1563,7 @@ extern "C" void baseline_overlay_move_returned(uint8_t* rdram, recomp_context* c
 #endif
     overlay_move = {};
 }
+// Hook at each listed audio call site: refuses an r25 target outside its finite original set, otherwise continues.
 extern "C" void baseline_audio_callable(uint8_t*, recomp_context* ctx, uint32_t pc) {
     const uint32_t target = uint32_t(ctx->r25);
     bool allowed = false;
@@ -1530,41 +1589,41 @@ void register_overlay_metadata(std::span<SectionTableEntry> sections, std::span<
         const uint64_t end = uint64_t(section.rom_addr) + section.size;
         if (!section.size || end > UINT32_MAX || section.index != i || i >= total ||
             (i && (section.rom_addr <= sections[i - 1].rom_addr || section.rom_addr < previous_end)))
-            rejected_body("overlay metadata order/interval/index admission");
+            rejected_registration("overlay metadata order/interval/index admission");
         previous_end = end;
     }
     for (int ordinal : ids) if (ordinal < -1 || (ordinal >= 0 && size_t(ordinal) >= sections.size()))
-        rejected_body("overlay metadata ID admission");
+        rejected_registration("overlay metadata ID admission");
     if (sections.size() <= 433 || ids.size() <= 438 || ids[438] != 433)
-        rejected_body("Honey overlay module/section mapping changed");
+        rejected_registration("Honey overlay module/section mapping changed");
     auto& honey = sections[433];
 #if BASELINE_HONEY_PATCH || BASELINE_RENDER_BRIDGE
     if (honey.rom_addr != 0x02063630 || honey.ram_addr != 0x80800000 ||
         honey.size != 0x440 || honey.index != 433 || honey.num_funcs != 5 || !honey.funcs ||
         std::any_of(honey.funcs, honey.funcs + honey.num_funcs,
             [](const auto& entry) { return entry.offset == 0x380; }))
-        rejected_body("Honey original overlay identity/omitted draw changed");
+        rejected_registration("Honey original overlay identity/omitted draw changed");
     static std::vector<FuncEntry> entries(honey.funcs, honey.funcs + honey.num_funcs);
     entries.push_back({.func = func_80800380_chhoneycarrier, .offset = 0x380, .rom_size = 0x3C});
     std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) { return a.offset < b.offset; });
     if (std::adjacent_find(entries.begin(), entries.end(),
             [](const auto& a, const auto& b) { return a.offset == b.offset; }) != entries.end())
-        rejected_body("Honey restored overlay offsets are not unique");
+        rejected_registration("Honey restored overlay offsets are not unique");
     honey.funcs = entries.data(); honey.num_funcs = entries.size();
 #else
     if (!honey.funcs || !std::any_of(honey.funcs, honey.funcs + honey.num_funcs,
             [](const auto& entry) { return entry.offset == 0x380; }))
-        rejected_body("Honey original draw missing while its patch is disabled");
+        rejected_registration("Honey original draw missing while its patch is disabled");
 #endif
 #if BASELINE_QUIET_TROT
     if (sections.size() <= 30 || ids.size() <= 29 || ids[29] != 30)
-        rejected_body("bsbtrot overlay module/section mapping changed");
+        rejected_registration("bsbtrot overlay module/section mapping changed");
     auto& trot = sections[30];
     if (trot.rom_addr != 0x01F14F50 || trot.ram_addr != 0x80800000 ||
         trot.size != 0x2F30 || trot.index != 30 || trot.num_funcs != (BASELINE_TROT_TOGGLE ? 81 : 82) || !trot.funcs ||
         std::any_of(trot.funcs, trot.funcs + trot.num_funcs,
             [](const auto& entry) { return entry.offset == 0xDC || (BASELINE_TROT_TOGGLE && entry.offset == 0x710); }))
-        rejected_body("bsbtrot original overlay identity/omitted sound leaf changed");
+        rejected_registration("bsbtrot original overlay identity/omitted sound leaf changed");
     static std::vector<FuncEntry> trot_entries(trot.funcs, trot.funcs + trot.num_funcs);
     trot_entries.push_back({.func = func_808000DC_bsbtrot, .offset = 0xDC, .rom_size = 0x44});
 #if BASELINE_TROT_TOGGLE
@@ -1576,7 +1635,7 @@ void register_overlay_metadata(std::span<SectionTableEntry> sections, std::span<
     if (trot_entries.size() != 83 ||
         std::adjacent_find(trot_entries.begin(), trot_entries.end(),
             [](const auto& a, const auto& b) { return a.offset == b.offset; }) != trot_entries.end())
-        rejected_body("bsbtrot restored overlay offsets are not unique");
+        rejected_registration("bsbtrot restored overlay offsets are not unique");
     trot.funcs = trot_entries.data(); trot.num_funcs = trot_entries.size();
 #endif
     overlay_sections = sections; overlay_ids = ids;
@@ -1786,6 +1845,8 @@ extern "C" void baseline_first_overlay_returned(uint8_t* rdram, recomp_context* 
     std::fprintf(stderr, " effects_equal=1 returned=1\n"); std::fflush(stderr);
     // Original startup choices observed; original scene prefix continues.
 }
+// Conditional hook at 800C2B50 (r19 != 0), main only (id 6, priority 20): one 1 ms external-message
+// wait and running-queue check per sweep step, then the original code continues.
 extern "C" void baseline_sfx_sweep_service(uint8_t* rdram, recomp_context* ctx) {
 #ifdef BASELINE_TERMINAL_FENCE
     tooie::lifecycle::poll();
@@ -2219,6 +2280,8 @@ extern "C" void baseline_first_graphics_submit(uint8_t* rdram, recomp_context* c
 }
 
 #endif
+// Selected missing-link imports are fatal missing_import stubs, except that
+// BASELINE_VI_CONTROLLER_CYCLE supplies the real SI and osPfsInit providers below.
 #ifdef BASELINE_IMPORT___osGetSR_recomp
 extern "C" void __osGetSR_recomp(uint8_t*, recomp_context*) { missing_import("__osGetSR_recomp"); }
 #endif
@@ -2292,14 +2355,20 @@ extern "C" void __osSiRelAccess_recomp(uint8_t*, recomp_context*) { missing_impo
 extern "C" void osViGetCurrentLine_recomp(uint8_t*, recomp_context*) { missing_import("osViGetCurrentLine_recomp"); }
 #endif
 #ifdef BASELINE_VI_CONTROLLER_CYCLE
-// Scoped native no-pak policy; no raw PIF/PFS equivalence or accessory success.
+// Scoped startup accessory policy; no raw PIF/PFS equivalence.
+// Finite: exactly four ordered main-thread calls (channels 0-3); a fifth is refused.
 extern "C" void osPfsInit_recomp(uint8_t* rdram, recomp_context* ctx) {
     const auto thread = ultramodern::this_thread();
     if (uint32_t(thread) != 0x80045788 || osGetThreadId(rdram, thread) != 6 || pfs_absence_calls >= 4 ||
         uint32_t(ctx->r6) != pfs_absence_calls || uint32_t(ctx->r4) != 0x80079B78 || uint32_t(ctx->r5) != 0x8007B2EC + 0x84 * pfs_absence_calls)
-        rejected_body("input-prefix ordered main no-pak request admission");
+        rejected_body("input-prefix ordered main accessory request admission");
+#ifdef BASELINE_PLAYER
+    if (pfs_absence_calls == 0) ctx->r2 = 11; // PFS_ERR_DEVICE: virtual port-0 RumblePak.
+    else osPfsInitPak_recomp(rdram, ctx);
+#else
     osPfsInitPak_recomp(rdram, ctx);
-    std::fprintf(stderr, "baseline input-prefix no-pak channel=%u native_no_pak_policy=1\n", pfs_absence_calls++);
+#endif
+    std::fprintf(stderr, "baseline input-prefix accessory channel=%u result=%u\n", pfs_absence_calls++, unsigned(ctx->r2));
     std::fflush(stderr);
 }
 #elif defined(BASELINE_IMPORT_osPfsInit_recomp)

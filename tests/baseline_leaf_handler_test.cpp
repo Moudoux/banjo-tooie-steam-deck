@@ -16,11 +16,30 @@ void tooie_npc665_leaf_end(uint8_t*, recomp_context*);
 }
 #include "player_leaf_helpers_fixture.inc"
 #endif
+#ifdef TOOIE_BK_LEAF_FIXTURE
+// BK selection: DD998 calls the BK list node instead of the row leaf labels (bk_graph.inc).
+#include "bk_pipeline_selection_layout.h"
+static_assert(TOOIE_BK_PIPELINE_SELECTED==1u,"BK leaf fixture requires the BK image selection");
+#endif
 #ifndef TOOIE_DD998_FRAME_BYTES
 #error Define TOOIE_DD998_FRAME_BYTES from the candidate object prologue
 #endif
+#ifndef TOOIE_TEST_PLAYER_PHYSICAL_BYTES
+#error "Supply the selected composition's physical player-list extent"
+#endif
+static_assert(TOOIE_TEST_PLAYER_PHYSICAL_BYTES==0x8FC0u || TOOIE_TEST_PLAYER_PHYSICAL_BYTES==0x5BEC0u,
+    "player physical extent is one of the two supported bridge selections");
 #ifndef TOOIE_DD998_HELPER_FRAME_BYTES
 #define TOOIE_DD998_HELPER_FRAME_BYTES 0
+#endif
+#ifdef TOOIE_BK_LEAF_FIXTURE
+#ifndef TOOIE_BK_LEAF_HELPER_FRAME_BYTES
+#error Define TOOIE_BK_LEAF_HELPER_FRAME_BYTES from the bk object frames (list_begin + set_model_matrix_group)
+#endif
+// Under BK the candidate's deepest callee chain is DD998 -> list_begin -> set_model_matrix_group.
+#define TOOIE_DD998_CANDIDATE_FRAME_BYTES (TOOIE_DD998_FRAME_BYTES+TOOIE_BK_LEAF_HELPER_FRAME_BYTES)
+#else
+#define TOOIE_DD998_CANDIDATE_FRAME_BYTES (TOOIE_DD998_FRAME_BYTES+TOOIE_DD998_HELPER_FRAME_BYTES)
 #endif
 extern "C" {
 void mlMtx_get_stack_pointer(uint8_t*, recomp_context*);
@@ -42,6 +61,9 @@ constexpr uint32_t callback_global=0x8012CEC4, lists_global=0x8012C960;
 constexpr uint32_t callback_a=0x8010E4C4, callback_b=0x8010E4C8;
 static_assert(TOOIE_DD998_FRAME_BYTES>0 && TOOIE_DD998_FRAME_BYTES<guard);
 enum Kind { Current, Parent, Apply, Transform, CallbackA, CallbackB, Physical };
+// Plain: no owner/label state. Row: the selected row player leaf bracket (row composition only).
+// BkOwned: BK owner ID set, no enclosing float root. BkFloat: also inside a float-enabled root.
+enum Mode { Plain, Row, BkOwned, BkFloat };
 struct Event {
     Kind kind; uint32_t matrix; int32_t count, position;
     bool operator==(const Event& b) const {
@@ -63,6 +85,15 @@ gpr guest(uint32_t p) { return S32(p); }
 uint32_t word(uint8_t* rdram,uint32_t p) { return uint32_t(MEM_W(0,guest(p))); }
 void put(uint8_t* rdram,uint32_t p,uint32_t v) { MEM_W(0,guest(p))=v; }
 void half(uint8_t* rdram,uint32_t p,int16_t v) { MEM_H(0,guest(p))=v; }
+#ifdef TOOIE_BK_LEAF_FIXTURE
+// tooie_bk_state layout1 (bk_pipeline.h) and tooie_bk_float layout1 (bk_float.inc) offsets.
+constexpr uint32_t bk_state=TOOIE_BK_STATE, bk_float=TOOIE_BK_FLOAT;
+constexpr uint32_t bk_id=0x20000000u, bk_offset=3u;                   // player own sample 0
+constexpr uint32_t seg_pos=0x80060000u, seg_vel=0x80068000u, seg_base=0x80070018u;
+// SIMPLE (bones in use), PUSH, MODELVIEW; position/rotation/scale/skew/perspective INTERPOLATE;
+// vertices SKIP; tile INTERPOLATE; LINEAR; no edit; aspect AUTO; texcoords SKIP; look-at AUTO.
+constexpr uint32_t bk_bone_policy=0x02008AA9u;
+#endif
 void clobber(recomp_context* c) {
     c->r1=1;c->r2=2;c->r3=3;c->r4=4;c->r5=5;c->r6=6;c->r7=7;
     c->r8=8;c->r9=9;c->r10=10;c->r11=11;c->r12=12;c->r13=13;
@@ -92,7 +123,10 @@ void process(Kind kind,uint8_t* rdram,recomp_context* c) {
 void callback_one(uint8_t* r,recomp_context* c) { process(CallbackA,r,c); }
 void callback_two(uint8_t* r,recomp_context* c) { process(CallbackB,r,c); }
 struct Result { std::vector<uint8_t> ram; std::vector<Event> trace; };
-Result run(const Case& test,recomp_func_t* function,unsigned frame,bool labelled=false) {
+// Bytes each leaf member emits, and where its original DE sits within them.
+uint32_t member_bytes(Mode mode) { return mode==Plain?16u:mode==BkFloat?112u:48u; }
+uint32_t de_offset(Mode mode) { return mode==Plain?0u:mode==BkFloat?56u:24u; }
+Result run(const Case& test,recomp_func_t* function,unsigned frame,Mode mode=Plain) {
     Result result{std::vector<uint8_t>(16*1024*1024),{}};
     auto* rdram=result.ram.data();active=test;events.clear();
     transform_position=callback_position=0;transforms=callbacks=physicals=0;
@@ -100,13 +134,25 @@ Result run(const Case& test,recomp_func_t* function,unsigned frame,bool labelled
     put(rdram,lists_global,lists);put(rdram,callback_global,test.callback?callback_a:0);
 #ifdef TOOIE_PLAYER_STATE_ADDRESS
     constexpr uint32_t state=TOOIE_PLAYER_STATE_ADDRESS, pc=state+18740;
-    if(labelled) {
+    if(mode==Row) {
         put(rdram,state+8,1);put(rdram,state+16,3792);put(rdram,state+28,1);
         put(rdram,state+18584,1);put(rdram,pc,1);put(rdram,pc+28,1);
         put(rdram,pc+32,0x90000000);put(rdram,pc+36,buffers);
         put(rdram,pc+40,gfx-0x100);put(rdram,pc+48,gfx-24);put(rdram,pc+96,3);
         put(rdram,pc+88,0x62A); // Effective model has 68 poses; required by real leaf helper.
         put(rdram,0x8007BCD0,gfx-0x100);half(rdram,0x8007BEDA,0);
+    }
+#endif
+#ifdef TOOIE_BK_LEAF_FIXTURE
+    if(mode==BkOwned || mode==BkFloat) {
+        // Owned player draw inside a boned model: ID, traversal offset and bones flag.
+        put(rdram,bk_state+52,bk_id);put(rdram,bk_state+60,bk_offset);put(rdram,bk_state+64,1);
+        put(rdram,bk_state+68,mode==BkFloat?1u:0u);                      // root_depth
+        if(mode==BkFloat) {
+            // Enclosing root 0 published its own POSITION/VELOCITY segments.
+            put(rdram,bk_float+128,seg_pos);put(rdram,bk_float+132,seg_vel);
+            put(rdram,bk_float+136,seg_base);put(rdram,bk_float+140,1);
+        }
     }
 #endif
     for(unsigned i=0;i<4;++i) half(rdram,node+8+2*i,test.indices[i]);
@@ -139,18 +185,19 @@ Result run(const Case& test,recomp_func_t* function,unsigned frame,bool labelled
         require(uint8_t(MEM_BU(0,guest(p)))==0xA5,"above-frame sentinel");
     require(events.size()>=4 && events[0].kind==Current && events[1].kind==Parent &&
         events[2].kind==Apply,"get current, get parent, apply once before leaves");
-    require(word(rdram,buffers)==gfx+physicals*(labelled?48:16)+(test.move_cursors?8:0),"gfx advancement");
+    const uint32_t stride=member_bytes(mode);
+    require(word(rdram,buffers)==gfx+physicals*stride+(test.move_cursors?8:0),"gfx advancement");
     require(word(rdram,buffers+4)==mtx+64+(test.move_cursors?64:0),"single final Mtx allocation");
     require(physicals>=1,"do/while emits first leaf even for index zero");
     for(unsigned i=0;i<physicals;++i) {
-        const uint32_t de=gfx+i*(labelled?48:16)+(labelled?24:0)+(test.move_cursors && i>0?8:0);
+        const uint32_t de=gfx+i*stride+de_offset(mode)+(test.move_cursors && i>0?8:0);
         const uint32_t da=de+8+(test.move_cursors && i==0?8:0);
         const uint32_t address=lists+uint32_t(int32_t(test.indices[i])*8)+8;
         require(word(rdram,de)==0xDE000000 && word(rdram,de+4)==(address&0x1FFFFFFF),
             "signed list index, DE and converted physical payload");
         require(word(rdram,da)==0xDA380002 &&
             word(rdram,da+4)==mtx+(test.move_cursors?64:0),"post-leaf GPU reload order and matrix");
-        if(labelled) {
+        if(mode==Row) {
             const uint32_t begin=de-24;
             require(word(rdram,begin)==0x6400000C&&word(rdram,begin+4)==0x90000103&&
                 word(rdram,begin+8)==0x02010AA9&&word(rdram,begin+12)==0,
@@ -160,21 +207,66 @@ Result run(const Case& test,recomp_func_t* function,unsigned frame,bool labelled
             require(word(rdram,da+8)==0x6400000D&&word(rdram,da+12)==1,
                 "leaf paid POP follows original LOAD PUSH");
         }
+#ifdef TOOIE_BK_LEAF_FIXTURE
+        if(mode==BkOwned || mode==BkFloat) {
+            const uint32_t group=de-24;
+            // BK func_80338904 node in the BT pair form: group, then identity MUL/NOPUSH; the
+            // original list and LOAD/PUSH reload stay adjacent; the group pops after the reload.
+            require(word(rdram,group)==0x6400000C&&word(rdram,group+4)==bk_id+bk_offset&&
+                word(rdram,group+8)==bk_bone_policy&&word(rdram,group+12)==0,
+                "BK leaf group: owner ID plus traversal offset, bone policy");
+            require(word(rdram,group+16)==0xDA380001&&word(rdram,group+20)==bk_float,
+                "BK identity MUL NOPUSH binds the group without changing the matrix stack");
+            require(word(rdram,da+8)==0x6400000D&&word(rdram,da+12)==1,
+                "BK group pop follows the original LOAD PUSH reload");
+        }
+        if(mode==BkFloat) {
+            const uint32_t off=de-56, on=da+16;
+            // F070/callback-written vertices never index the enclosing float arena.
+            require(word(rdram,off)==0x64000031&&word(rdram,off+4)==0&&word(rdram,off+8)==0&&word(rdram,off+12)==0,
+                "POSITION segment disabled before the CPU-written leaf");
+            require(word(rdram,off+16)==0x64000031&&word(rdram,off+20)==2&&word(rdram,off+24)==0&&word(rdram,off+28)==0,
+                "VELOCITY segment disabled before the CPU-written leaf");
+            require(word(rdram,on)==0x64000031&&word(rdram,on+4)==1&&word(rdram,on+8)==seg_pos&&word(rdram,on+12)==seg_base,
+                "enclosing POSITION segment restored after the leaf pair");
+            require(word(rdram,on+16)==0x64000031&&word(rdram,on+20)==3&&word(rdram,on+24)==seg_vel&&word(rdram,on+28)==seg_base,
+                "enclosing VELOCITY segment restored after the leaf pair");
+        }
+#endif
     }
+#ifdef TOOIE_BK_LEAF_FIXTURE
+    if(mode==BkOwned || mode==BkFloat)
+        require(word(rdram,bk_state+728+12)==physicals,"one BK group per leaf member");
+    require(word(rdram,bk_float+88)==(mode==BkFloat?physicals:0u),"float suspension only inside a float root");
+    require(word(rdram,bk_state+60)==(mode==Plain?0u:bk_offset),"DL nodes do not advance the BK offset");
+#endif
     result.trace=events;return result;
 }
 void compare(const Case& test) {
     auto a=run(test,original_DD998,112);
-    auto b=run(test,func_800DD998,TOOIE_DD998_FRAME_BYTES+TOOIE_DD998_HELPER_FRAME_BYTES);
+    auto b=run(test,func_800DD998,TOOIE_DD998_CANDIDATE_FRAME_BYTES);
     require(a.trace==b.trace,"original/candidate call and position trace");
-    // Stack frames/volatile return registers may differ. All non-stack RAM must agree.
+    // Stack frames/volatile return registers may differ. All non-stack RAM must agree: with no
+    // owner state the candidate emits exactly the original commands and writes no BK state.
     for(size_t i=0;i<a.ram.size();++i) {
         const size_t begin=(stack-guard)&0xFFFFFF, end=(stack+32)&0xFFFFFF;
         if(i>=begin && i<end) continue;
         require(a.ram[i]==b.ram[i],"original/candidate non-stack RAM");
     }
 }
+#ifdef TOOIE_BK_LEAF_FIXTURE
+void bk_owned(const Case& test) {
+    // Same original reads, calls and positions as the original; only the BK commands are added.
+    auto a=run(test,original_DD998,112);
+    for(Mode mode:{BkOwned,BkFloat}) {
+        auto b=run(test,func_800DD998,TOOIE_DD998_CANDIDATE_FRAME_BYTES,mode);
+        require(a.trace==b.trace,"BK leaf keeps the original call and position trace");
+    }
+}
+#endif
 #ifdef TOOIE_PLAYER_STATE_ADDRESS
+// Row player helpers stay compiled until retirement (the bone handler still calls the bone pair),
+// so their controls run in both selections; only DD998 itself stops calling the leaf pair under BK.
 void hybrid_helpers() {
     std::vector<uint8_t> ram(16*1024*1024);auto* rdram=ram.data();
     constexpr uint32_t state=TOOIE_PLAYER_STATE_ADDRESS,pc=state+18740,base=gfx-0x100;
@@ -213,9 +305,19 @@ void hybrid_helpers() {
     }
     reset();put(rdram,pc+96,0);require(call(tooie_player_leaf_begin)==0&&word(rdram,buffers)==gfx&&word(rdram,state+24)==1,"leaf role0 refused");
     reset();put(rdram,pc+96,UINT32_MAX);require(call(tooie_player_leaf_begin)==0&&word(rdram,buffers)==gfx,"invalid leaf context refused");
-    reset();put(rdram,buffers,base+0x8FC0-24);require(call(tooie_player_leaf_begin)==0&&word(rdram,buffers)==base+0x8FC0-24,"leaf reserves complete32-byte augmentation");
-    reset();put(rdram,buffers,base+0x8FC0-32);require(call(tooie_player_leaf_begin)==1,"32-byte boundary accepted");
-    call(tooie_player_leaf_end);require(word(rdram,buffers)==base+0x8FC0,"boundary paid pop fits");
+    constexpr uint32_t physical_end=base+TOOIE_TEST_PLAYER_PHYSICAL_BYTES,canary=0x7B5D3F19u;
+    require(size_t(physical_end-0x80000000u)+8u<=ram.size(),"boundary canary fits backing RAM");
+    reset();put(rdram,buffers,physical_end-24);
+    for(uint32_t at=physical_end-24;at<physical_end+8;at+=4)put(rdram,at,canary);
+    require(call(tooie_player_leaf_begin)==0&&word(rdram,buffers)==physical_end-24&&word(rdram,state+24)==1,
+        "leaf reserves complete32-byte augmentation");
+    for(uint32_t at=physical_end-24;at<physical_end+8;at+=4)
+        require(word(rdram,at)==canary,"boundary refusal preserves command span");
+    reset();put(rdram,buffers,physical_end-32);
+    require(call(tooie_player_leaf_begin)==1&&word(rdram,buffers)==physical_end-8&&word(rdram,state+16)==3792,
+        "32-byte boundary accepted with existing reserve");
+    call(tooie_player_leaf_end);
+    require(word(rdram,buffers)==physical_end&&word(rdram,state+16)==3792,"boundary paid pop fits without charge");
     reset();put(rdram,buffers,gfx+1);call(tooie_player_bone_pop,2);
     require(word(rdram,pc+96)==0&&word(rdram,state+24)==1&&word(rdram,buffers)==gfx+1,"unsafe bone pop restores role0 context without write");
     reset();put(rdram,pc+96,UINT32_MAX);const uint32_t outer=call(tooie_player_bone_push,uint32_t(-1));
@@ -272,9 +374,20 @@ int main() {
         t=base;t.flags=1;t.current_counts[0]=1;t.parent_counts[0]=2;
         t.indices={1,2,0,0};t.mutate_transform=true;compare(t); // Late flags/count/callback.
         t=base;t.move_cursors=true;t.indices={1,2,0,0};compare(t); // Reload cursors across conversion.
+#ifdef TOOIE_BK_LEAF_FIXTURE
+        // Owned leaves, with and without an enclosing float root: one leaf, three signed leaves,
+        // and processing with callbacks (the CPU-written case the suspension exists for).
+        bk_owned(base);
+        t=base;t.indices={-2,4,7,0};bk_owned(t);
+        t=base;t.flags=1;t.callback=true;t.current_counts[0]=2;t.parent_counts[0]=4;t.indices={1,2,0,0};bk_owned(t);
+        std::cout<<"BK leaf group/identity/segment-suspension cases passed\n";
 #ifdef TOOIE_PLAYER_STATE_ADDRESS
+        hybrid_helpers();
+        std::cout<<"Hybrid leaf command/token/boundary controls passed\n";
+#endif
+#elif defined(TOOIE_PLAYER_STATE_ADDRESS)
         t=base;t.callback=true;t.current_counts[0]=2;t.parent_counts[0]=4;
-        run(t,func_800DD998,TOOIE_DD998_FRAME_BYTES+TOOIE_DD998_HELPER_FRAME_BYTES,true);
+        run(t,func_800DD998,TOOIE_DD998_CANDIDATE_FRAME_BYTES,Row);
         hybrid_helpers();
         std::cout<<"Hybrid leaf command/token/boundary controls passed\n";
 #endif

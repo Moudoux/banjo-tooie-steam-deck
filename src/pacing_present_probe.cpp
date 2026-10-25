@@ -23,6 +23,19 @@ std::atomic<std::uint64_t> session_intervals_over_50ms{0};
 std::atomic<std::uint64_t> session_last_long_interval_ns{0};
 std::atomic<std::uint64_t> session_last_long_elapsed_ms{0};
 
+// Strict diagnostic-only bounds; malformed values retain the legacy fallback.
+std::uint32_t trace_milliseconds(const char* name, std::uint32_t maximum) noexcept {
+    const char* value = std::getenv(name);
+    if (!value || !*value) return 0;
+    std::uint32_t parsed = 0;
+    for (const char* digit = value; *digit; ++digit) {
+        if (*digit < '0' || *digit > '9' ||
+            parsed > (maximum - std::uint32_t(*digit - '0')) / 10u) return 0;
+        parsed = parsed * 10u + std::uint32_t(*digit - '0');
+    }
+    return parsed;
+}
+
 std::uint64_t now_ns() noexcept {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -62,6 +75,60 @@ extern "C" void tooie_rt64_present_observed(bool successful, bool vsync_actual,
     }
 }
 
+extern "C" bool tooie_rt64_present_trace_enabled() noexcept {
+    static const bool enabled = [] {
+        const char* value = std::getenv("TOOIE_PRESENT_TRACE");
+        return value && std::string_view(value) == "1";
+    }();
+    return enabled;
+}
+extern "C" std::uint64_t tooie_rt64_present_trace_clock_ns() noexcept { return now_ns(); }
+
+namespace {
+void trace_present(std::uint64_t present_id,
+    std::uint64_t workload_id, std::uint32_t mode, std::uint32_t vi_origin,
+    std::uint32_t vi_framebuffer, std::uint32_t color_framebuffer,
+    std::uint32_t vi_x, std::uint32_t vi_y, std::uint32_t vi_h,
+    std::uint32_t vi_v, std::uint32_t index, std::uint32_t count,
+    std::uint32_t source_hz, std::uint32_t target_hz, bool successful,
+    bool vsync_actual, const tooie::pacing::PresentStageTimes* stages) noexcept {
+    if (!tooie_rt64_present_trace_enabled()) return;
+    // Called exclusively on RT64's present thread. Delay is relative to its
+    // first present callback; the existing row cap also bounds duration=0.
+    static const auto delay_ns = std::uint64_t(trace_milliseconds(
+        "TOOIE_PRESENT_TRACE_DELAY_MS", 900000)) * 1'000'000ull;
+    static const auto duration_ns = std::uint64_t(trace_milliseconds(
+        "TOOIE_PRESENT_TRACE_DURATION_MS", 60000)) * 1'000'000ull;
+    static std::uint32_t calls = 0;
+    if (calls >= 4096) return;
+    const auto now = now_ns();
+    static const auto started = now;
+    const auto elapsed = now - started;
+    if (elapsed < delay_ns || (duration_ns != 0 && elapsed - delay_ns >= duration_ns)) return;
+    // The first captured interval is unknown, never the preceding delay.
+    static auto previous = now;
+    const tooie::pacing::PresentStageTimes absent{};
+    const auto& t = stages ? *stages : absent;
+    std::fprintf(stderr,
+        "TOOIE_PRESENT_TRACE n=%u us=%llu dt_us=%llu present=%llu workload=%llu "
+        "mode=%u origin=%08x vi_fb=%08x color_fb=%08x x=%08x y=%08x h=%08x v=%08x "
+        "index=%u count=%u source=%u target=%u success=%u vsync=%u "
+        "stage_mask=%u phase_ns=%llu interp_ns=%llu acquire_ns=%llu worker_ns=%llu "
+        "sleep_ns=%llu present_wait_ns=%llu present_ns=%llu\n",
+        calls++, static_cast<unsigned long long>((now - started) / 1000),
+        static_cast<unsigned long long>((now - previous) / 1000),
+        static_cast<unsigned long long>(present_id),
+        static_cast<unsigned long long>(workload_id), mode, vi_origin,
+        vi_framebuffer, color_framebuffer, vi_x, vi_y, vi_h, vi_v,
+        index, count, source_hz, target_hz, unsigned(successful), unsigned(vsync_actual),
+        t.measured, static_cast<unsigned long long>(t.phase_ns),
+        static_cast<unsigned long long>(t.interp_ns), static_cast<unsigned long long>(t.acquire_ns),
+        static_cast<unsigned long long>(t.worker_ns), static_cast<unsigned long long>(t.sleep_ns),
+        static_cast<unsigned long long>(t.present_wait_ns), static_cast<unsigned long long>(t.present_ns));
+    previous = now;
+}
+} // namespace
+
 extern "C" void tooie_rt64_present_trace(std::uint64_t present_id,
     std::uint64_t workload_id, std::uint32_t mode, std::uint32_t vi_origin,
     std::uint32_t vi_framebuffer, std::uint32_t color_framebuffer,
@@ -69,29 +136,20 @@ extern "C" void tooie_rt64_present_trace(std::uint64_t present_id,
     std::uint32_t vi_v, std::uint32_t index, std::uint32_t count,
     std::uint32_t source_hz, std::uint32_t target_hz, bool successful,
     bool vsync_actual) noexcept {
-    static const bool enabled = [] {
-        const char* value = std::getenv("TOOIE_PRESENT_TRACE");
-        return value && std::string_view(value) == "1";
-    }();
-    if (!enabled) return;
-    // Called exclusively on RT64's present thread. Bound diagnostics even if
-    // the environment option is accidentally retained for a longer session.
-    static std::uint32_t calls = 0;
-    if (calls >= 4096) return;
-    const auto now = now_ns();
-    static const auto started = now;
-    static auto previous = now;
-    std::fprintf(stderr,
-        "TOOIE_PRESENT_TRACE n=%u us=%llu dt_us=%llu present=%llu workload=%llu "
-        "mode=%u origin=%08x vi_fb=%08x color_fb=%08x x=%08x y=%08x h=%08x v=%08x "
-        "index=%u count=%u source=%u target=%u success=%u vsync=%u\n",
-        calls++, static_cast<unsigned long long>((now - started) / 1000),
-        static_cast<unsigned long long>((now - previous) / 1000),
-        static_cast<unsigned long long>(present_id),
-        static_cast<unsigned long long>(workload_id), mode, vi_origin,
-        vi_framebuffer, color_framebuffer, vi_x, vi_y, vi_h, vi_v,
-        index, count, source_hz, target_hz, unsigned(successful), unsigned(vsync_actual));
-    previous = now;
+    trace_present(present_id, workload_id, mode, vi_origin, vi_framebuffer, color_framebuffer,
+        vi_x, vi_y, vi_h, vi_v, index, count, source_hz, target_hz, successful, vsync_actual, nullptr);
+}
+
+extern "C" void tooie_rt64_present_trace_staged(std::uint64_t present_id,
+    std::uint64_t workload_id, std::uint32_t mode, std::uint32_t vi_origin,
+    std::uint32_t vi_framebuffer, std::uint32_t color_framebuffer,
+    std::uint32_t vi_x, std::uint32_t vi_y, std::uint32_t vi_h,
+    std::uint32_t vi_v, std::uint32_t index, std::uint32_t count,
+    std::uint32_t source_hz, std::uint32_t target_hz, bool successful,
+    bool vsync_actual,
+    const tooie::pacing::PresentStageTimes* stages) noexcept {
+    trace_present(present_id, workload_id, mode, vi_origin, vi_framebuffer, color_framebuffer,
+        vi_x, vi_y, vi_h, vi_v, index, count, source_hz, target_hz, successful, vsync_actual, stages);
 }
 
 namespace tooie::pacing {

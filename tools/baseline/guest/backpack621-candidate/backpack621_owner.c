@@ -15,6 +15,8 @@ _Static_assert(TOOIE_CPU625_ID_FIRST+512ULL*TOOIE_CPU625_BLOCKS<=TOOIE_BACKPACK6
 #define BX BS.context
 #define BE BS.emission
 #define B621_INVALID 0xFFFFFFFFu
+/* At DEFA0: 416 original bytes + 592 added bytes; keep 48 camera bytes separate.
+ * Added bytes: envelope 32 + 14 bone scopes * 24 + 7 hybrid scopes * 32. */
 #define B621_SUFFIX 1008u
 #define B621_TAIL 48u
 enum { B621_BAD_LAYOUT=1,B621_NESTED,B621_BEGIN,B621_CONTEXT,B621_SLOT,
@@ -70,7 +72,9 @@ SI u32 b621_component(u32 self) {
        !*(volatile u8*)(part+8u) || *(volatile u8*)(part+9u) || *(volatile u8*)(part+10u))return 0;
     return part;
 }
-/* Original inline FreeList has stride12. This subset requires no second handle. */
+/* Original 80100690 publishes the stride-12 FreeList at 80135A60.
+ * A74/AC4 use freelist_at without bounds checks; preflight its four-byte header.
+ * Entry +8 is AC4's secondary handle; requiring zero avoids that second lookup. */
 SI u32 b621_primary(u32 handle) {
     u32 pool=*(volatile u32*)0x80135A60u;
     if(!silo_range(pool,4u,3u) || *(volatile s16*)pool!=12)return 0;
@@ -99,7 +103,9 @@ SI u32 b621_camera(void) {
        r->view_id[p->view]!=p->id || r->view_scale[p->view]!=p->scale)return 0;
     return p->id;
 }
-/* Fixed source-class reads, not another graph walk or asset decoder. */
+/* Fixed immutable 0x621 fingerprint: 8096 bytes, geometry +7384, DL +1400,
+ * vertices +3840 and bones +3608/count 14. This is not general graph validation;
+ * the original publication and fixed node guards below remain required. */
 SI u32 b621_model(u32 model) {
     u32 table=D_8012CF8C;
     if(!silo_range(model,8096u,7u) || *(volatile u32*)(model+4u)!=7384u ||
@@ -187,6 +193,8 @@ B621 u32 tooie_backpack621_begin(u32 self,u32 model) {
     if(BX.owner)return b621_stop(B621_NESTED);
     BX.owner=self;BX.model=model;BX.slot=slot;BX.view=(u32)D_80127674;
     BX.phase=(u32)(s32)D_80132E9C;BX.epoch=SS.epoch;BX.depth=SS.silo_depth;
+    /* C840 is the original reusable pose slot. DE498 builds it before DEFA0;
+     * begin checks it is warm, admit checks the completed C968 publication. */
     u32 scratch=*(volatile u32*)0x8012C840u;
     if(BX.depth || SS.active || SC.actor || SC.admitted || D_8012C948[24] ||
        !BX.epoch || BX.epoch==B621_INVALID || BX.view>=4u ||
@@ -216,6 +224,8 @@ B621 u32 tooie_backpack621_admit(u32 buffers,u32 cursor_slot,u32 model) {
     if(!b621_model(model) || D_8012C838 || D_8012CEC4 || D_8012C948[14] ||
        D_8012C948[24] || D_8012C948[26] || D_8012C948[28] ||
        *(volatile u32*)0x8012C848u)return b621_refuse(B621_MODEL);
+    /* Original entry3 sends backpack +4 through DF738 to C844;
+     * DD410 reads it for DC028 vector-cache writes. Preserve that binding. */
     u32 pose=(u32)D_8012C968,vector=*(volatile u32*)0x8012C844u;
     if(pose!=*(volatile u32*)0x8012C840u || !silo_range(pose,0x3D0u,3u) ||
        *(volatile u32*)pose!=14u || *(volatile u32*)(pose+4u)<14u ||
@@ -232,9 +242,13 @@ B621 u32 tooie_backpack621_admit(u32 buffers,u32 cursor_slot,u32 model) {
        current<base || current<c->main_begin || current<SS.last_end || (current&7u) ||
        current>c->main_end-B621_SUFFIX-B621_TAIL ||
        c->main_extra>TOOIE_CAMERA_EXTRA_BYTES-B621_TAIL)return b621_refuse(B621_CAMERA);
+    /* 22 original matrix slots need 1408 bytes; the model budget is 6400 - 592.
+     * Physical suffix/tail checks above are separate from this shared model debit. */
     if(!silo_range(mtxbase,0x12C00u,7u) || mtx<mtxbase || ((mtx-mtxbase)&63u) ||
        mtx>mtxbase+0x12C00u-1408u || SS.extra_bytes>5808u)return b621_refuse(B621_BUDGET);
     volatile struct TooieBackpack621Owner* e=&BS.owner[BX.slot];
+    /* DF41C publishes the decoded animation input at C824 for DE498.
+     * Refresh its address each occurrence; renewal below compares nullness only. */
     u32 animation=*(volatile u32*)0x8012C824u,seen=1u<<(BX.view*5u+b621_phase(BX.phase));
     /* Decoded-buffer address is occurrence input; only nullness changes producer class. */
     u32 renew=!(e->flags&TOOIE_BACKPACK621_VALID) || e->owner!=BX.owner ||

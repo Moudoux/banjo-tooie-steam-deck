@@ -195,11 +195,12 @@
       "strip_components": 0,
       "source_repository": "https://github.com/microsoft/DirectXShaderCompiler",
       "source_commit": "b4711839eb9a87da7c3436d9b212e0492359fbbd",
-      "license": "NCSA; see LICENSE-LLVM.txt in the official release",
+      "license": "NCSA (LICENSE-LLVM.txt); d3d12shader.h uses MIT, per official ReleaseNotes.md",
       "files": {
         "bin/x64/dxc.exe": "ae4bf100b8c64ab03cdc0ee5996d5f212e96c59d6d37340359342d714ac6c004",
         "bin/x64/dxcompiler.dll": "f79943b02f73b621421b58a569fd6ee120d0023fb6bfa23844ecad6b00d6a295",
-        "lib/x64/dxcompiler.lib": "c3ce5cab858f13dff3e1440471c48b29829ce0f43d0fe27525ef599a21562131"
+        "lib/x64/dxcompiler.lib": "c3ce5cab858f13dff3e1440471c48b29829ce0f43d0fe27525ef599a21562131",
+        "bin/x64/dxil.dll": "62736e99aa534a942873f92b881a71b2cb6ad62b8d7481ea7a8ad8e9888a8056"
       }
     },
     "sdl2_windows": {
@@ -225,7 +226,9 @@
       "strip_components": 1,
       "files": {
         "bin/clang-cl.exe": "6ac72dac3eb54eb7f807b0c4428c8a61cf73fe77d00be8aec8bc07ab94cdcf23",
+        "bin/clang.exe": "6ac72dac3eb54eb7f807b0c4428c8a61cf73fe77d00be8aec8bc07ab94cdcf23",
         "bin/lld-link.exe": "91da6d00511f43b86c8f9800888e6c66939a864e860bfda6594c1c186fd97a77",
+        "bin/ld.lld.exe": "91da6d00511f43b86c8f9800888e6c66939a864e860bfda6594c1c186fd97a77",
         "bin/llvm-lib.exe": "428437f321aed236a3241e7f4c8c6a79ba4823ac6cf0ea89ce1d9f3b5f410cfe",
         "bin/llvm-nm.exe": "80fc7944dffe4929dde0da55ad4ee1800bcf8b9b6ec8cb4b2d9e344f4fffe347"
       }

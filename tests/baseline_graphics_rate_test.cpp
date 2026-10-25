@@ -11,15 +11,18 @@
 #include "hle/rt64_rsp.h"
 #include "hle/rt64_workload_queue.h"
 extern "C" {
-void func_80014F4C(uint8_t*,recomp_context*);
+void func_80015184(uint8_t*,recomp_context*);
 void func_800A9800(uint8_t*,recomp_context*);
 }
 #include "graphics_rate_candidate_fixture.inc"
 namespace {
 constexpr uint32_t store=0x80020000,root=0x80030000,stack=0x8007F000;
 constexpr uint32_t tail=TOOIE_GRAPHICS_RATE_TAIL_ADDRESS;
+// Linked DemoTimingState {pending, active}; the completed VI count must stay unread.
+constexpr uint32_t demo=TOOIE_DEMO_TIMING_STATE_ADDRESS,measured=0x80078F64;
 constexpr unsigned frame=TOOIE_GRAPHICS_RATE_FRAME_BYTES,guard=256;
 static_assert(tail>=0x80801000 && tail+48<=0x81000000 && !(tail&7));
+static_assert(demo>=0x80801000 && demo+8<=0x81000000 && !(demo&3));
 static_assert(frame>0 && frame<guard);
 int32_t sample;
 unsigned reads,resets;
@@ -72,7 +75,8 @@ void clobber(recomp_context* c) {
     c->r14=14;c->r15=15;c->r24=24;c->r25=25;c->hi=0x1234;c->lo=0x5678;
 }
 }
-extern "C" void func_80014F4C(uint8_t*,recomp_context* c) {
+// Original requested-period getter (signed 0x8007913C); the sample stands in for it.
+extern "C" void func_80015184(uint8_t*,recomp_context* c) {
     ++reads;clobber(c);c->r2=S32(sample);
 }
 extern "C" void func_800A9800(uint8_t* rdram,recomp_context* c) {
@@ -84,12 +88,18 @@ extern "C" void func_800A9800(uint8_t* rdram,recomp_context* c) {
 int main() try {
     std::vector<uint8_t> memory(16*1024*1024,0xCD);auto* rdram=memory.data();
     RateTransport transport(rdram);
-    const std::array<int32_t,8> samples={2,3,1,0,-1,61,2,2};
-    const std::array<uint32_t,8> rates={30,20,60,0xFFFF,0xFFFF,0xFFFF,30,30};
+    // Without a pending recorded divisor the requested period decides; a pending one
+    // (still unlatched at render) wins, and a stale active value from the last frame is ignored.
+    const std::array<int32_t,13> samples={2,3,1,0,-1,61,2,2, 2,3,2,2,-1};
+    const std::array<uint32_t,13> pendings={0,0,0,0,0,0,0,0, 3,1,15,0,2};
+    const std::array<uint32_t,13> actives={0,0,0,0,0,0,0,0, 0,0,0,5,0};
+    const std::array<uint32_t,13> rates={30,20,60,0xFFFF,0xFFFF,0xFFFF,30,30, 20,60,4,30,30};
     for(unsigned i=0;i<samples.size();++i) {
-        // Last two calls deliberately reuse the same slot and equal sample.
+        // Calls 6 and 7 deliberately reuse the same slot and equal sample.
         const unsigned index=i==7?0:i%2;const uint32_t selected=tail+24*index,other=tail+24*(1-index);
         std::array<uint32_t,6> untouched{};for(unsigned k=0;k<6;++k)untouched[k]=word(rdram,other+4*k);
+        put(rdram,demo,pendings[i]);put(rdram,demo+4,actives[i]);
+        MEM_H(0,guest(measured))=int16_t(53); // A long completed period must not reach the hint.
         sample=samples[i];reads=resets=0;put(rdram,store,root);MEM_H(0,guest(0x8007BEDA))=int16_t(index);
         for(unsigned k=0;k<8;++k)put(rdram,root-8+4*k,0xCCCCCCCC);
         for(uint32_t p=stack-guard;p<stack+32;++p)MEM_B(0,guest(p))=0xA5;
@@ -97,6 +107,7 @@ int main() try {
         c.r16=16;c.r17=17;c.r18=18;c.r19=19;c.r20=20;c.r21=21;c.r22=22;c.r23=23;c.r28=28;c.r30=30;
         const auto before=c;func_800E7EF4(rdram,&c);
         require(reads==1 && resets==1 && word(rdram,store)==root+16,"one sample, one original side effect, exact16byte cursor");
+        require(word(rdram,demo)==pendings[i] && word(rdram,demo+4)==actives[i],"rate read leaves the wait's pending/active latch untouched");
         require(word(rdram,root)==0xE0525464 && word(rdram,root+4)==0x10000064,"actual Enable command bytes");
         require(word(rdram,root+8)==0xDE010000 && word(rdram,root+12)==(selected&0x1FFFFFFF),"actual nonpush physical branch");
         require(word(rdram,selected)==0x64000009 && word(rdram,selected+4)==rates[i],"actual public refresh command bytes/rate");
@@ -112,6 +123,6 @@ int main() try {
         transport.check(rdram,selected,rates[i]);
         put(rdram,selected+4,0xDEAD); // Equal-sample next call must publish again.
     }
-    std::cout<<"Actual compiled/retranslated graphics-rate body + real RT64 pre-FullSync decoder transport: 8 cases pass\n";
+    std::cout<<"Actual compiled/retranslated graphics-rate body + real RT64 pre-FullSync decoder transport: "<<samples.size()<<" cases pass\n";
     return 0;
 } catch(const std::exception& e) { std::cerr<<"FAIL: "<<e.what()<<"\n";return 1; }

@@ -12,8 +12,23 @@ void baseline_render_construction_begin(uint8_t*, recomp_context*);
 #include "pre_background_layout.h"
 #include "cpu625_selection_layout.h"
 #if TOOIE_BASELINE_HOST
+void baseline_trace_flip_init(uint8_t*, recomp_context*);
+void baseline_trace_flip_substate(uint8_t*, recomp_context*);
+void baseline_trace_landing(uint8_t*, recomp_context*);
+void baseline_trace_sound_id(uint8_t*, recomp_context*);
+void baseline_trace_sound_start(uint8_t*, recomp_context*);
+void baseline_trace_sound_submit(uint8_t*, recomp_context*);
+void baseline_trace_sound_stop(uint8_t*, recomp_context*);
 void baseline_cutscene_command(uint8_t*,recomp_context*);
+void baseline_cutscene_ticker_update(uint8_t*,recomp_context*);
+void baseline_cutscene_ticker_destroy(uint8_t*,recomp_context*);
 void tooie_baseline_widescreen_frame(uint8_t*,recomp_context*);
+void baseline_modern_fps_capture(uint8_t*,recomp_context*);
+void func_80804848_bsfirstp(uint8_t*,recomp_context*);
+void func_80808E78_bsfirstp(uint8_t*,recomp_context*);
+void func_808099B4_bsfirstp(uint8_t*,recomp_context*);
+void func_808069FC_bsfirstp(uint8_t*,recomp_context*);
+void func_80806928_bsfirstp(uint8_t*,recomp_context*);
 #endif
 #include "npc665_selection_layout.h"
 #if TOOIE_NPC665_SELECTED
@@ -27,6 +42,24 @@ void baseline_cpu625_end(uint8_t*, recomp_context*);
 void baseline_cpu625_set_state(uint8_t*, recomp_context*);
 void baseline_cpu625_init(uint8_t*, recomp_context*);
 void baseline_cpu625_admit(uint8_t*, recomp_context*);
+#endif
+#include "ckcopy_selection_layout.h"
+#if TOOIE_CKCOPY_SELECTED
+void baseline_ckcopy_root_begin(uint8_t*, recomp_context*);
+void baseline_ckcopy_root_end(uint8_t*, recomp_context*);
+void baseline_ckcopy_segment(uint8_t*, recomp_context*);
+void baseline_ckcopy_release(uint8_t*, recomp_context*);
+void baseline_cpu625_attach_begin(uint8_t*, recomp_context*);
+void baseline_cpu625_attach_end(uint8_t*, recomp_context*);
+#endif
+#include "secondary_selection_layout.h"
+#if TOOIE_PLAYER_SECONDARY_SELECTED
+void baseline_secondary_route_begin_main(uint8_t*, recomp_context*);
+void baseline_secondary_route_end_main(uint8_t*, recomp_context*);
+void baseline_secondary_route_begin_late(uint8_t*, recomp_context*);
+void baseline_secondary_route_end_late(uint8_t*, recomp_context*);
+void baseline_secondary_route_arm(uint8_t*, recomp_context*);
+void baseline_secondary_route_disarm(uint8_t*, recomp_context*);
 #endif
 #if TOOIE_ACTOR_PALETTE_SELECTED
 void baseline_actor_cpu_root_begin(uint8_t*, recomp_context*);
@@ -60,6 +93,7 @@ void baseline_shadow_fullframe(uint8_t*, recomp_context*);
 void baseline_shadow_mode_begin(uint8_t*, recomp_context*);
 void baseline_shadow_mode_end(uint8_t*, recomp_context*);
 void baseline_shadow_complete(uint8_t*, recomp_context*);
+void baseline_shadow_mv_end(uint8_t*, recomp_context*);
 
 #endif
 void func_800EBED4(uint8_t*, recomp_context*);

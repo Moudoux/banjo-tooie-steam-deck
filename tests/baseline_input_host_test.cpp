@@ -2,7 +2,11 @@
 #include "frontend_input_host.hpp"
 #include "frontend_config.hpp"
 #include "widescreen.hpp"
+#include "virtual_clock.hpp"
+#include <json/json.hpp>
+#include "../tools/baseline/guest/minimum-host/first_person_aim_abi.h"
 #include <SDL.h>
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -11,9 +15,11 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 // Test-target-only focus admission, selected by baseline_input_focus.h.
 // Synthetic window/key events do not test native focus or SDL keyboard state.
@@ -48,6 +54,16 @@ struct Fixture {
     std::array<SDL_Joystick*, 2> pads{};
     std::array<SDL_GameController*, 2> controllers{};
     bool sdl = false, redirected = false;
+
+    struct RumbleCommand { unsigned pad; Uint16 low, high; };
+    std::vector<RumbleCommand> rumble_commands;
+    struct RumbleSource { Fixture* owner; unsigned pad; };
+    std::array<RumbleSource, 2> rumble_sources{};
+    static int SDLCALL record_rumble(void* userdata, Uint16 low, Uint16 high) {
+        auto& source = *static_cast<RumbleSource*>(userdata);
+        source.owner->rumble_commands.push_back({source.pad, low, high});
+        return 0;
+    }
 
     ~Fixture() {
         host::shutdown();
@@ -114,6 +130,9 @@ struct Fixture {
             desc.vendor_id = 0x1209;
             desc.product_id = Uint16(0x4200 + i); // Distinct persistent identities.
             desc.name = i == 0 ? "Baseline input selected fixture" : "Baseline input foreign fixture";
+            rumble_sources[i] = {this, i};
+            desc.userdata = &rumble_sources[i];
+            desc.Rumble = record_rumble;
             const int device = SDL_JoystickAttachVirtualEx(&desc);
             require(device >= 0 && SDL_IsGameController(device), "fixture virtual controller attachment failed");
             pads[i] = SDL_JoystickOpen(device);
@@ -237,6 +256,348 @@ struct Fixture {
     }
 };
 
+
+// Real mapper/host publication and existing Player owner; no devices.cpp import
+// or guest is linked into this fixture, so those remain separate qualification.
+void check_music_volume(Fixture& fixture) {
+    namespace settings = tooie::frontend::settings;
+    constexpr const char* key = "tooie_music_volume_percent";
+    require(settings::get_int(key, -1) == -1 && host::requested_music_volume() == 100 &&
+        fixture.snapshot()->preferences.music_volume == 100,
+        "missing music preference did not default to 100 percent");
+    const auto request = [](int value) {
+        host::Request change{};
+        change.kind = host::RequestKind::Preference;
+        change.preference = host::Preference::MusicVolume;
+        change.value = value;
+        require(host::enqueue(change), "music preference queue failed");
+        host::tick(false);
+    };
+    const auto reload = [&] {
+        require(settings::flush(), "music preference flush failed");
+        host::shutdown();
+        require(host::requested_music_volume() == 100, "shutdown retained requested music gain");
+        host::initialize(fixture.window, fixture.profile, true);
+        host::publish_ready(true);
+        fixture.focus();
+        tooie::input::host().set_menu_open(true);
+        host::tick(false);
+    };
+    request(50);
+    require(host::requested_music_volume() == 50 && fixture.snapshot()->preferences.music_volume == 50 &&
+        settings::get_int(key, -1) == 50 && host::latched_preferences().music_volume == 100,
+        "music request was not published/persisted or changed startup state");
+    request(-1);
+    request(101);
+    require(host::requested_music_volume() == 50 && fixture.snapshot()->preferences.music_volume == 50 &&
+        settings::get_int(key, -1) == 50, "invalid music request changed requested or saved gain");
+    reload();
+    require(host::requested_music_volume() == 50 && fixture.snapshot()->preferences.music_volume == 50 &&
+        host::latched_preferences().music_volume == 50, "music preference did not survive settings/host reload");
+    settings::set_int(key, -20);
+    reload();
+    require(host::requested_music_volume() == 0 && fixture.snapshot()->preferences.music_volume == 0,
+        "negative saved music preference did not clamp to zero");
+    require(settings::get_int(key, 0) == -20,
+        "loading clamped music preference rewrote the saved key");
+    settings::set_int(key, 120);
+    reload();
+    require(host::requested_music_volume() == 100 && fixture.snapshot()->preferences.music_volume == 100,
+        "high saved music preference did not clamp to 100");
+    require(settings::get_int(key, 0) == 120,
+        "loading clamped music preference rewrote the saved key");
+    settings::set_string(key, "invalid");
+    reload();
+    require(host::requested_music_volume() == 100 && fixture.snapshot()->preferences.music_volume == 100,
+        "nonnumeric saved music preference did not use the default");
+    request(0);
+    require(host::requested_music_volume() == 0 && settings::get_int(key, -1) == 0,
+        "zero-percent music request was refused");
+    request(100);
+    require(host::requested_music_volume() == 100 && fixture.snapshot()->preferences.music_volume == 100 &&
+        settings::get_int(key, -1) == 100, "music request could not return to its default");
+}
+
+// Exercises the actual mapper/SDL calls. Guest/runtime callback and tape admission
+// live in devices.cpp and are not linked by this existing host fixture.
+void check_rumble(Fixture& fixture) {
+    namespace settings = tooie::frontend::settings;
+    constexpr const char* key = "rumble_strength";
+    const double saved_strength = settings::get_number(key, 100.0);
+    const auto request = [&](int value) {
+        host::Request change{};
+        change.kind = host::RequestKind::Preference;
+        change.preference = host::Preference::RumbleStrength; change.value = value;
+        require(host::enqueue(change), "rumble preference queue failed");
+        host::tick(false);
+    };
+    const auto reload = [&] {
+        require(settings::flush(), "rumble preference flush failed");
+        host::shutdown(); host::initialize(fixture.window, fixture.profile, true);
+        host::publish_ready(true); fixture.focus();
+        tooie::input::host().set_menu_open(true); host::tick(false);
+    };
+    const auto resume = [&] {
+        const auto first = fixture.rumble_commands.size();
+        host::request_close(); host::tick(true); host::tick(true);
+        require(!host::menu_open() && !tooie::input::input_suppressed(), "rumble gameplay admission failed");
+        require(std::none_of(fixture.rumble_commands.begin() + first, fixture.rumble_commands.end(),
+            [](const auto& command) { return command.low || command.high; }), "rumble replayed while gameplay resumed");
+    };
+    const auto expect_last = [&](unsigned pad, Uint16 intensity, const char* message) {
+        require(!fixture.rumble_commands.empty(), message);
+        const auto& command = fixture.rumble_commands.back();
+        require(command.pad == pad && command.low == intensity && command.high == intensity, message);
+    };
+    const auto start = [&](unsigned pad, Uint16 intensity = 65535) {
+        const auto first = fixture.rumble_commands.size();
+        tooie::input::set_rumble(0, true); host::tick(true);
+        require(fixture.rumble_commands.size() > first, "fresh rumble request emitted no new SDL command");
+        expect_last(pad, intensity, "fresh port0 request did not reach the selected capable pad");
+    };
+    const auto stop = [&](unsigned pad) {
+        tooie::input::set_rumble(0, false); host::tick(true);
+        expect_last(pad, 0, "port0 off request did not stop the selected pad");
+    };
+    const auto no_replay = [&] {
+        const auto first = fixture.rumble_commands.size(); host::tick(true);
+        require(std::none_of(fixture.rumble_commands.begin() + first, fixture.rumble_commands.end(),
+            [](const auto& command) { return command.low || command.high; }), "blocked rumble request replayed");
+    };
+    const auto select = [&](SDL_JoystickID instance) {
+        const auto first = fixture.rumble_commands.size();
+        host::Request change{}; change.kind = host::RequestKind::Controller; change.value = instance;
+        require(host::enqueue(change), "rumble controller selection queue failed"); host::tick(true);
+        require(tooie::input::selected_controller_instance() == instance, "rumble target selection failed");
+        require(std::none_of(fixture.rumble_commands.begin() + first, fixture.rumble_commands.end(),
+            [](const auto& command) { return command.low || command.high; }), "selection replayed rumble on the new target");
+    };
+    const auto device_event = [&](Uint32 type, Sint32 which) {
+        SDL_Event event{}; event.type = type; event.cdevice.which = which;
+        host::handle_event(event);
+    };
+    const auto device_index = [&](SDL_JoystickID instance) {
+        for (int i = 0; i < SDL_NumJoysticks(); ++i)
+            if (SDL_JoystickGetDeviceInstanceID(i) == instance) return i;
+        throw std::runtime_error("rumble fixture device index missing");
+    };
+    const auto focus = [&](bool gained) {
+        const auto first = fixture.rumble_commands.size();
+        fixture_focus = gained ? fixture.window : nullptr;
+        SDL_Event event{}; event.type = SDL_WINDOWEVENT;
+        event.window.windowID = SDL_GetWindowID(fixture.window);
+        event.window.event = gained ? SDL_WINDOWEVENT_FOCUS_GAINED : SDL_WINDOWEVENT_FOCUS_LOST;
+        host::handle_event(event); host::tick(true);
+        if (gained) require(std::none_of(fixture.rumble_commands.begin() + first, fixture.rumble_commands.end(),
+            [](const auto& command) { return command.low || command.high; }), "focus gain replayed rumble");
+    };
+    const auto first_pad = SDL_JoystickInstanceID(fixture.pads[0]);
+    const auto second_pad = SDL_JoystickInstanceID(fixture.pads[1]);
+    require(tooie::input::rumble_capable() && settings::get_number(key, -1) == -1 &&
+        fixture.snapshot()->preferences.rumble_strength == 100,
+        "rumble capable fixture or missing-key strength default failed");
+    request(0);
+    require(fixture.snapshot()->preferences.rumble_strength == 0 && settings::get_number(key, -1) == 0,
+        "zero rumble strength preference failed");
+    request(100); request(-1); request(101);
+    require(fixture.snapshot()->preferences.rumble_strength == 100 && settings::get_number(key, -1) == 100,
+        "invalid rumble strength changed the accepted value");
+    request(40); reload();
+    require(fixture.snapshot()->preferences.rumble_strength == 40 && settings::get_number(key, -1) == 40,
+        "rumble strength did not persist");
+    settings::set_number(key, 37.5); reload();
+    require(fixture.snapshot()->preferences.rumble_strength == 37 && settings::get_number(key, -1) == 37.5,
+        "rumble startup truncated the stored fractional strength");
+    resume(); fixture.rumble_commands.clear();
+    start(0, 24576); stop(0); // The mapper consumes37.5, not the integer UI view37.
+    request(100); resume(); start(0); stop(0);
+    request(50); resume(); start(0, 32768); stop(0);
+    request(100); resume();
+    for (double nonfinite : {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()}) {
+        settings::set_number(key, nonfinite);
+        require(!std::isfinite(settings::get_number(key, 100)), "nonfinite rumble fixture setup failed");
+        start(0); stop(0);
+    }
+    settings::set_number(key, 100);
+    const auto foreign_request = fixture.rumble_commands.size();
+    tooie::input::set_rumble(1, true); host::tick(true);
+    require(fixture.rumble_commands.size() == foreign_request, "foreign console port armed rumble");
+    start(0);
+    host::tick(false); expect_last(0, 0, "non-gameplay tick did not stop rumble");
+    resume(); no_replay(); start(0);
+    tooie::input::host().set_menu_open(true); host::tick(true);
+    expect_last(0, 0, "menu did not stop rumble");
+    tooie::input::set_rumble(0, true); host::tick(true); // A new command while blocked is discarded too.
+    resume(); no_replay(); start(0);
+    tooie::input::begin_capture(Action::A, Device::Button, 0); host::tick(true);
+    require(tooie::input::input_suppressed(), "rumble capture setup failed");
+    expect_last(0, 0, "capture did not stop rumble");
+    tooie::input::cancel_capture(); fixture.cooldown(); resume(); no_replay(); start(0);
+    focus(false); expect_last(0, 0, "focus loss did not stop rumble");
+    fixture.button(0, SDL_CONTROLLER_BUTTON_A, true);
+    const auto background = host::tick(true);
+    require(!background.focused && background.physical_admitted && (background.physical.buttons & 0x8000),
+        "rumble focus policy disabled supported background controller input");
+    tooie::input::set_rumble(0, true); host::tick(true);
+    fixture.button(0, SDL_CONTROLLER_BUTTON_A, false); host::tick(true);
+    focus(true); resume(); no_replay(); start(0);
+    settings::set_number(key, 0); host::tick(true);
+    expect_last(0, 0, "strength0 did not stop rumble during gameplay");
+    settings::set_number(key, 100); no_replay(); start(0);
+    const auto transition = fixture.rumble_commands.size(); select(second_pad);
+    require(fixture.rumble_commands.size() > transition && fixture.rumble_commands[transition].pad == 0 &&
+        !fixture.rumble_commands[transition].low && !fixture.rumble_commands[transition].high,
+        "old rumble target was not stopped before selection changed");
+    no_replay(); start(1); select(first_pad); expect_last(1, 0, "selection back did not stop old pad");
+    no_replay(); start(0);
+    const auto foreign_removal = fixture.rumble_commands.size();
+    device_event(SDL_CONTROLLERDEVICEREMOVED, second_pad);
+    require(fixture.rumble_commands.size() == foreign_removal, "foreign removal stopped the selected rumble target");
+    host::tick(true); expect_last(0, 65535, "foreign removal changed the active rumble request");
+    device_event(SDL_CONTROLLERDEVICEADDED, device_index(second_pad)); host::tick(true);
+    // Keep the fixture's external controller handle open: SDL cannot supply the
+    // mapper's missing stop as a side effect of closing the last reference.
+    device_event(SDL_CONTROLLERDEVICEREMOVED, first_pad);
+    expect_last(0, 0, "selected removal did not stop the still-owned handle before close");
+    require(SDL_GameControllerGetAttached(fixture.controllers[0]), "synthetic removal closed the fixture owner");
+    device_event(SDL_CONTROLLERDEVICEADDED, device_index(first_pad)); select(first_pad);
+    no_replay(); start(0);
+    host::shutdown(); expect_last(0, 0, "mapper shutdown did not stop before closing its handle");
+    require(SDL_GameControllerGetAttached(fixture.controllers[0]), "shutdown closed the fixture owner");
+    tooie::input::set_rumble(0, true); // A late worker request cannot survive a new session.
+    host::initialize(fixture.window, fixture.profile, true); host::publish_ready(true); fixture.focus();
+    resume(); no_replay(); start(0); stop(0);
+    SDL_VirtualJoystickDesc incapable{};
+    incapable.version = SDL_VIRTUAL_JOYSTICK_DESC_VERSION; incapable.type = SDL_JOYSTICK_TYPE_GAMECONTROLLER;
+    incapable.naxes = SDL_CONTROLLER_AXIS_MAX; incapable.nbuttons = SDL_CONTROLLER_BUTTON_MAX;
+    incapable.vendor_id = 0x1209; incapable.product_id = 0x4210; incapable.name = "Baseline no-rumble fixture";
+    const int incapable_index = SDL_JoystickAttachVirtualEx(&incapable);
+    require(incapable_index >= 0, "noncapable rumble fixture attachment failed");
+    const auto incapable_id = SDL_JoystickGetDeviceInstanceID(incapable_index);
+    fixture.drain(); select(incapable_id);
+    require(!tooie::input::rumble_capable(), "noncapable selected controller reported rumble");
+    const auto incapable_commands = fixture.rumble_commands.size();
+    tooie::input::set_rumble(0, true); host::tick(true);
+    require(fixture.rumble_commands.size() == incapable_commands, "noncapable selection drove another controller");
+    select(first_pad); no_replay();
+    require(SDL_JoystickDetachVirtual(device_index(incapable_id)) == 0, "noncapable fixture detach failed");
+    fixture.drain();
+    settings::set_number(key, saved_strength);
+    tooie::input::host().set_menu_open(true); host::tick(false);
+}
+
+void check_modern_aim(Fixture& fixture) {
+    const auto preference = [](host::Preference key, int value) {
+        host::Request request{};
+        request.kind = host::RequestKind::Preference;
+        request.preference = key; request.value = value;
+        require(host::enqueue(request), "aim preference queue failed");
+        return host::tick(true);
+    };
+    host::request_close(); host::tick(true); host::tick(true);
+    require(fixture.snapshot()->preferences.first_person_aim == 0, "aim default was not OFF");
+    fixture.axis(SDL_CONTROLLER_AXIS_RIGHTX, 28000);
+    const auto off = host::tick(true);
+    require(off.aim_sample == 0 && off.aim_policy == 0 && off.physical.buttons != 0,
+        "OFF changed original right-stick C input or exposed modern input");
+    fixture.axis(SDL_CONTROLLER_AXIS_RIGHTX, 0); host::tick(true);
+
+    // A legitimate profile may unbind both right axes from original gameplay.
+    struct Saved { Action action; tooie::input::Binding binding;
+        tooie::input::BindingLayer layer; unsigned slot; };
+    std::vector<Saved> saved;
+    for (unsigned a = 0; a <= unsigned(Action::Menu); ++a)
+        for (auto layer : {tooie::input::BindingLayer::Base, tooie::input::BindingLayer::Modified})
+            for (auto device : {Device::AxisPositive, Device::AxisNegative})
+                for (unsigned slot = 0; slot < 2; ++slot) {
+                    const auto binding = tooie::input::get_binding(Action(a), device, layer, slot);
+                    if (binding.code == SDL_CONTROLLER_AXIS_RIGHTX || binding.code == SDL_CONTROLLER_AXIS_RIGHTY) {
+                        saved.push_back({Action(a), binding, layer, slot});
+                        tooie::input::set_binding(Action(a), {device, -1}, layer, slot);
+                    }
+                }
+    require(!saved.empty(), "aim custom-profile setup found no right-axis binding");
+    const auto neutral = preference(host::Preference::FirstPersonAim, 1);
+    require((neutral.aim_policy & TOOIE_FP_AIM_ENABLED) && neutral.aim_sample == 0,
+        "ON neutral was unavailable instead of admitted modern input");
+    fixture.axis(SDL_CONTROLLER_AXIS_RIGHTX, 28000);
+    const auto right = host::tick(true);
+    require((right.aim_policy & TOOIE_FP_AIM_ENABLED) && right.aim_sample != 0 &&
+        !right.physical.nonneutral() && right.activity,
+        "unbound right aim was lost, mapped to N64 input, or omitted from activity");
+    fixture.focus(false);
+    const auto background = host::tick(true);
+    require(!background.focused && background.physical_admitted &&
+        (background.aim_policy & TOOIE_FP_AIM_ENABLED) && background.aim_sample != 0,
+        "admitted background controller lost its modern aim publication");
+    fixture.focus(true);
+    fixture.axis(SDL_CONTROLLER_AXIS_RIGHTX, 0); host::tick(true);
+
+    // Exercise the actual script/latch owner using actual host publications.
+    std::istringstream tape("checkpoint done 1\n");
+    baseline::input::Player player(baseline::input::parse(tape));
+    const auto publish = [&](const host::InputPublication& v, uint64_t now) {
+        player.publish(v.physical, v.activity, false, now, v.focused || v.physical_admitted);
+    };
+    publish(host::tick(true), 0);
+    require(player.owns_port() && !player.delivers_physical(), "script allowed physical aim admission");
+    player.read(0); player.read(1); player.read(2);
+    require(player.finished() && !player.delivers_physical(), "script finish did not retain neutral latch");
+    fixture.axis(SDL_CONTROLLER_AXIS_RIGHTX, 28000);
+    publish(host::tick(true), 3);
+    require(!player.delivers_physical(), "held unbound aim cleared post-script neutral latch");
+    fixture.axis(SDL_CONTROLLER_AXIS_RIGHTX, 0);
+    publish(host::tick(true), 4);
+    require(player.delivers_physical(), "neutral modern input did not release script latch");
+
+    // Overflow is possible while the menu is already closed: no menu/focus
+    // transition arms suppress_camera, so raw aim activity must hold quarantine.
+    fixture.axis(SDL_CONTROLLER_AXIS_RIGHTX, 28000); host::tick(true);
+    host::take_render_input();
+    host::Request queued{}; queued.kind = host::RequestKind::Preference;
+    queued.preference = host::Preference::FirstPersonAimSensitivity; queued.value = 100;
+    bool overflowed = false;
+    for (unsigned i = 0; i < 65; ++i) overflowed |= !host::enqueue(queued);
+    require(overflowed, "aim quarantine setup did not overflow existing queue");
+    const auto held = host::tick(true);
+    require(held.activity && held.aim_sample == 0 && held.aim_policy == 0,
+        "overflow quarantine leaked held unbound right aim");
+    require(host::tick(true).aim_policy == 0, "held aim released quarantine on next publication");
+    fixture.axis(SDL_CONTROLLER_AXIS_RIGHTX, 0); host::tick(true);
+    fixture.axis(SDL_CONTROLLER_AXIS_RIGHTX, 28000);
+    require(host::tick(true).aim_sample != 0, "released quarantine did not restore modern input");
+    fixture.axis(SDL_CONTROLLER_AXIS_RIGHTX, 0); host::tick(true);
+
+    // Real capture/rebind with modern input selected; original binding owner wins.
+    const auto keyboard = tooie::input::get_binding(Action::A, Device::Keyboard, 1);
+    tooie::input::host().set_menu_open(true);
+    host::Request capture{}; capture.kind = host::RequestKind::Capture;
+    capture.action = Action::A; capture.device = Device::Keyboard; capture.slot = 1;
+    require(host::enqueue(capture), "aim capture queue failed");
+    const auto capturing = host::tick(true);
+    require(capturing.aim_policy == 0 && capturing.aim_sample == 0 &&
+        fixture.snapshot()->capture.active, "menu/capture leaked aim or failed to arm");
+    SDL_Event key{}; key.type = SDL_KEYDOWN; key.key.state = SDL_PRESSED;
+    key.key.windowID = SDL_GetWindowID(fixture.window);
+    key.key.keysym.scancode = SDL_SCANCODE_F10; key.key.keysym.sym = SDLK_F10;
+    host::handle_event(key);
+    require(host::tick(true).aim_policy == 0 &&
+        tooie::input::get_binding(Action::A, Device::Keyboard, 1).code == SDL_SCANCODE_F10,
+        "modern aim stole actual keyboard rebind or bypassed suppression");
+    key.type = SDL_KEYUP; key.key.state = SDL_RELEASED; host::handle_event(key);
+    tooie::input::set_binding(Action::A, keyboard, 1);
+    fixture.axis(SDL_CONTROLLER_AXIS_RIGHTX, 28000);
+    host::request_close();
+    const auto resumed = host::tick(true);
+    require((resumed.aim_policy & TOOIE_FP_AIM_ENABLED) && resumed.aim_sample == 0 &&
+        host::tick(true).aim_sample == 0, "held right aim bypassed menu-close release guard");
+    fixture.axis(SDL_CONTROLLER_AXIS_RIGHTX, 0); host::tick(true);
+    preference(host::Preference::FirstPersonAim, 0);
+    for (const auto& item : saved)
+        tooie::input::set_binding(item.action, item.binding, item.layer, item.slot);
+    host::take_render_input(); host::tick(true);
+}
+
 void check_bindings() {
     require(tooie::input::get_binding(Action::Z, Device::Button, 0).code == SDL_CONTROLLER_BUTTON_X &&
         tooie::input::get_binding(Action::Z, Device::AxisPositive, 0).code == -1,
@@ -245,12 +606,1244 @@ void check_bindings() {
         tooie::input::get_binding(Action::Start, Device::Button, 0).code == -1,
         "Start trigger binding did not replace START button slot");
 }
+
+void check_settings_string_roundtrip(Fixture& fixture) {
+    namespace settings = tooie::frontend::settings;
+    const std::array<const char*, 3> keys{{"tooie_input_profiles_v1",
+        "tooie_input_profile_extras_v1", "tooie_preferred_controller_id"}};
+    std::array<std::string, 3> original;
+    for (unsigned i = 0; i < keys.size(); ++i) original[i] = settings::get_string(keys[i], "");
+    // Exercise the real outer settings JSON with a large nested profile string
+    // and the quotes/backslashes found in a Windows HID identity. No device data.
+    const std::string identity = R"(030000005e040000e002000000006800:1118:736:path:\\?\HID#VID_045E&PID_02E0#fixture\"pad")";
+    auto rows = nlohmann::json::array();
+    for (unsigned action = 0; action < unsigned(Action::Count); ++action)
+        rows.push_back(std::array<int, 6>{{-1, 0, 1, 2, 3, 4}});
+    auto profiles = nlohmann::json::object();
+    for (unsigned i = 0; i < 24; ++i) profiles["Profile \"fixture\" \\ " + std::to_string(i)] = rows;
+    const nlohmann::json document = {{"devices", {{identity,
+        {{"active", "Profile \"fixture\" \\ 0"}, {"profiles", profiles}}}}}};
+    const std::array<std::string, 3> payload{{document.dump(), document.dump(), identity}};
+    require(payload[0].size() > 8192, "profile serialization fixture is too small");
+    for (unsigned i = 0; i < keys.size(); ++i) settings::set_string(keys[i], payload[i]);
+    require(settings::flush(), "escaped profile-string flush failed");
+    settings::initialize(fixture.profile);
+    for (unsigned i = 0; i < keys.size(); ++i)
+        require(settings::get_string(keys[i], "") == payload[i], "settings changed nested profile/identity string bytes");
+    require(nlohmann::json::parse(settings::get_string(keys[0], "")) == document,
+        "reloaded nested profile JSON no longer parses equivalently");
+    for (unsigned i = 0; i < keys.size(); ++i) settings::set_string(keys[i], original[i]);
+    require(settings::flush(), "profile-string fixture restoration failed");
+}
+
+void check_clear_and_profile_roundtrip(Fixture& fixture) {
+    using namespace tooie::input;
+    const auto original_profile = active_controller_profile();
+    const auto identity = selected_device_id();
+    require(!fixture.snapshot()->controller_auto, "explicit controller snapshot was labelled Automatic");
+    const std::string profile = "Clear \"fixture\" \\ profile";
+    const std::array<Binding, 2> keyboard_menu{{get_binding(Action::Menu, Device::Keyboard, 0),
+        get_binding(Action::Menu, Device::Keyboard, 1)}};
+    require(create_controller_profile(profile), "named controller fixture profile creation failed");
+    set_binding(Action::Menu, {Device::Button, SDL_CONTROLLER_BUTTON_BACK}, 0);
+    set_binding(Action::Menu, {Device::AxisPositive, SDL_CONTROLLER_AXIS_RIGHTX}, 0);
+    set_binding(Action::Menu, {Device::AxisNegative, SDL_CONTROLLER_AXIS_RIGHTY}, 0);
+    set_binding(Action::Menu, {Device::Button, SDL_CONTROLLER_BUTTON_Y}, 1);
+    set_binding(Action::B, {Device::Button, SDL_CONTROLLER_BUTTON_X}, 1);
+    set_binding(Action::CLeft, {Device::AxisNegative, SDL_CONTROLLER_AXIS_LEFTX}, BindingLayer::Modified, 1);
+    set_modifier_binding({Device::Button, SDL_CONTROLLER_BUTTON_LEFTSHOULDER});
+    set_modifier_solo_behavior(ModifierSoloBehavior::ModifierOnly);
+    require(set_trigger_thresholds(65, 35), "profile fixture trigger setup failed");
+    const auto clear = [&](Action action, Device device, unsigned slot) {
+        host::Request request{};
+        request.kind = host::RequestKind::ClearBinding;
+        request.action = action; request.device = device; request.slot = slot;
+        require(host::enqueue(request), "clear binding request queue failed");
+        host::tick(false);
+    };
+    fixture.capture(Action::Menu);
+    clear(Action::Menu, Device::Button, 0);
+    require(capture_active() && get_binding(Action::Menu, Device::Button, 0).code == SDL_CONTROLLER_BUTTON_BACK &&
+        get_binding(Action::Menu, Device::AxisPositive, 0).code == SDL_CONTROLLER_AXIS_RIGHTX &&
+        get_binding(Action::Menu, Device::AxisNegative, 0).code == SDL_CONTROLLER_AXIS_RIGHTY,
+        "Clear changed a cell while capture owned its binding");
+    host::Request cancel{}; cancel.kind = host::RequestKind::CancelCapture;
+    require(host::enqueue(cancel), "clear fixture capture cancellation queue failed");
+    host::tick(false); fixture.cooldown();
+    clear(Action::Menu, Device::Button, 0);
+    for (const auto device : {Device::Button, Device::AxisPositive, Device::AxisNegative})
+        require(get_binding(Action::Menu, device, 0).code == -1,
+            "controller Clear did not remove all three kinds in its cell");
+    const auto cleared_row = fixture.snapshot()->bindings[unsigned(Action::Menu)];
+    require(cleared_row.controller[0].empty() && cleared_row.controller[2].empty() &&
+        cleared_row.controller[4].empty() && !cleared_row.controller[1].empty(),
+        "controller snapshot formatted absent kinds instead of transporting empty labels");
+    require(get_binding(Action::Menu, Device::Button, 1).code == SDL_CONTROLLER_BUTTON_Y &&
+        get_binding(Action::B, Device::Button, 1).code == SDL_CONTROLLER_BUTTON_X,
+        "Clear changed another slot/action");
+    clear(Action::Menu, Device::Keyboard, 0);
+    clear(Action::Menu, Device::Keyboard, 1);
+    set_binding(Action::SaveProgress, {Device::Button, SDL_CONTROLLER_BUTTON_A}, 0);
+    const auto saved_profiles = tooie::frontend::settings::get_string("tooie_input_profiles_v1", "");
+    clear(Action::Menu, Device::Button, 2);
+    clear(Action::Count, Device::Button, 0);
+    clear(Action::SaveProgress, Device::Button, 0);
+    clear(Action::B, Device(255), 1);
+    require(tooie::frontend::settings::get_string("tooie_input_profiles_v1", "") == saved_profiles,
+        "invalid Clear request changed saved controller profiles");
+    const auto escape = [&](bool pressed, bool repeat = false) {
+        fixture_keys[SDL_SCANCODE_ESCAPE] = pressed ? 1 : 0;
+        SDL_Event event{};
+        event.type = pressed ? SDL_KEYDOWN : SDL_KEYUP;
+        event.key.windowID = SDL_GetWindowID(fixture.window);
+        event.key.state = pressed ? SDL_PRESSED : SDL_RELEASED;
+        event.key.repeat = repeat;
+        event.key.keysym.scancode = SDL_SCANCODE_ESCAPE;
+        event.key.keysym.sym = SDLK_ESCAPE;
+        host::handle_event(event); host::tick(false);
+    };
+    escape(true);
+    require(!host::menu_open(), "unbound keyboard Menu stranded Escape close");
+    escape(true, true);
+    require(!host::menu_open(), "repeated Escape toggled the menu");
+    escape(false);
+    clear(Action::B, Device::Button, 1);
+    require(get_binding(Action::B, Device::Button, 1).code == SDL_CONTROLLER_BUTTON_X,
+        "Clear was accepted with the menu closed");
+    escape(true); escape(false);
+    require(host::menu_open(), "unbound keyboard Menu stranded Escape open");
+    fixture.capture(Action::A);
+    const auto prior_a = get_binding(Action::A, Device::Button, 0);
+    escape(true); escape(false);
+    require(!capture_active() && host::menu_open() && get_binding(Action::A, Device::Button, 0).code == prior_a.code,
+        "Escape during capture toggled menu or changed the binding instead of cancelling");
+    fixture.cooldown();
+    const auto controller_codes = [] {
+        std::vector<int> codes;
+        for (unsigned a = 0; a < unsigned(Action::Count); ++a)
+            for (const auto layer : {BindingLayer::Base, BindingLayer::Modified})
+                for (const auto device : {Device::Button, Device::AxisPositive, Device::AxisNegative})
+                    for (unsigned slot = 0; slot < 2; ++slot)
+                        codes.push_back(get_binding(Action(a), device, layer, slot).code);
+        return codes;
+    };
+    const auto keyboard_codes = [] {
+        std::vector<int> codes;
+        for (unsigned action = 0; action < unsigned(Action::Count); ++action)
+            for (unsigned slot = 0; slot < 2; ++slot)
+                codes.push_back(get_binding(Action(action), Device::Keyboard, slot).code);
+        return codes;
+    };
+    const auto original_keyboard = keyboard_codes();
+    const auto expected = controller_codes();
+    // The same real queue must refuse a stale pad target before any setter runs.
+    require(selected_controller_instance() == SDL_JoystickInstanceID(fixture.pads[0]),
+        "guarded request fixture did not retain its selected pad");
+    const auto guarded_base = tooie::frontend::settings::get_string("tooie_input_profiles_v1", "");
+    const auto guarded_extras = tooie::frontend::settings::get_string("tooie_input_profile_extras_v1", "");
+    host::Request guarded{};
+    guarded.kind = host::RequestKind::ClearBinding;
+    guarded.action = Action::B;
+    guarded.device = Device::Button;
+    guarded.slot = 1;
+    guarded.controller = SDL_JoystickInstanceID(fixture.pads[1]);
+    require(host::enqueue(guarded), "stale controller Clear queue failed");
+    host::tick(false);
+    require(controller_codes() == expected && keyboard_codes() == original_keyboard &&
+        tooie::frontend::settings::get_string("tooie_input_profiles_v1", "") == guarded_base &&
+        tooie::frontend::settings::get_string("tooie_input_profile_extras_v1", "") == guarded_extras,
+        "stale controller request changed bindings or saved profile JSON");
+    const std::array<Binding, 3> guarded_cell{{get_binding(Action::B, Device::Button, 1),
+        get_binding(Action::B, Device::AxisPositive, 1), get_binding(Action::B, Device::AxisNegative, 1)}};
+    guarded.controller = SDL_JoystickInstanceID(fixture.pads[0]);
+    require(host::enqueue(guarded), "matched controller Clear queue failed");
+    host::tick(false);
+    for (const auto device : {Device::Button, Device::AxisPositive, Device::AxisNegative})
+        require(get_binding(Action::B, device, 1).code == -1, "matched controller Clear did not apply");
+    for (const auto binding : guarded_cell)
+        set_binding(Action::B, binding, 1);
+    const auto guarded_key = get_binding(Action::A, Device::Keyboard, 1);
+    set_binding(Action::A, {Device::Keyboard, SDL_SCANCODE_U}, 1);
+    guarded.controller.reset();
+    guarded.action = Action::A;
+    guarded.device = Device::Keyboard;
+    require(host::enqueue(guarded), "untagged keyboard Clear queue failed");
+    host::tick(false);
+    require(get_binding(Action::A, Device::Keyboard, 1).code == -1,
+        "untagged keyboard Clear was refused by controller guard");
+    set_binding(Action::A, guarded_key, 1);
+    require(controller_codes() == expected && keyboard_codes() == original_keyboard,
+        "guarded request fixture failed to restore its binding cells");
+    const auto original_type = selected_controller_type();
+    const auto labels = [](int value) {
+        host::Request request{}; request.kind = host::RequestKind::ControllerLabels; request.value = value;
+        require(host::enqueue(request), "controller labels request queue failed");
+        host::tick(false);
+    };
+    set_selected_controller_type(ControllerType::Other); host::tick(false);
+    const auto generic_a = binding_label(get_binding(Action::A, Device::Button, 0));
+    const auto keyboard_a = fixture.snapshot()->bindings[unsigned(Action::A)].keyboard;
+    require(fixture.snapshot()->bindings[unsigned(Action::A)].controller[0] == generic_a,
+        "Default controller labels changed the generic label");
+    const auto label_extras = tooie::frontend::settings::get_string("tooie_input_profile_extras_v1", "");
+    labels(int(ControllerType::DualSense));
+    require(selected_controller_type() == ControllerType::DualSense &&
+        fixture.snapshot()->bindings[unsigned(Action::A)].controller[0] == "Cross" &&
+        fixture.snapshot()->bindings[unsigned(Action::A)].keyboard == keyboard_a && controller_codes() == expected &&
+        fixture.snapshot()->bindings[unsigned(Action::Menu)].controller[0].empty() &&
+        get_modifier_binding().device == Device::Button && get_modifier_binding().code == SDL_CONTROLLER_BUTTON_LEFTSHOULDER &&
+        get_modifier_solo_behavior() == ModifierSoloBehavior::ModifierOnly && get_trigger_thresholds() == std::pair<int, int>{65, 35} &&
+        tooie::frontend::settings::get_string("tooie_input_profile_extras_v1", "") == label_extras,
+        "controller label choice changed bindings/extras or failed to publish the legend");
+    const char* prior_hint = SDL_GetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS);
+    const bool had_hint = prior_hint != nullptr;
+    const std::string saved_hint = prior_hint ? prior_hint : "";
+    const auto label_base = nlohmann::json::parse(tooie::frontend::settings::get_string("tooie_input_profiles_v1", ""));
+    const auto reload_labels = [&] {
+        host::shutdown();
+        host::initialize(fixture.window, fixture.profile, true);
+        host::publish_ready(true);
+        fixture.focus();
+        tooie::input::host().set_menu_open(true);
+        host::tick(false);
+    };
+    const auto nintendo_unchanged = [&] {
+        auto base = nlohmann::json::parse(tooie::frontend::settings::get_string("tooie_input_profiles_v1", ""));
+        base.at("devices").at(identity).at("type") = unsigned(ControllerType::DualSense);
+        return base == label_base && controller_codes() == expected && keyboard_codes() == original_keyboard &&
+            tooie::frontend::settings::get_string("tooie_input_profile_extras_v1", "") == label_extras;
+    };
+    // The mapper samples the hint at initialization; changing it alone must not
+    // make the render-thread formatter call SDL or change an existing snapshot.
+    SDL_ResetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS);
+    if (SDL_GetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS) == nullptr) {
+        reload_labels();
+        labels(int(ControllerType::NintendoPro));
+        require(fixture.snapshot()->bindings[unsigned(Action::A)].controller[0] == "A" && nintendo_unchanged(),
+            "Nintendo unset hint did not use default letter labels");
+    }
+    require(SDL_SetHintWithPriority(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS,
+        "1", SDL_HINT_OVERRIDE) == SDL_TRUE, "Nintendo label-mode fixture hint rejected");
+    reload_labels();
+    labels(int(ControllerType::NintendoPro));
+    constexpr std::array<const char*, 4> letter_labels{{"A", "B", "X", "Y"}};
+    for (unsigned code = 0; code < letter_labels.size(); ++code)
+        require(binding_label_for_type({Device::Button, int(code)}, ControllerType::NintendoPro) == letter_labels[code],
+            "Nintendo label mode did not retain the printed face letter");
+    require(selected_controller_type() == ControllerType::NintendoPro &&
+        fixture.snapshot()->controller_type == ControllerType::NintendoPro &&
+        fixture.snapshot()->bindings[unsigned(Action::A)].controller[0] == "A" && nintendo_unchanged(),
+        "Nintendo labels request changed profile contents or failed to publish A");
+    require(SDL_SetHintWithPriority(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS,
+        "0", SDL_HINT_OVERRIDE) == SDL_TRUE, "Nintendo position-mode fixture hint rejected");
+    require(binding_label_for_type({Device::Button, SDL_CONTROLLER_BUTTON_A}, ControllerType::NintendoPro) == "A",
+        "Nintendo formatter read a changed hint outside initialization");
+    reload_labels();
+    constexpr std::array<const char*, 4> positional_labels{{"B (south)", "A (east)", "Y (west)", "X (north)"}};
+    for (unsigned code = 0; code < positional_labels.size(); ++code)
+        require(binding_label_for_type({Device::Button, int(code)}, ControllerType::NintendoPro) == positional_labels[code],
+            "Nintendo position mode changed the existing face legend");
+    require(fixture.snapshot()->bindings[unsigned(Action::A)].controller[0] == "B (south)" && nintendo_unchanged(),
+        "Nintendo position-mode reload changed profile contents or lost its legend");
+    if (had_hint)
+        require(SDL_SetHintWithPriority(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS,
+            saved_hint.c_str(), SDL_HINT_OVERRIDE) == SDL_TRUE, "Nintendo previous hint restoration failed");
+    else
+        SDL_ResetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS);
+    const char* restored_hint = SDL_GetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS);
+    require(had_hint ? restored_hint && saved_hint == restored_hint : restored_hint == nullptr,
+        "Nintendo label fixture did not restore the previous hint value/unset state");
+    reload_labels();
+    labels(int(ControllerType::DualSense));
+    require(nintendo_unchanged(), "Nintendo label fixture did not restore its type or profile contents");
+    for (int value : {-1, 99, int(ControllerType::N64), int(ControllerType::GameCube)})
+        labels(value);
+    require(selected_controller_type() == ControllerType::DualSense, "unsupported controller labels request was accepted");
+    set_selected_controller_type(ControllerType::N64); host::tick(false);
+    require(selected_controller_type() == ControllerType::N64 && fixture.snapshot()->controller_type == ControllerType::N64 &&
+        fixture.snapshot()->bindings[unsigned(Action::A)].controller[0] == generic_a,
+        "unsupported saved controller type changed labels or was rewritten");
+    labels(int(ControllerType::DualSense));
+    require(tooie::frontend::settings::flush(), "named controller profile flush failed");
+    host::shutdown(); host::initialize(fixture.window, fixture.profile, true);
+    host::publish_ready(true); fixture.focus();
+    tooie::input::host().set_menu_open(true); host::tick(false);
+    require(selected_controller_type() == ControllerType::DualSense &&
+        fixture.snapshot()->controller_type == ControllerType::DualSense,
+        "controller label choice did not survive reload");
+    require(selected_device_id() == identity && preferred_device_id() == identity &&
+        active_controller_profile() == profile && controller_codes() == expected,
+        "controller identity, active profile or full base/modified bindings changed across reload");
+    require(get_modifier_binding().code == SDL_CONTROLLER_BUTTON_LEFTSHOULDER &&
+        get_modifier_solo_behavior() == ModifierSoloBehavior::ModifierOnly &&
+        get_trigger_thresholds() == std::pair<int, int>{65, 35},
+        "controller profile extras changed across reload");
+    require(get_binding(Action::Menu, Device::Keyboard, 0).code == -1 &&
+        get_binding(Action::Menu, Device::Keyboard, 1).code == -1,
+        "cleared keyboard Menu bindings returned across reload");
+    host::Request automatic{}; automatic.kind = host::RequestKind::Controller; automatic.value = -1;
+    require(host::enqueue(automatic), "Automatic controller request queue failed");
+    host::tick(false);
+    host::shutdown(); host::initialize(fixture.window, fixture.profile, true);
+    host::publish_ready(true); fixture.focus();
+    tooie::input::host().set_menu_open(true); host::tick(false);
+    const bool reloaded_auto = controller_auto_selection();
+    const auto reloaded_identity = selected_device_id();
+    const auto reloaded_profile = active_controller_profile();
+    const bool reloaded_codes_match = controller_codes() == expected;
+    const bool reloaded_snapshot_auto = fixture.snapshot()->controller_auto;
+    if (!(reloaded_auto && reloaded_identity == identity && reloaded_profile == profile &&
+            reloaded_codes_match && reloaded_snapshot_auto)) {
+        std::ostringstream diagnostic;
+        diagnostic << "Automatic selection changed controller profile or bindings across reload"
+            << "; auto=" << reloaded_auto << "; snapshot_auto=" << reloaded_snapshot_auto
+            << "; selected_id=" << reloaded_identity << "; expected_id=" << identity
+            << "; active_profile=" << reloaded_profile << "; expected_profile=" << profile
+            << "; controller_codes_match=" << reloaded_codes_match
+            << "; selected_instance=" << selected_controller_instance()
+            << "; SDL_NumJoysticks=" << SDL_NumJoysticks();
+        for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+            const char* name = SDL_JoystickNameForIndex(i);
+            diagnostic << "; device[" << i << "]={instance=" << SDL_JoystickGetDeviceInstanceID(i)
+                << ",vendor=" << SDL_JoystickGetDeviceVendor(i)
+                << ",product=" << SDL_JoystickGetDeviceProduct(i)
+                << ",controller=" << SDL_IsGameController(i)
+                << ",name=" << (name ? name : "unavailable") << '}';
+        }
+        throw std::runtime_error(diagnostic.str());
+    }
+    host::Request reselect{}; reselect.kind = host::RequestKind::Controller;
+    reselect.value = selected_controller_instance();
+    require(host::enqueue(reselect), "explicit controller restore queue failed");
+    host::tick(false);
+    require(!fixture.snapshot()->controller_auto, "explicit controller restore snapshot stayed Automatic");
+    const auto profile_count = controller_profiles().size();
+    const auto duplicate = [] {
+        host::Request request{}; request.kind = host::RequestKind::DuplicateProfile;
+        require(host::enqueue(request), "duplicate profile request queue failed");
+        host::tick(false);
+    };
+    const auto same_profile_contents = [&] {
+        const auto modifier = get_modifier_binding();
+        return controller_codes() == expected && modifier.device == Device::Button &&
+            modifier.code == SDL_CONTROLLER_BUTTON_LEFTSHOULDER &&
+            get_modifier_solo_behavior() == ModifierSoloBehavior::ModifierOnly &&
+            get_trigger_thresholds() == std::pair<int, int>{65, 35};
+    };
+    duplicate();
+    const auto first_copy = profile + " copy";
+    require(active_controller_profile() == first_copy && controller_profiles().size() == profile_count + 1,
+        "duplicate did not activate a new profile");
+    const auto stored_base = nlohmann::json::parse(tooie::frontend::settings::get_string("tooie_input_profiles_v1", ""));
+    const auto stored_extras = nlohmann::json::parse(tooie::frontend::settings::get_string("tooie_input_profile_extras_v1", ""));
+    const auto& base_profiles = stored_base.at("devices").at(identity).at("profiles");
+    const auto& extra_profiles = stored_extras.at("devices").at(identity);
+    require(base_profiles.contains(first_copy) && base_profiles.at(first_copy) == base_profiles.at(profile) &&
+        extra_profiles.contains(first_copy) && extra_profiles.at(first_copy) == extra_profiles.at(profile),
+        "duplicate was not serialized as an identical base/extras profile");
+    require(select_controller_profile(profile) && select_controller_profile(first_copy) && same_profile_contents(),
+        "duplicate did not save a full base/modified profile copy");
+    require(select_controller_profile(profile), "duplicate numbering source selection failed");
+    duplicate();
+    const auto second_copy = profile + " copy 2";
+    require(active_controller_profile() == second_copy && controller_profiles().size() == profile_count + 2,
+        "duplicate collision did not activate the numbered copy");
+    require(select_controller_profile(profile) && select_controller_profile(second_copy) && same_profile_contents(),
+        "numbered duplicate did not save matching profile contents");
+    require(select_controller_profile(profile), "duplicate guard source selection failed");
+    const auto saved_base = tooie::frontend::settings::get_string("tooie_input_profiles_v1", "");
+    const auto saved_extras = tooie::frontend::settings::get_string("tooie_input_profile_extras_v1", "");
+    const auto unchanged = [&] {
+        return selected_controller_type() == ControllerType::DualSense &&
+            active_controller_profile() == profile && controller_profiles().size() == profile_count + 2 &&
+            same_profile_contents() &&
+            tooie::frontend::settings::get_string("tooie_input_profiles_v1", "") == saved_base &&
+            tooie::frontend::settings::get_string("tooie_input_profile_extras_v1", "") == saved_extras;
+    };
+    host::request_close(); host::tick(false);
+    require(!host::menu_open(), "duplicate closed-menu guard setup failed");
+    duplicate();
+    host::Request direct_c_guard{};
+    direct_c_guard.kind = host::RequestKind::CreateDirectCProfile;
+    require(host::enqueue(direct_c_guard), "direct-C guarded request queue failed");
+    host::tick(false);
+    labels(int(ControllerType::Other));
+    require(unchanged(), "duplicate changed profiles with the menu closed");
+    tooie::input::host().set_menu_open(true); host::tick(false);
+    fixture.capture(Action::A);
+    require(capture_active(), "duplicate capture guard setup failed");
+    duplicate();
+    require(host::enqueue(direct_c_guard), "direct-C capture guard queue failed");
+    host::tick(false);
+    labels(int(ControllerType::Other));
+    require(capture_active() && unchanged(), "duplicate changed profiles during binding capture");
+    require(host::enqueue(cancel), "duplicate fixture capture cancellation queue failed");
+    host::tick(false); fixture.cooldown();
+    const auto utf8_profile = std::string(42, 'u') + "\xc3\xa9" + "xyz";
+    require(utf8_profile.size() == 47 && create_controller_profile(utf8_profile),
+        "UTF-8 duplicate source profile creation failed");
+    duplicate();
+    const auto utf8_copy = std::string(42, 'u') + " copy";
+    require(active_controller_profile() == utf8_copy && utf8_copy.size() <= 48 && same_profile_contents(),
+        "duplicate split a UTF-8 character or changed profile contents");
+    require(nlohmann::json::parse(tooie::frontend::settings::get_string("tooie_input_profiles_v1", "")).is_object() &&
+        nlohmann::json::parse(tooie::frontend::settings::get_string("tooie_input_profile_extras_v1", "")).is_object(),
+        "UTF-8 duplicate produced invalid profile JSON");
+    require(select_controller_profile(profile), "duplicate cleanup source selection failed");
+    for (const auto& copy : {first_copy, second_copy, utf8_copy, utf8_profile})
+        require(delete_controller_profile(copy), "duplicate fixture profile cleanup failed");
+    require(controller_profiles().size() == profile_count && active_controller_profile() == profile,
+        "duplicate fixture retained profiles or changed the original selection");
+    require(select_controller_profile(original_profile) && delete_controller_profile(profile),
+        "named controller fixture profile cleanup failed");
+    set_selected_controller_type(original_type);
+    for (unsigned slot = 0; slot < keyboard_menu.size(); ++slot)
+        set_binding(Action::Menu, keyboard_menu[slot], slot);
+}
+
+void check_direct_c_profile(Fixture& fixture) {
+    using namespace tooie::input;
+    namespace settings = tooie::frontend::settings;
+    const auto original_profile = active_controller_profile();
+    const auto original_type = selected_controller_type();
+    const auto original_key = get_binding(Action::A, Device::Keyboard, 1);
+    const auto original_aim = fixture.snapshot()->preferences.first_person_aim;
+    const auto identity = selected_device_id();
+    const auto preferred = preferred_device_id();
+    const auto friendly_name = selected_friendly_name();
+    const auto profiles_before = controller_profiles();
+    const std::string seed = "Direct C source fixture";
+    require(create_controller_profile(seed), "direct-C source profile creation failed");
+    set_binding(Action::A, {Device::Button, SDL_CONTROLLER_BUTTON_Y}, 1);
+    set_binding(Action::Menu, {Device::Button, SDL_CONTROLLER_BUTTON_X}, BindingLayer::Modified, 0);
+    set_binding(Action::SaveProgress, {Device::AxisNegative, SDL_CONTROLLER_AXIS_RIGHTX}, BindingLayer::Modified, 1);
+    set_binding(Action::A, {Device::Keyboard, SDL_SCANCODE_U}, 1);
+    set_modifier_binding({Device::AxisPositive, SDL_CONTROLLER_AXIS_TRIGGERLEFT});
+    set_modifier_solo_behavior(ModifierSoloBehavior::ModifierOnly);
+    require(set_trigger_thresholds(65, 35), "direct-C source thresholds failed");
+    // A saved display-label type is not a device-capability gate.
+    set_selected_controller_type(ControllerType::N64);
+    const auto aim = [](int value) {
+        host::Request request{};
+        request.kind = host::RequestKind::Preference;
+        request.preference = host::Preference::FirstPersonAim;
+        request.value = value;
+        require(host::enqueue(request), "direct-C aim setup queue failed");
+        host::tick(false);
+    };
+    aim(1);
+    const auto codes = [](bool keyboard) {
+        std::vector<int> result;
+        for (unsigned action = 0; action < unsigned(Action::Count); ++action)
+            for (auto layer : {BindingLayer::Base, BindingLayer::Modified})
+                for (auto device : {Device::Keyboard, Device::Button, Device::AxisPositive, Device::AxisNegative})
+                    if ((device == Device::Keyboard) == keyboard)
+                        for (unsigned slot = 0; slot < 2; ++slot)
+                            result.push_back(get_binding(Action(action), device, layer, slot).code);
+        return result;
+    };
+    const auto source_codes = codes(false);
+    const auto keyboard_codes = codes(true);
+    const auto config_without_profiles = [&] {
+        require(settings::flush(), "direct-C fixture config flush failed");
+        std::ifstream file(fixture.profile / "tooie_imgui.json");
+        require(bool(file), "direct-C fixture config open failed");
+        auto config = nlohmann::json::parse(file);
+        config.erase("tooie_input_profiles_v1");
+        config.erase("tooie_input_profile_extras_v1");
+        return config;
+    };
+    const auto config_before = config_without_profiles();
+    const auto saved_base = nlohmann::json::parse(settings::get_string("tooie_input_profiles_v1", ""));
+    const auto saved_extras = nlohmann::json::parse(settings::get_string("tooie_input_profile_extras_v1", ""));
+    const auto originals_unchanged = [&] {
+        auto base = nlohmann::json::parse(settings::get_string("tooie_input_profiles_v1", ""));
+        auto extras = nlohmann::json::parse(settings::get_string("tooie_input_profile_extras_v1", ""));
+        auto& device = base.at("devices").at(identity);
+        for (const auto& name : {"Direct C", "Direct C 2"}) {
+            device.at("profiles").erase(name);
+            extras.at("devices").at(identity).erase(name);
+        }
+        device.at("active") = seed;
+        return base == saved_base && extras == saved_extras;
+    };
+    const auto create = [] {
+        host::Request request{};
+        request.kind = host::RequestKind::CreateDirectCProfile;
+        require(host::enqueue(request), "direct-C request queue failed");
+        host::tick(false);
+    };
+    const auto direct_c_contents = [&] {
+        // Independent expected logical layout; all other controller cells must be empty.
+        const std::array<std::pair<Action, Binding>, 19> expected{{
+            {Action::A, {Device::Button, SDL_CONTROLLER_BUTTON_A}},
+            {Action::B, {Device::Button, SDL_CONTROLLER_BUTTON_X}},
+            {Action::Z, {Device::AxisPositive, SDL_CONTROLLER_AXIS_TRIGGERLEFT}},
+            {Action::Start, {Device::Button, SDL_CONTROLLER_BUTTON_START}},
+            {Action::L, {Device::Button, SDL_CONTROLLER_BUTTON_LEFTSTICK}},
+            {Action::R, {Device::Button, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER}},
+            {Action::CUp, {Device::Button, SDL_CONTROLLER_BUTTON_Y}},
+            {Action::CDown, {Device::Button, SDL_CONTROLLER_BUTTON_B}},
+            {Action::CLeft, {Device::AxisPositive, SDL_CONTROLLER_AXIS_TRIGGERRIGHT}},
+            {Action::CRight, {Device::Button, SDL_CONTROLLER_BUTTON_LEFTSHOULDER}},
+            {Action::DUp, {Device::Button, SDL_CONTROLLER_BUTTON_DPAD_UP}},
+            {Action::DDown, {Device::Button, SDL_CONTROLLER_BUTTON_DPAD_DOWN}},
+            {Action::DLeft, {Device::Button, SDL_CONTROLLER_BUTTON_DPAD_LEFT}},
+            {Action::DRight, {Device::Button, SDL_CONTROLLER_BUTTON_DPAD_RIGHT}},
+            {Action::MoveUp, {Device::AxisNegative, SDL_CONTROLLER_AXIS_LEFTY}},
+            {Action::MoveDown, {Device::AxisPositive, SDL_CONTROLLER_AXIS_LEFTY}},
+            {Action::MoveLeft, {Device::AxisNegative, SDL_CONTROLLER_AXIS_LEFTX}},
+            {Action::MoveRight, {Device::AxisPositive, SDL_CONTROLLER_AXIS_LEFTX}},
+            {Action::Menu, {Device::Button, SDL_CONTROLLER_BUTTON_BACK}},
+        }};
+        unsigned populated = 0;
+        for (unsigned action = 0; action < unsigned(Action::Count); ++action)
+            for (auto layer : {BindingLayer::Base, BindingLayer::Modified})
+                for (auto device : {Device::Button, Device::AxisPositive, Device::AxisNegative})
+                    for (unsigned slot = 0; slot < 2; ++slot) {
+                        int expected_code = -1;
+                        if (layer == BindingLayer::Base && slot == 0)
+                            for (const auto& [expected_action, binding] : expected)
+                                if (expected_action == Action(action) && binding.device == device)
+                                    expected_code = binding.code;
+                        const int actual = get_binding(Action(action), device, layer, slot).code;
+                        if (actual != expected_code) return false;
+                        if (actual >= 0) ++populated;
+                    }
+        const auto modifier = get_modifier_binding();
+        return populated == 19 && modifier.device == Device::Button && modifier.code == -1 &&
+            get_modifier_solo_behavior() == ModifierSoloBehavior::ModifierOnly &&
+            get_trigger_thresholds() == std::pair<int, int>{65, 35} && codes(true) == keyboard_codes &&
+            selected_device_id() == identity && preferred_device_id() == preferred &&
+            selected_friendly_name() == friendly_name && selected_controller_type() == ControllerType::N64 &&
+            fixture.snapshot()->preferences.first_person_aim == 1;
+    };
+    create();
+    require(active_controller_profile() == "Direct C" && direct_c_contents() && originals_unchanged() &&
+        config_without_profiles() == config_before, "direct-C creation changed its layout, source, keyboard or preferences");
+    require(select_controller_profile(seed) && codes(false) == source_codes && codes(true) == keyboard_codes &&
+        get_modifier_binding().device == Device::AxisPositive &&
+        get_modifier_binding().code == SDL_CONTROLLER_AXIS_TRIGGERLEFT &&
+        get_modifier_solo_behavior() == ModifierSoloBehavior::ModifierOnly &&
+        get_trigger_thresholds() == std::pair<int, int>{65, 35}, "direct-C creation changed the original profile");
+    create();
+    require(active_controller_profile() == "Direct C 2" && direct_c_contents() && originals_unchanged() &&
+        config_without_profiles() == config_before, "direct-C name collision overwrote a profile or preference");
+    require(select_controller_profile("Direct C") && settings::flush(), "direct-C reload setup failed");
+    host::shutdown();
+    host::initialize(fixture.window, fixture.profile, true);
+    host::publish_ready(true);
+    fixture.focus();
+    tooie::input::host().set_menu_open(true);
+    host::tick(false);
+    require(active_controller_profile() == "Direct C" && direct_c_contents() && originals_unchanged() &&
+        config_without_profiles() == config_before, "direct-C full settings/mapper reload lost contents or preferences");
+    require(select_controller_profile(original_profile), "direct-C cleanup original selection failed");
+    for (const auto& name : {std::string("Direct C"), std::string("Direct C 2"), seed})
+        require(delete_controller_profile(name), "direct-C fixture profile cleanup failed");
+    set_selected_controller_type(original_type);
+    set_binding(Action::A, original_key, 1);
+    aim(original_aim);
+    require(controller_profiles() == profiles_before && active_controller_profile() == original_profile,
+        "direct-C fixture cleanup retained profiles or changed selection");
+}
+
+void check_legacy_input_bounds(Fixture& fixture) {
+    using namespace tooie::input;
+    using Json = nlohmann::json;
+    const auto root = fixture.profile / "legacy-input-bounds";
+    require(std::filesystem::create_directory(root), "legacy fixture root creation failed");
+    const auto field = [](Json type, Json id) {
+        return Json{{"input_type", std::move(type)}, {"input_id", std::move(id)}};
+    };
+    const Json controls{
+        {"keyboard", {
+            {"A", {field(1, 0), field(1, SDL_NUM_SCANCODES - 1)}},
+            {"B", {field(1, SDL_NUM_SCANCODES), Json{{"input_id", 0}}}}
+        }},
+        {"controller", {
+            {"B", {field(3, 0), field(3, SDL_CONTROLLER_BUTTON_MAX - 1)}},
+            {"Z", {field(4, 1), field(4, -int(SDL_CONTROLLER_AXIS_MAX))}},
+            {"START", {field(4, std::numeric_limits<int>::min()), field(4, std::numeric_limits<int>::max())}},
+            {"L", {field(3, 4294967297ULL), field(4294967299ULL, 0)}},
+            {"R", {field(3, SDL_CONTROLLER_BUTTON_MAX), Json{{"input_type", 4}}}},
+            {"C_UP", {field(3.0, 0), field(3, "invalid")}},
+            {"C_DOWN", {field(4, SDL_CONTROLLER_AXIS_MAX + 1), field(4, -int(SDL_CONTROLLER_AXIS_MAX) - 1)}},
+            {"C_LEFT", {field(3, 1.0), field(3, 1.5)}},
+            {"C_RIGHT", {field(3, SDL_CONTROLLER_BUTTON_Y)}}
+        }}
+    };
+    const auto path = root / "controls.json";
+    const auto original = controls.dump(2) + "\n";
+    {
+        std::ofstream output(path, std::ios::binary);
+        output << original;
+        output.close();
+        require(bool(output), "legacy fixture controls write failed");
+    }
+    host::shutdown();
+    host::initialize(fixture.window, root, true);
+    require(select_controller(SDL_JoystickInstanceID(fixture.pads[0])), "legacy fixture controller selection failed");
+    require(get_binding(Action::A, Device::Keyboard, 0).code == 0 &&
+        get_binding(Action::A, Device::Keyboard, 1).code == SDL_NUM_SCANCODES - 1,
+        "valid legacy keyboard edge codes changed");
+    require(get_binding(Action::B, Device::Button, 0).code == 0 &&
+        get_binding(Action::B, Device::Button, 1).code == SDL_CONTROLLER_BUTTON_MAX - 1,
+        "valid legacy button edge codes changed");
+    require(get_binding(Action::Z, Device::AxisPositive, 0).code == 0 &&
+        get_binding(Action::Z, Device::AxisNegative, 1).code == SDL_CONTROLLER_AXIS_MAX - 1,
+        "valid legacy signed one-based axes changed");
+    for (unsigned slot = 0; slot < 2; ++slot) {
+        require(get_binding(Action::B, Device::Keyboard, slot).code == -1,
+            "invalid or missing legacy keyboard field imported");
+        for (const auto action : {Action::Start, Action::L, Action::R, Action::CUp, Action::CDown, Action::CLeft})
+            for (const auto device : {Device::Button, Device::AxisPositive, Device::AxisNegative})
+                require(get_binding(action, device, slot).code == -1,
+                    "invalid legacy type/id narrowed, overflowed or became a mapping");
+    }
+    require(get_binding(Action::CRight, Device::Button, 0).code == SDL_CONTROLLER_BUTTON_Y,
+        "malformed legacy slot aborted a later valid field");
+    host::shutdown();
+    {
+        std::ifstream input(path, std::ios::binary);
+        const std::string current{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+        require(current == original, "legacy controls reader changed original file bytes");
+    }
+    host::initialize(fixture.window, fixture.profile, true);
+    host::publish_ready(true);
+    fixture.focus();
+    tooie::input::host().set_menu_open(true);
+    host::tick(false);
+}
+
+void check_legacy_guid_bounds(Fixture& fixture) {
+    using namespace tooie::input;
+    using Json = nlohmann::json;
+    Uint16 vendor = 0, product = 0, version = 0, crc16 = 0;
+    SDL_GetJoystickGUIDInfo(SDL_JoystickGetGUID(fixture.pads[0]), &vendor, &product, &version, &crc16);
+    const auto* serial = SDL_JoystickGetSerial(fixture.pads[0]);
+    const std::string serial_text = serial ? serial : "";
+    require(version == 0, "virtual GUID fixture requires its default zero version");
+    const std::string preferred = "SERIAL_" + serial_text + "_VID_" + std::to_string(vendor) +
+        "_PID_" + std::to_string(product) + "_VERSION_" + std::to_string(version) + "_CRC16_" + std::to_string(crc16);
+    const Json valid{{"serial", serial_text}, {"vendor", vendor}, {"product", product}, {"version", version}, {"crc16", crc16}};
+    const auto assigned = [](const Json& guid, const char* profile) {
+        return Json{{"guid", guid}, {"profile", profile}};
+    };
+    Json omitted = valid; omitted.erase("version");
+    Json overflow = valid; overflow["vendor"] = 4294967296ULL + vendor;
+    Json floating = valid; floating["product"] = double(product);
+    Json wrong_type = valid; wrong_type["version"] = "invalid";
+    Json out_of_width = valid; out_of_width["crc16"] = 65536;
+    Json negative = valid; negative["vendor"] = -1;
+    Json bad_serial = valid; bad_serial["serial"] = 1;
+    const std::array<Json, 4> controllers{{
+        Json::array({assigned(valid, "assigned")}),
+        Json::array({assigned(omitted, "assigned")}),
+        Json::array({assigned(wrong_type, "rejected"), assigned(valid, "assigned"),
+            assigned(overflow, "rejected"), assigned(floating, "rejected"),
+            assigned(out_of_width, "rejected"), assigned(negative, "rejected")}),
+        Json::array({assigned(valid, "assigned"), assigned(bad_serial, "rejected")})
+    }};
+    host::shutdown();
+    for (unsigned index = 0; index < controllers.size(); ++index) {
+        const auto root = fixture.profile / ("legacy-guid-" + std::to_string(index));
+        require(std::filesystem::create_directory(root), "legacy GUID fixture root creation failed");
+        const auto profile = [](const char* key, int type, int code) {
+            const Json field{{"input_type", type}, {"input_id", code}};
+            return Json{{"key", key}, {"mappings", {{"A", Json::array({field})}}}};
+        };
+        const Json controls{{"profiles", Json::array({
+            profile("keyboard_sp", 1, SDL_SCANCODE_Y),
+            profile("controller_sp", 3, SDL_CONTROLLER_BUTTON_X),
+            profile("assigned", 3, SDL_CONTROLLER_BUTTON_Y),
+            profile("rejected", 3, SDL_CONTROLLER_BUTTON_B)
+        })}, {"controllers", controllers[index]}};
+        const auto original = controls.dump(2) + "\n";
+        {
+            std::ofstream output(root / "controls.json", std::ios::binary);
+            output << original;
+            output.close();
+            require(bool(output), "legacy GUID controls write failed");
+            std::ofstream settings(root / "tooie_imgui.json", std::ios::binary);
+            settings << Json{{"tooie_preferred_controller_guid", preferred}}.dump();
+            settings.close();
+            require(bool(settings), "legacy GUID preference write failed");
+        }
+        host::initialize(fixture.window, root, true);
+        require(select_controller(SDL_JoystickInstanceID(fixture.pads[0])), "legacy GUID fixture selection failed");
+        require(preferred_guid() == preferred && active_controller_profile() == "Default",
+            "legacy GUID fixture did not retain its exact preferred-device Default path");
+        require(get_binding(Action::A, Device::Keyboard, 0).code == SDL_SCANCODE_Y,
+            "legacy GUID rejection rolled back earlier valid mappings");
+        require(get_binding(Action::A, Device::Button, 0).code ==
+            (index == 3 ? SDL_CONTROLLER_BUTTON_X : SDL_CONTROLLER_BUTTON_Y),
+            "legacy GUID boundary aliased malformed identity, lost defaults or changed partial import");
+        host::shutdown();
+        std::ifstream input(root / "controls.json", std::ios::binary);
+        const std::string current{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+        require(current == original, "legacy GUID reader changed original file bytes");
+    }
+    host::initialize(fixture.window, fixture.profile, true);
+    host::publish_ready(true);
+    fixture.focus();
+    tooie::input::host().set_menu_open(true);
+    host::tick(false);
+}
+
+void check_profile_integer_bounds(Fixture& fixture) {
+    using namespace tooie::input;
+    namespace settings = tooie::frontend::settings;
+    const auto identity = selected_device_id();
+    const auto active = active_controller_profile();
+    const auto original_base = settings::get_string("tooie_input_profiles_v1", "");
+    const auto original_extras = settings::get_string("tooie_input_profile_extras_v1", "");
+    const auto original_type = selected_controller_type();
+    const auto original_modifier = get_modifier_binding();
+    const auto original_solo = get_modifier_solo_behavior();
+    const auto original_thresholds = get_trigger_thresholds();
+    const auto controller_codes = [] {
+        std::vector<int> codes;
+        for (unsigned a = 0; a < unsigned(Action::Count); ++a)
+            for (const auto layer : {BindingLayer::Base, BindingLayer::Modified})
+                for (const auto device : {Device::Button, Device::AxisPositive, Device::AxisNegative})
+                    for (unsigned slot = 0; slot < 2; ++slot)
+                        codes.push_back(get_binding(Action(a), device, layer, slot).code);
+        return codes;
+    };
+    const auto expected = controller_codes();
+    auto base = nlohmann::json::parse(original_base);
+    auto extras = nlohmann::json::parse(original_extras);
+    auto& record = base.at("devices").at(identity);
+    auto& profiles = record.at("profiles");
+    const auto valid_rows = profiles.at(active);
+    profiles["Wrap unsigned"] = valid_rows;
+    profiles["Wrap unsigned"][0][0] = 4294967299ULL;
+    profiles["Wrap signed"] = valid_rows;
+    profiles["Wrap signed"][0][0] = -4294967295LL;
+    record["type"] = 4294967297ULL;
+    auto& fields = extras.at("devices").at(identity).at(active);
+    fields["modifier"] = {4294967298ULL, 4294967300ULL};
+    fields["solo"] = 4294967297ULL;
+    const auto reload = [&] {
+        host::shutdown(); host::initialize(fixture.window, fixture.profile, true);
+        host::publish_ready(true); fixture.focus();
+        tooie::input::host().set_menu_open(true); host::tick(false);
+    };
+    // The actual settings flush/reinitialize and mapper loader own this check.
+    // These values fit JSON's integer storage but must never narrow into codes/enums.
+    settings::set_string("tooie_input_profiles_v1", base.dump());
+    settings::set_string("tooie_input_profile_extras_v1", extras.dump());
+    reload();
+    require(selected_device_id() == identity && active_controller_profile() == active,
+        "invalid stored integer changed the selected device or valid active profile");
+    for (const auto& name : controller_profiles())
+        require(name != "Wrap unsigned" && name != "Wrap signed",
+            "out-of-range stored code wrapped into a valid controller profile");
+    require(controller_codes() == expected, "invalid metadata changed valid base/modified bindings");
+    const auto modifier = get_modifier_binding();
+    require(modifier.device == Device::Button && modifier.code == -1,
+        "out-of-range stored modifier narrowed into a valid binding");
+    require(get_modifier_solo_behavior() == ModifierSoloBehavior::PassThrough,
+        "out-of-range stored solo narrowed into a valid policy");
+    require(selected_controller_type() == ControllerType::Other,
+        "out-of-range stored type narrowed into a valid controller family");
+    settings::set_string("tooie_input_profiles_v1", original_base);
+    settings::set_string("tooie_input_profile_extras_v1", original_extras);
+    reload();
+    const auto restored_modifier = get_modifier_binding();
+    require(selected_device_id() == identity && active_controller_profile() == active &&
+        controller_codes() == expected && selected_controller_type() == original_type &&
+        restored_modifier.device == original_modifier.device && restored_modifier.code == original_modifier.code &&
+        get_modifier_solo_behavior() == original_solo && get_trigger_thresholds() == original_thresholds &&
+        settings::get_string("tooie_input_profiles_v1", "") == original_base &&
+        settings::get_string("tooie_input_profile_extras_v1", "") == original_extras,
+        "integer-boundary fixture did not restore its valid profile settings and contents");
+}
+
+// Stored controller data this build cannot read survives load, record_for
+// defaults, connect, startup legacy import and unrelated edits; a store that
+// cannot be read at all is never written and the menu says so.
+void check_profile_preservation(Fixture& fixture) {
+    using namespace tooie::input;
+    using Json = nlohmann::json;
+    namespace settings = tooie::frontend::settings;
+    const auto identity = selected_device_id();
+    const auto original = active_controller_profile();
+    std::string other_identity;
+    for (const auto& pad : controllers())
+        if (pad.instance == SDL_JoystickInstanceID(fixture.pads[1])) other_identity = pad.stable_id;
+    require(!other_identity.empty() && other_identity != identity, "preservation fixture lacks a second identity");
+    const auto original_base = settings::get_string("tooie_input_profiles_v1", "");
+    const auto original_extras = settings::get_string("tooie_input_profile_extras_v1", "");
+    const auto reload = [&] {
+        host::shutdown(); host::initialize(fixture.window, fixture.profile, true);
+        host::publish_ready(true); fixture.focus();
+        tooie::input::host().set_menu_open(true); host::tick(false);
+    };
+    const auto unsaved_notice = [&] {
+        return fixture.snapshot()->notice.find("controller changes this session will not be saved") != std::string::npos;
+    };
+    require(create_controller_profile("Keep"), "preservation Keep profile creation failed");
+    set_binding(Action::A, {Device::Button, SDL_CONTROLLER_BUTTON_Y}, 0);
+    require(select_controller_profile(original), "preservation original profile selection failed");
+    set_modifier_binding({Device::Button, SDL_CONTROLLER_BUTTON_LEFTSHOULDER});
+    set_binding(Action::Menu, {Device::Button, SDL_CONTROLLER_BUTTON_Y}, BindingLayer::Modified, 0);
+
+    auto base = Json::parse(settings::get_string("tooie_input_profiles_v1", ""));
+    auto extras = Json::parse(settings::get_string("tooie_input_profile_extras_v1", ""));
+    auto& devices = base.at("devices");
+    auto& extra_devices = extras.at("devices");
+    const auto keep = devices.at(identity).at("profiles").at("Keep");
+    auto broken = keep;
+    broken.erase(broken.size() - 1); // One row short: undecodable by this build.
+    devices.at(identity).at("profiles")["Broken"] = broken;
+    extra_devices.at(identity)["Broken"] = Json{{"future", "kept"}};
+    auto& fields = extra_devices.at(identity).at(original);
+    fields["trigger_press"] = "x";
+    fields["future"] = Json::array({1, 2});
+    // A readable profile with an opaque (null) extras entry, and the supported legacy
+    // object form whose embedded modified layer is unreadable, with no overriding extras.
+    extra_devices.at(identity)["Keep"] = nullptr;
+    Json legacy = Json::object();
+    legacy["base"] = keep;
+    legacy["modified"] = broken;
+    devices.at(identity).at("profiles")["Legacy"] = legacy;
+    // Valid embedded modified rows (held Menu on Y) whose extras entry is opaque: the
+    // legacy form is their only persisted copy.
+    Json legacy_valid = Json::object();
+    legacy_valid["base"] = keep;
+    legacy_valid["modified"] = fields.at("modified");
+    devices.at(identity).at("profiles")["Legacy valid"] = legacy_valid;
+    extra_devices.at(identity)["Legacy valid"] = Json::array({"opaque"});
+    // Wrong-typed metadata once discarded every device; this one's only profile is an unreadable Default.
+    devices[other_identity] = Json::object();
+    devices[other_identity]["friendly_name"] = 7;
+    devices[other_identity]["active"] = 9;
+    devices[other_identity]["profiles"]["Default"] = broken;
+    extra_devices[other_identity] = Json::object();
+    extra_devices[other_identity]["Default"] = Json{{"solo", 1}};
+    devices["unreadable-device"] = 5;
+    extra_devices["unreadable-device"] = Json::object();
+    extra_devices["unreadable-device"]["Default"] = Json{{"solo", 1}};
+    settings::set_string("tooie_input_profiles_v1", base.dump());
+    settings::set_string("tooie_input_profile_extras_v1", extras.dump());
+    reload();
+    const auto profiles = controller_profiles();
+    require(selected_device_id() == identity && active_controller_profile() == original &&
+        std::find(profiles.begin(), profiles.end(), "Keep") != profiles.end() &&
+        std::find(profiles.begin(), profiles.end(), "Legacy") != profiles.end() &&
+        std::find(profiles.begin(), profiles.end(), "Broken") == profiles.end(),
+        "malformed stored data lost readable profiles or listed an unreadable one");
+    require(get_modifier_binding().code == SDL_CONTROLLER_BUTTON_LEFTSHOULDER &&
+        get_binding(Action::Menu, Device::Button, BindingLayer::Modified, 0).code == SDL_CONTROLLER_BUTTON_Y &&
+        get_trigger_thresholds().first == 50,
+        "an unreadable trigger field reset the modifier or held-Menu binding");
+    require(!create_controller_profile("Broken") && active_controller_profile() == original && !unsaved_notice(),
+        "an unreadable profile name was reused or a readable store reported unsaved edits");
+    set_binding(Action::B, {Device::Button, SDL_CONTROLLER_BUTTON_X}, 1);
+    const auto saved = Json::parse(settings::get_string("tooie_input_profiles_v1", "")).at("devices");
+    const auto saved_extras = Json::parse(settings::get_string("tooie_input_profile_extras_v1", "")).at("devices");
+    require(saved.at(identity).at("profiles").at("Keep") == keep &&
+        saved.at(identity).at("profiles").at("Legacy") == legacy &&
+        saved.at(identity).at("profiles").at("Legacy valid") == legacy_valid &&
+        saved.at(identity).at("profiles").at("Broken") == broken &&
+        saved.at(other_identity).at("profiles").at("Default") == broken &&
+        saved.at(other_identity).at("profiles").contains("Default 2") &&
+        saved.at("unreadable-device") == 5,
+        "an unrelated edit deleted or replaced readable or unreadable stored profiles");
+    require(saved_extras.at(identity).at(original).at("trigger_press") == "x" &&
+        saved_extras.at(identity).at(original).at("future") == Json::array({1, 2}) &&
+        saved_extras.at(identity).at("Broken") == Json{{"future", "kept"}} &&
+        saved_extras.at(identity).at("Keep").is_null() &&
+        saved_extras.at(identity).at("Legacy valid") == Json::array({"opaque"}) &&
+        saved_extras.at(other_identity).at("Default") == Json{{"solo", 1}} &&
+        saved_extras.at("unreadable-device") == extra_devices.at("unreadable-device"),
+        "an unrelated edit overwrote unread stored extras");
+    require(set_trigger_thresholds(60, 40), "preservation trigger edit failed");
+    const auto owned = Json::parse(settings::get_string("tooie_input_profile_extras_v1", ""))
+        .at("devices").at(identity).at(original);
+    require(owned.at("trigger_press") == 60 && owned.at("trigger_release") == 40 &&
+        owned.at("future") == Json::array({1, 2}),
+        "an explicit trigger edit did not take ownership of only its unread fields");
+    const auto stored_devices = [] {
+        return Json::parse(settings::get_string("tooie_input_profiles_v1", "")).at("devices");
+    };
+    const auto stored_extra_devices = [] {
+        return Json::parse(settings::get_string("tooie_input_profile_extras_v1", "")).at("devices");
+    };
+    // After those saves, a reload still finds the embedded modified mapping beside opaque extras.
+    reload();
+    require(select_controller_profile("Legacy valid") &&
+        get_binding(Action::Menu, Device::Button, BindingLayer::Modified, 0).code == SDL_CONTROLLER_BUTTON_Y &&
+        stored_devices().at(identity).at("profiles").at("Legacy valid") == legacy_valid &&
+        stored_extra_devices().at(identity).at("Legacy valid") == Json::array({"opaque"}),
+        "a valid embedded modified mapping beside opaque extras was lost across save and reload");
+    require(select_controller_profile(original), "preservation original profile reselection failed");
+    // A base-layer edit keeps the legacy form; a modified-layer edit owns and replaces it.
+    require(select_controller_profile("Legacy"), "preservation legacy profile selection failed");
+    set_binding(Action::A, {Device::Button, SDL_CONTROLLER_BUTTON_X}, 0);
+    const auto edited_legacy = stored_devices().at(identity).at("profiles").at("Legacy");
+    require(edited_legacy.is_object() && edited_legacy.at("modified") == broken &&
+        edited_legacy.at("base").at(0).at(0) == int(SDL_CONTROLLER_BUTTON_X),
+        "a base edit discarded an unreadable legacy modified layer");
+    set_binding(Action::Menu, {Device::Button, SDL_CONTROLLER_BUTTON_X}, BindingLayer::Modified, 0);
+    const auto owned_legacy = stored_devices().at(identity).at("profiles").at("Legacy");
+    require(owned_legacy.is_array() && owned_legacy.at(0).at(0) == int(SDL_CONTROLLER_BUTTON_X) &&
+        stored_extra_devices().at(identity).at("Legacy").at("modified")
+            .at(size_t(Action::Menu)).at(0) == int(SDL_CONTROLLER_BUTTON_X),
+        "a modified-layer edit did not take ownership of the legacy form");
+    // An extras edit replaces an opaque entry whole instead of merging into it.
+    require(select_controller_profile("Keep"), "preservation opaque-extras profile selection failed");
+    set_modifier_binding({Device::Button, SDL_CONTROLLER_BUTTON_B});
+    const auto owned_keep = stored_extra_devices().at(identity).at("Keep");
+    require(owned_keep.is_object() &&
+        owned_keep.at("modifier") == Json::array({unsigned(Device::Button), int(SDL_CONTROLLER_BUTTON_B)}),
+        "an explicit extras edit did not replace an opaque extras entry");
+    require(select_controller_profile(original), "preservation original profile reselection failed");
+
+    // A readable device whose extras entry is opaque keeps usable mappings, edits for this
+    // session only, and its stored entries survive saves for other devices.
+    const auto original_device = Json::parse(original_base).at("devices").at(identity);
+    auto opaque_device_extras = Json::parse(original_extras);
+    opaque_device_extras.at("devices")[identity] = Json::array({"opaque"});
+    settings::set_string("tooie_input_profiles_v1", original_base);
+    settings::set_string("tooie_input_profile_extras_v1", opaque_device_extras.dump());
+    reload();
+    require(selected_device_id() == identity && active_controller_profile() == original &&
+        get_binding(Action::A, Device::Button, 0).code ==
+            original_device.at("profiles").at(original).at(0).at(0).get<int>() && unsaved_notice(),
+        "opaque device extras hid readable mappings or the session-only notice");
+    set_binding(Action::B, {Device::Button, SDL_CONTROLLER_BUTTON_Y}, 1);
+    require(stored_devices().at(identity) == original_device &&
+        stored_extra_devices().at(identity) == Json::array({"opaque"}),
+        "an edit overwrote a device entry with opaque extras");
+
+    // Either unreadable string, including extras beside an empty base, is never written.
+    const std::array<std::pair<std::string, std::string>, 3> unreadable_stores{{
+        {"not json", original_extras}, {original_base, R"({"devices": 5})"}, {"", "not json"}}};
+    for (const auto& [base_text, extras_text] : unreadable_stores) {
+        settings::set_string("tooie_input_profiles_v1", base_text);
+        settings::set_string("tooie_input_profile_extras_v1", extras_text);
+        reload();
+        require(unsaved_notice(), "unsaved controller profile edits had no visible notice");
+        set_binding(Action::B, {Device::Button, SDL_CONTROLLER_BUTTON_Y}, 1);
+        require(settings::get_string("tooie_input_profiles_v1", "") == base_text &&
+            settings::get_string("tooie_input_profile_extras_v1", "") == extras_text,
+            "a controller edit overwrote an unreadable profile store");
+    }
+
+    // Startup legacy import saves for each newly seen pad before any user action.
+    Json stored = Json::object(), stored_extras = Json::object();
+    stored["devices"]["unreadable-device"] = 5;
+    stored["devices"]["stored-only"]["profiles"]["Old"] = broken;
+    stored_extras["devices"]["stored-only"]["Old"] = Json{{"solo", 1}};
+    stored["devices"]["opaque-device"]["profiles"]["Valid"] = keep;
+    stored_extras["devices"]["opaque-device"] = "opaque";
+    auto& opaque_profiles = stored["devices"]["opaque-profiles"]["profiles"];
+    opaque_profiles["Null"] = keep;
+    opaque_profiles["Array"] = keep;
+    opaque_profiles["Legacy"] = legacy;
+    stored_extras["devices"]["opaque-profiles"]["Null"] = nullptr;
+    stored_extras["devices"]["opaque-profiles"]["Array"] = Json::array({1, "x"});
+    const Json legacy_field{{"input_type", 3}, {"input_id", int(SDL_CONTROLLER_BUTTON_X)}};
+    Json legacy_profile = Json::object();
+    legacy_profile["key"] = "controller_sp";
+    legacy_profile["mappings"]["A"] = Json::array({legacy_field});
+    const Json controls{{"profiles", Json::array({legacy_profile})}};
+    const std::array<std::array<std::string, 3>, 3> imports{{
+        {"preservation-import", stored.dump(), stored_extras.dump()},
+        {"preservation-import-unreadable", "not json", stored_extras.dump()},
+        {"preservation-import-empty-base", "", "not json"}}};
+    host::shutdown();
+    for (const auto& [directory, base_text, extras_text] : imports) {
+        const bool readable = base_text == stored.dump();
+        const auto root = fixture.profile / directory;
+        require(std::filesystem::create_directory(root), "preservation import root creation failed");
+        Json config = Json::object();
+        config["tooie_input_profiles_v1"] = base_text;
+        config["tooie_input_profile_extras_v1"] = extras_text;
+        {
+            std::ofstream legacy(root / "controls.json", std::ios::binary);
+            legacy << controls.dump();
+            std::ofstream file(root / "tooie_imgui.json", std::ios::binary);
+            file << config.dump();
+            legacy.close(); file.close();
+            require(legacy && file, "preservation import fixture write failed");
+        }
+        host::initialize(fixture.window, root, true);
+        const auto imported = settings::get_string("tooie_input_profiles_v1", "");
+        const auto imported_extras = settings::get_string("tooie_input_profile_extras_v1", "");
+        if (!readable) {
+            require(imported == base_text && imported_extras == extras_text,
+                "startup legacy import overwrote an unreadable profile store");
+        } else {
+            const auto devices_after = Json::parse(imported).at("devices");
+            const auto extras_after = Json::parse(imported_extras).at("devices");
+            require(devices_after.contains(identity) && devices_after.at("unreadable-device") == 5 &&
+                devices_after.at("stored-only").at("profiles").at("Old") == broken &&
+                extras_after.at("stored-only").at("Old") == Json{{"solo", 1}},
+                "startup legacy import did not run or deleted unreadable stored devices/profiles");
+            require(devices_after.at("opaque-device") == stored["devices"]["opaque-device"] &&
+                extras_after.at("opaque-device") == "opaque" &&
+                devices_after.at("opaque-profiles").at("profiles") == opaque_profiles &&
+                extras_after.at("opaque-profiles").at("Null").is_null() &&
+                extras_after.at("opaque-profiles").at("Array") == Json::array({1, "x"}),
+                "startup legacy import overwrote opaque extras or a legacy modified layer");
+        }
+        host::shutdown();
+    }
+    host::initialize(fixture.window, fixture.profile, true);
+    settings::set_string("tooie_input_profiles_v1", original_base);
+    settings::set_string("tooie_input_profile_extras_v1", original_extras);
+    reload();
+    require(selected_device_id() == identity && active_controller_profile() == original &&
+        settings::get_string("tooie_input_profiles_v1", "") == original_base &&
+        settings::get_string("tooie_input_profile_extras_v1", "") == original_extras,
+        "preservation fixture did not restore its profile settings");
+}
+
+// The host refuses a profile switch while a capture is pending, as BK's modal
+// binding scan does; the capture lands in the profile that started it.
+void check_capture_profile_gate(Fixture& fixture) {
+    using namespace tooie::input;
+    const auto original = active_controller_profile();
+    const std::string other = "Capture gate fixture";
+    const std::array<Binding, 3> prior{{get_binding(Action::A, Device::Button, 0),
+        get_binding(Action::A, Device::AxisPositive, 0), get_binding(Action::A, Device::AxisNegative, 0)}};
+    require(prior[0].code != SDL_CONTROLLER_BUTTON_Y && create_controller_profile(other) &&
+        select_controller_profile(original), "capture gate profile setup failed");
+    host::Request profile{};
+    profile.kind = host::RequestKind::Profile;
+    profile.controller = SDL_JoystickInstanceID(fixture.pads[0]);
+    profile.name = other;
+    fixture.capture(Action::A);
+    require(host::enqueue(profile), "capture gate profile request queue failed");
+    host::tick(false);
+    require(capture_active() && active_controller_profile() == original,
+        "profile switch retargeted a pending binding capture");
+    fixture.button(0, SDL_CONTROLLER_BUTTON_Y, true);
+    host::tick(false);
+    require(!capture_active() && get_binding(Action::A, Device::Button, 0).code == SDL_CONTROLLER_BUTTON_Y,
+        "capture did not finish in its original profile");
+    fixture.button(0, SDL_CONTROLLER_BUTTON_Y, false);
+    fixture.cooldown();
+    require(host::enqueue(profile), "capture gate later profile request queue failed");
+    host::tick(false);
+    require(active_controller_profile() == other && get_binding(Action::A, Device::Button, 0).code == prior[0].code,
+        "profile switch was refused after capture or the capture reached the other profile");
+    require(select_controller_profile(original) && delete_controller_profile(other),
+        "capture gate profile cleanup failed");
+    for (const auto binding : prior) set_binding(Action::A, binding, 0);
+}
+
+// Generic settings numbers are range-checked before narrowing; the JSON
+// library itself static_casts. Supported values keep their meaning.
+void check_settings_numeric_bounds(Fixture& fixture) {
+    const auto root = fixture.profile / "settings-numeric-bounds";
+    require(std::filesystem::create_directory(root), "numeric settings fixture root creation failed");
+    {
+        std::ofstream file(root / "tooie_imgui.json", std::ios::binary);
+        file << R"({"baseline_resolution": 4294967298, "tooie_game_widescreen": -4294967295,)"
+            R"( "tooie_music_volume_percent": 1e300, "tooie_controller_auto": 4294967296,)"
+            R"( "baseline_texture_filter": 1, "tooie_cutscene_aspect": 1.0, "rumble_strength": 37.5})";
+        file.close();
+        require(bool(file), "numeric settings fixture write failed");
+    }
+    host::shutdown();
+    host::initialize(fixture.window, root, true);
+    const auto& startup = host::latched_preferences();
+    require(host::requested_resolution() == 1 && startup.wide == -1,
+        "an out-of-range stored integer wrapped into a valid preference");
+    require(host::requested_music_volume() == 100, "an out-of-range stored float did not use the default");
+    require(tooie::frontend::settings::get_bool("tooie_controller_auto", false),
+        "a large nonzero stored integer read as false");
+    require(host::requested_texture_filter() == 1 && host::requested_cutscene_aspect() == 1 &&
+        startup.rumble_strength == 37, "supported stored numbers changed meaning");
+    host::shutdown();
+    host::initialize(fixture.window, fixture.profile, true);
+    host::publish_ready(true);
+    fixture.focus();
+    tooie::input::host().set_menu_open(true);
+    host::tick(false);
+}
+
+void check_menu_chord(Fixture& fixture) {
+    using namespace tooie::input;
+    const auto original_profile = active_controller_profile();
+    const auto keyboard_menu = get_binding(Action::Menu, Device::Keyboard, 0);
+    const std::string profile = "Menu chord fixture";
+    require(create_controller_profile(profile), "chord fixture profile creation failed");
+    set_binding(Action::Start, {Device::Button, SDL_CONTROLLER_BUTTON_START}, 0);
+    set_binding(Action::Menu, {Device::Button, SDL_CONTROLLER_BUTTON_BACK}, 0);
+    set_binding(Action::Menu, {Device::Button, SDL_CONTROLLER_BUTTON_Y}, BindingLayer::Modified, 1);
+    set_binding(Action::CLeft, {Device::Button, SDL_CONTROLLER_BUTTON_X}, BindingLayer::Modified, 1);
+    set_modifier_solo_behavior(ModifierSoloBehavior::ModifierOnly);
+    tooie::input::host().set_menu_open(true); host::tick(false);
+    const auto apply = [](host::Request request) {
+        require(host::enqueue(request), "chord request queue failed");
+        host::tick(false);
+    };
+    host::Request modifier{}; modifier.kind = host::RequestKind::Modifier;
+    modifier.device = Device::AxisPositive; modifier.value = SDL_CONTROLLER_AXIS_TRIGGERLEFT;
+    apply(modifier);
+    require(get_modifier_binding().device == Device::AxisPositive &&
+        get_modifier_binding().code == SDL_CONTROLLER_AXIS_TRIGGERLEFT,
+        "positive trigger modifier request was not applied");
+    modifier.device = Device::Button; modifier.value = -1; apply(modifier);
+    require(get_modifier_binding().code == -1 &&
+        get_binding(Action::Menu, Device::Button, BindingLayer::Modified, 1).code == SDL_CONTROLLER_BUTTON_Y,
+        "None modifier request was not applied or cleared saved modified bindings");
+    modifier.value = SDL_CONTROLLER_BUTTON_LEFTSHOULDER; apply(modifier);
+    require(fixture.snapshot()->modifier.code == SDL_CONTROLLER_BUTTON_LEFTSHOULDER &&
+        fixture.snapshot()->modifier_solo == ModifierSoloBehavior::ModifierOnly,
+        "modifier snapshot lost binding or changed saved solo policy");
+
+    host::Request cell{}; cell.kind = host::RequestKind::Capture;
+    cell.action = Action::Menu; cell.device = Device::Button; cell.layer = BindingLayer::Modified;
+    apply(cell);
+    require(capture_active(), "modified Menu capture did not arm");
+    modifier.value = SDL_CONTROLLER_BUTTON_RIGHTSHOULDER; apply(modifier);
+    require(get_modifier_binding().code == SDL_CONTROLLER_BUTTON_LEFTSHOULDER,
+        "modifier changed during binding capture");
+    fixture.button(0, SDL_CONTROLLER_BUTTON_START, true); host::tick(false);
+    require(!capture_active() && get_binding(Action::Menu, Device::Button, BindingLayer::Modified, 0).code ==
+        SDL_CONTROLLER_BUTTON_START && get_binding(Action::Start, Device::Button, 0).code == SDL_CONTROLLER_BUTTON_START,
+        "modified Menu capture changed base Start or missed the second control");
+    fixture.button(0, SDL_CONTROLLER_BUTTON_START, false); fixture.cooldown();
+
+    set_binding(Action::Menu, {Device::Keyboard, SDL_SCANCODE_F9}, 0);
+    const auto saved = tooie::frontend::settings::get_string("tooie_input_profiles_v1", "");
+    const auto saved_extras = tooie::frontend::settings::get_string("tooie_input_profile_extras_v1", "");
+    for (const auto invalid : {Binding{Device::Keyboard, -1}, Binding{Device::AxisNegative, SDL_CONTROLLER_AXIS_TRIGGERLEFT},
+            Binding{Device::AxisPositive, SDL_CONTROLLER_AXIS_LEFTX}, Binding{Device::Button, -5},
+            Binding{Device::Button, SDL_CONTROLLER_BUTTON_MAX}}) {
+        modifier.device = invalid.device; modifier.value = invalid.code; apply(modifier);
+    }
+    require(get_modifier_binding().device == Device::Button &&
+        get_modifier_binding().code == SDL_CONTROLLER_BUTTON_LEFTSHOULDER,
+        "invalid modifier request replaced the profile modifier");
+    for (const auto kind : {host::RequestKind::Capture, host::RequestKind::ClearBinding}) {
+        cell.kind = kind; cell.layer = BindingLayer(255); apply(cell);
+        cell.layer = BindingLayer::Modified; cell.device = Device::Keyboard; apply(cell);
+        cell.device = Device::Button; cell.action = Action::CLeft; cell.slot = 1; apply(cell);
+        cell.action = Action::Menu; cell.slot = 0;
+    }
+    require(get_binding(Action::Menu, Device::Keyboard, 0).code == SDL_SCANCODE_F9,
+        "modified keyboard Clear reached the base keyboard cell");
+    require(!capture_active() && tooie::frontend::settings::get_string("tooie_input_profiles_v1", "") == saved &&
+        tooie::frontend::settings::get_string("tooie_input_profile_extras_v1", "") == saved_extras,
+        "invalid modifier/layer/action request changed profile or started capture");
+
+    host::request_close(); host::tick(true); host::tick(true);
+    modifier.device = Device::Button; modifier.value = SDL_CONTROLLER_BUTTON_RIGHTSHOULDER; apply(modifier);
+    require(get_modifier_binding().code == SDL_CONTROLLER_BUTTON_LEFTSHOULDER,
+        "modifier changed with the menu closed");
+    fixture.button(0, SDL_CONTROLLER_BUTTON_LEFTSHOULDER, true); host::tick(true);
+    fixture.button(0, SDL_CONTROLLER_BUTTON_START, true);
+    host::tick(true);
+    require(host::menu_open(), "modifier-first chord did not open Menu");
+    host::tick(true);
+    require(host::menu_open(), "held Menu chord toggled twice");
+    fixture.button(0, SDL_CONTROLLER_BUTTON_START, false);
+    fixture.button(0, SDL_CONTROLLER_BUTTON_LEFTSHOULDER, false); host::tick(false);
+    host::request_close(); host::tick(true); host::tick(true);
+    fixture.button(0, SDL_CONTROLLER_BUTTON_START, true);
+    const auto alone = host::tick(true);
+    require(!host::menu_open() && (alone.physical.buttons & 0x1000) != 0,
+        "Start alone opened Menu or lost its base action");
+    fixture.button(0, SDL_CONTROLLER_BUTTON_START, false); host::tick(true);
+
+    tooie::input::host().set_menu_open(true); host::tick(false);
+    set_binding(Action::Menu, {Device::AxisPositive, SDL_CONTROLLER_AXIS_RIGHTX}, BindingLayer::Modified, 0);
+    set_binding(Action::Menu, {Device::AxisNegative, SDL_CONTROLLER_AXIS_RIGHTY}, BindingLayer::Modified, 0);
+    cell.kind = host::RequestKind::ClearBinding; apply(cell);
+    for (const auto device : {Device::Button, Device::AxisPositive, Device::AxisNegative})
+        require(get_binding(Action::Menu, device, BindingLayer::Modified, 0).code == -1,
+            "modified Menu Clear missed a controller kind");
+    require(get_binding(Action::Menu, Device::Button, 0).code == SDL_CONTROLLER_BUTTON_BACK &&
+        get_binding(Action::Start, Device::Button, 0).code == SDL_CONTROLLER_BUTTON_START &&
+        get_binding(Action::Menu, Device::Button, BindingLayer::Modified, 1).code == SDL_CONTROLLER_BUTTON_Y &&
+        get_binding(Action::CLeft, Device::Button, BindingLayer::Modified, 1).code == SDL_CONTROLLER_BUTTON_X,
+        "modified Menu Clear changed base bindings, another slot or another action");
+    require(select_controller_profile(original_profile) && delete_controller_profile(profile),
+        "chord fixture profile cleanup failed");
+    set_binding(Action::Menu, keyboard_menu, 0);
+    host::request_close(); host::tick(true); host::tick(true);
+}
 }
 
 int main() {
     try {
         Fixture fixture;
         fixture.setup();
+        check_legacy_input_bounds(fixture);
+        check_legacy_guid_bounds(fixture);
+        check_music_volume(fixture);
+        check_rumble(fixture);
+        check_settings_string_roundtrip(fixture);
+        check_clear_and_profile_roundtrip(fixture);
+        check_direct_c_profile(fixture);
+        check_profile_integer_bounds(fixture);
+        check_profile_preservation(fixture);
+        check_capture_profile_gate(fixture);
+        check_settings_numeric_bounds(fixture);
+        // Existing settings without a FastForward key inherit the new default;
+        // an explicit custom key or -1 remains authoritative across restart.
+        const auto restart_bindings = [&] {
+            require(tooie::frontend::settings::flush(), "F6 binding fixture flush failed");
+            host::shutdown(); host::initialize(fixture.window, fixture.profile, true);
+            host::publish_ready(true); fixture.focus();
+            tooie::input::host().set_menu_open(true); host::tick(false);
+        };
+        tooie::input::set_binding(Action::A, {Device::Keyboard, SDL_SCANCODE_Y}, 1);
+        restart_bindings();
+        require(tooie::input::get_binding(Action::FastForward, Device::Keyboard, 0).code == SDL_SCANCODE_F6 &&
+            tooie::input::get_binding(Action::A, Device::Keyboard, 1).code == SDL_SCANCODE_Y,
+            "unrelated saved binding prevented F6 default or was reset");
+        tooie::input::set_binding(Action::FastForward, {Device::Keyboard, SDL_SCANCODE_F7}, 0);
+        restart_bindings();
+        require(tooie::input::get_binding(Action::FastForward, Device::Keyboard, 0).code == SDL_SCANCODE_F7,
+            "existing custom fast-forward key was overwritten");
+        tooie::input::set_binding(Action::FastForward, {Device::Keyboard, -1}, 0);
+        restart_bindings();
+        require(tooie::input::get_binding(Action::FastForward, Device::Keyboard, 0).code == -1,
+            "explicit fast-forward unbind was overwritten");
+        // The single utility row recovers an unbound key through the same Capture
+        // queue as gameplay; hidden utilities and out-of-range slots stay refused.
+        host::Request fast_capture{};
+        fast_capture.kind=host::RequestKind::Capture;
+        fast_capture.action=Action::FastForward;
+        fast_capture.device=Device::Keyboard;
+        fast_capture.slot=2;
+        require(host::enqueue(fast_capture), "F6 invalid-slot request queue failed");
+        host::tick(false);
+        require(!fixture.snapshot()->capture.active, "F6 capture admitted invalid slot");
+        fast_capture.action=Action::SaveProgress;fast_capture.slot=0;
+        require(host::enqueue(fast_capture), "hidden utility request queue failed");
+        host::tick(false);
+        require(!fixture.snapshot()->capture.active, "F6 row unlocked hidden utility capture");
+        fast_capture.action=Action::FastForward;
+        require(host::enqueue(fast_capture), "F6 capture request queue failed");
+        host::tick(false);
+        require(fixture.snapshot()->capture.active && !fixture.snapshot()->capture.arming &&
+            fixture.snapshot()->capture.action==Action::FastForward,
+            "explicit F6 row did not arm existing capture");
+        SDL_Event fast_event{};
+        fast_event.type=SDL_KEYDOWN;fast_event.key.windowID=SDL_GetWindowID(fixture.window);
+        fast_event.key.state=SDL_PRESSED;fast_event.key.keysym.scancode=SDL_SCANCODE_F6;
+        fast_event.key.keysym.sym=SDLK_F6;
+        host::handle_event(fast_event);host::tick(false);
+        require(!fixture.snapshot()->capture.active &&
+            tooie::input::get_binding(Action::FastForward,Device::Keyboard,0).code==SDL_SCANCODE_F6 &&
+            fixture.snapshot()->fast_forward.keyboard[0]==tooie::input::binding_label({Device::Keyboard,SDL_SCANCODE_F6}) &&
+            tooie::input::get_binding(Action::A,Device::Keyboard,1).code==SDL_SCANCODE_Y &&
+            fixture.snapshot()->bindings.size()==unsigned(Action::Menu)+1,
+            "F6 capture/snapshot reset another binding or exposed hidden action rows");
+        fast_event.type=SDL_KEYUP;fast_event.key.state=SDL_RELEASED;
+        host::handle_event(fast_event);fixture.cooldown();
+        tooie::input::set_binding(Action::A, {Device::Keyboard, -1}, 1);
+
         tooie::widescreen::configure_profile(true);
         tooie::widescreen::configure_native_aspect(tooie::widescreen::NativeAspect::Ratio16x9);
         tooie::widescreen::latch_for_game_start();
@@ -330,6 +1923,8 @@ int main() {
         require((host::tick(true).physical.buttons & 0x1000) == 0, "old START button still published Start gameplay bit");
         fixture.button(0, SDL_CONTROLLER_BUTTON_START, false);
 
+        check_menu_chord(fixture);
+
         // C2: Exercise the final Player admission too, not just mapper output.
         baseline::input::Player manual;
         uint64_t sample_time = 0;
@@ -399,6 +1994,8 @@ int main() {
         fixture.focus(true);
         host::tick(true);
 
+        check_modern_aim(fixture);
+
         // D: Re-read real on-disk settings; no fake settings store or host adapter.
         if (!tooie::frontend::settings::flush()) {
             std::string diagnostic = "binding settings flush failed; profile=" + fixture.profile.string() +
@@ -442,6 +2039,30 @@ int main() {
             first_log.find(" published_aspect_bits=0xffffffff ") != std::string::npos &&
             first_log.find(" guest_publication=0x00000000") != std::string::npos,
             "F4 marker line lacks sequence, timestamps, version or current state");
+        const auto admission_line = [&](const std::string& log) {
+            const auto start = log.rfind("baseline controller-admission phase=marker ");
+            require(start != std::string::npos, "F4 controller admission line missing");
+            return log.substr(start, log.find('\n', start) - start);
+        };
+        const auto field = [](const std::string& line, const std::string& name) {
+            const auto start = line.find(" " + name + "=");
+            require(start != std::string::npos, "controller admission field missing");
+            const auto value = start + name.size() + 2;
+            return line.substr(value, line.find(' ', value) - value);
+        };
+        const auto admission = admission_line(first_log);
+        const auto diagnostic_id = tooie::input::selected_device_id();
+        const auto diagnostic_profile = tooie::input::active_controller_profile();
+        const auto live_base = field(admission, "live_base");
+        require(live_base.size() == 16 && live_base.find_first_not_of("0123456789abcdef") == std::string::npos &&
+            field(admission, "loaded_base") == live_base && field(admission, "current_base") == live_base &&
+            field(admission, "loaded_active_match") == "1", "base profile diagnostic differs after reload");
+        for (const auto& pad : tooie::input::controllers()) if (pad.selected) {
+            for (const auto& sensitive : {diagnostic_id, pad.serial, pad.path, diagnostic_profile})
+                require(sensitive.empty() || admission.find(sensitive) == std::string::npos,
+                    "controller admission exposed a raw identity, serial, path or profile name");
+        }
+        require(admission.find("\"devices\"") == std::string::npos, "controller admission exposed profile JSON");
         require(fixture.snapshot()->toast.find("#1") != std::string::npos,
             "F4 acknowledgement missing while menu closed");
         fixture.f4(KMOD_NONE, 1);
@@ -491,8 +2112,80 @@ int main() {
         require(fixture.log().find("issue-marker seq=2 ") != std::string::npos &&
             fixture.snapshot()->toast.find("#2") != std::string::npos,
             "reset bindings did not re-enable F4 marker");
+        const auto marker_admission = [&] { fixture.f4(); return admission_line(fixture.log()); };
+        const auto saved_source = tooie::frontend::settings::get_string("tooie_input_profiles_v1", "");
+        auto altered = nlohmann::json::parse(saved_source);
+        altered["devices"].erase(diagnostic_id);
+        tooie::frontend::settings::set_string("tooie_input_profiles_v1", altered.dump());
+        require(field(marker_admission(), "current_base") == "absent", "missing profile was not diagnosed absent");
+        altered = nlohmann::json::parse(saved_source);
+        auto& malformed_rows = altered["devices"][diagnostic_id]["profiles"][diagnostic_profile];
+        malformed_rows.erase(malformed_rows.end() - 1);
+        tooie::frontend::settings::set_string("tooie_input_profiles_v1", altered.dump());
+        const auto malformed = marker_admission();
+        require(field(malformed, "current_base") == "invalid" && field(malformed, "loaded_base") == live_base,
+            "invalid current rows or immutable loaded snapshot was misdiagnosed");
+        altered = nlohmann::json::parse(saved_source);
+        altered["devices"][diagnostic_id]["profiles"][diagnostic_profile][0][0] = UINT64_MAX;
+        tooie::frontend::settings::set_string("tooie_input_profiles_v1", altered.dump());
+        require(field(marker_admission(), "current_base") == "invalid", "out-of-range integer was narrowed into a valid digest");
+        tooie::frontend::settings::set_string("tooie_input_profiles_v1", saved_source);
+        // F6: actual player adapter and shared mapper, synthetic focus/keys.
+        const auto fast_key = [&](bool held) {
+            fixture_keys[SDL_SCANCODE_F6] = held ? 1 : 0;
+            return host::tick(true);
+        };
+        const auto fast_is = [&](bool held, const char* why) {
+            require(tooie::timing::fast_forward_held() == held &&
+                tooie::timing::rate() == (held ? 2U : 1U), why);
+        };
+        const auto* actions = tooie::input::host().product;
+        require(actions && actions->set_fast_forward_held &&
+            !actions->dispatch && !actions->set_fast_forward_rate &&
+            !actions->free_camera_enabled && !actions->set_free_camera_input_active &&
+            !actions->set_free_camera_motion && !actions->request_free_camera_reset,
+            "player offered unrelated product utilities");
+        fast_key(false);
+        tooie::frontend::settings::set_int("tooie_fast_forward_rate", 8);
+        const auto normal_time = tooie::timing::virtual_elapsed();
+        fast_key(true); fast_is(true, "F6 did not hold supported 2x or used persisted 8x");
+        fast_key(true); fast_is(true, "repeated held poll changed acceleration");
+        fast_key(false); fast_is(false, "F6 release did not return to 1x");
+        require(tooie::timing::virtual_elapsed() >= normal_time, "F6 transition rewound guest clock");
+        fast_key(true);
+        tooie::input::host().set_menu_open(true);
+        host::tick(true); fast_is(false, "open menu retained acceleration");
+        host::request_close(); host::tick(true);
+        fast_is(false, "held F6 restarted on menu close");
+        fast_key(false); fast_key(true); fast_is(true, "fresh F6 after menu close was suppressed");
+        fixture.focus(false); fast_is(false, "focus loss retained acceleration");
+        fixture.focus(true); fast_is(false, "held F6 restarted on focus regain");
+        fast_key(false);
+        SDL_SetModState(KMOD_SHIFT);
+        fast_key(true); fast_is(false, "modified F6 activated acceleration");
+        SDL_SetModState(KMOD_NONE);
+        fast_key(true); fast_is(false, "removing modifier activated already held F6");
+        fast_key(false);
+        const auto original_a = tooie::input::get_binding(Action::A, Device::Keyboard, 1);
+        tooie::input::set_binding(Action::A, {Device::Keyboard, SDL_SCANCODE_F6}, 1);
+        require((fast_key(true).physical.buttons & 0x8000) != 0,
+            "gameplay F6 binding did not retain A input");
+        fast_is(false, "gameplay F6 conflict also activated acceleration");
+        require(tooie::input::get_binding(Action::A, Device::Keyboard, 1).code == SDL_SCANCODE_F6,
+            "F6 conflict handling rewrote user binding");
+        fast_key(false);
+        tooie::input::set_binding(Action::A, original_a, 1);
+        fast_key(true); fast_is(true, "F6 did not resume after conflict removal and release");
+        host::shutdown(); fast_is(false, "shutdown retained F6 acceleration");
+        fixture_keys.fill(0);
+        host::initialize(fixture.window, fixture.profile, true);
+        host::publish_ready(true); host::note_game_started();
+        fixture.focus(true);
+
         // F: The SDL queue publishes live preferences without changing startup state.
         const auto startup=host::latched_preferences();
+        require(host::requested_texture_filter()==0 && host::requested_output_filter()==0,
+            "filtering defaults changed");
         const auto preference=[&](host::Preference key,int value) {
             host::Request request{};
             request.kind=host::RequestKind::Preference;
@@ -553,6 +2246,28 @@ int main() {
         preference(host::Preference::Wide,1);
         preference(host::Preference::NativeAspect,2);
         preference(host::Preference::TalonTrotToggle,1);
+        preference(host::Preference::CutsceneAspect,1);
+        require(host::requested_cutscene_aspect()==1 &&
+            tooie::frontend::settings::get_int("tooie_cutscene_aspect",-1)==1 &&
+            host::latched_preferences().cutscene_aspect==startup.cutscene_aspect,
+            "cutscene-aspect request was not live/persisted or mutated startup");
+        preference(host::Preference::CutsceneAspect,-1);
+        preference(host::Preference::CutsceneAspect,2);
+        require(host::requested_cutscene_aspect()==1, "invalid cutscene-aspect request changed live policy");
+        preference(host::Preference::TextureFilter,1);
+        preference(host::Preference::OutputFilter,2);
+        require(host::requested_texture_filter()==1 && host::requested_output_filter()==2 &&
+            tooie::frontend::settings::get_int("baseline_texture_filter",-1)==1 &&
+            tooie::frontend::settings::get_int("baseline_output_filter",-1)==2,
+            "filtering request was not live and persisted");
+        for(int value:{-1,2})preference(host::Preference::TextureFilter,value);
+        for(int value:{-1,3})preference(host::Preference::OutputFilter,value);
+        require(host::requested_texture_filter()==1 && host::requested_output_filter()==2 &&
+            host::latched_preferences().texture_filter==startup.texture_filter &&
+            host::latched_preferences().output_filter==startup.output_filter &&
+            tooie::frontend::settings::get_int("baseline_texture_filter",-1)==1 &&
+            tooie::frontend::settings::get_int("baseline_output_filter",-1)==2,
+            "invalid filtering request changed policy or live request mutated startup");
         host::render::fixture_publication = 0x00010003;
         fixture.f4();
         const auto live_log = fixture.log();
@@ -560,11 +2275,14 @@ int main() {
         require(live_marker.find(" startup_wide=" + std::to_string(startup.wide) + " ") != std::string::npos &&
             live_marker.find(" startup_aspect=" + std::to_string(startup.native_aspect) + " ") != std::string::npos &&
             live_marker.find(" startup_cutscene_aspect=" + std::to_string(startup.cutscene_aspect) + " ") != std::string::npos &&
+            live_marker.find(" requested_cutscene_aspect=1 ") != std::string::npos &&
             live_marker.find(" requested_resolution=8 ") != std::string::npos &&
             live_marker.find(" requested_wide=1 ") != std::string::npos &&
             live_marker.find(" requested_aspect=2 ") != std::string::npos &&
             live_marker.find(" requested_quiet_trot=1 ") != std::string::npos &&
             live_marker.find(" requested_trot_toggle=1 ") != std::string::npos &&
+            live_marker.find(" requested_texture_filter=1 ") != std::string::npos &&
+            live_marker.find(" requested_output_filter=2 ") != std::string::npos &&
             live_marker.find(" published_aspect_bits=0x00000008 ") != std::string::npos &&
             live_marker.find(" guest_publication=0x00010003") != std::string::npos &&
             live_marker.find(" wide=") == std::string::npos &&
@@ -577,11 +2295,17 @@ int main() {
         require(tooie::widescreen::live_widescreen_request()==-1, "shutdown retained live wide request");
         require(!host::requested_quiet_talon_trot() && host::requested_resolution()==1,
             "shutdown retained live request");
+        require(host::requested_cutscene_aspect()==0, "shutdown retained live cutscene aspect");
+        require(host::requested_texture_filter()==0 && host::requested_output_filter()==0,
+            "shutdown retained filtering requests");
         host::initialize(fixture.window,fixture.profile);
         require(tooie::widescreen::live_widescreen_request()==1, "persisted wide request missing on restart");
         preference(host::Preference::Wide,-1);
         require(host::requested_quiet_talon_trot() && host::requested_resolution()==8,
             "persisted preferences missing on restart");
+        require(host::requested_cutscene_aspect()==1, "persisted cutscene aspect missing on restart");
+        require(host::requested_texture_filter()==1 && host::requested_output_filter()==2,
+            "persisted filtering missing on restart");
 
         // Toggle uses the same live SDL publication, with independent persistence.
         require(!host::requested_talon_trot_toggle(), "toggle default is not hold-Z");
@@ -612,11 +2336,13 @@ int main() {
         require(SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,
             "1", SDL_HINT_OVERRIDE) == SDL_TRUE, "script-policy transport isolation failed");
         host::publish_ready(true); host::note_game_started();
+        preference(host::Preference::FirstPersonAim, 1);
         fixture.focus(false);
         fixture.button(0, SDL_CONTROLLER_BUTTON_A, true);
         const auto script_publication = host::tick(true);
         require(!script_publication.focused && !script_publication.physical_admitted &&
-            !script_publication.physical.nonneutral() && !script_publication.activity,
+            !script_publication.physical.nonneutral() && !script_publication.activity &&
+            script_publication.aim_sample == 0 && script_publication.aim_policy == 0,
             "default/script policy admitted background physical input");
         std::istringstream tape("hold first 1 A\ncheckpoint done 1\n");
         baseline::input::Player scripted(baseline::input::parse(tape));
@@ -637,6 +2363,7 @@ int main() {
         SDL_ResetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS);
         host::initialize(fixture.window, fixture.profile, true);
         host::publish_ready(true); host::note_game_started();
+        preference(host::Preference::FirstPersonAim, 1);
         fixture.focus(true); fixture.focus(false);
         fixture.button(0, SDL_CONTROLLER_BUTTON_A, true);
         require((host::tick(true).physical.buttons & 0x8000) != 0,
@@ -647,7 +2374,46 @@ int main() {
         require(selected_index >= 0 && SDL_JoystickDetachVirtual(selected_index) == 0,
             "fixture selected-controller detach failed");
         fixture.drain();
-        require(!host::tick(true).physical.nonneutral(), "disconnect retained background controller state");
+        const auto disconnected = host::tick(true);
+        require(!disconnected.physical.nonneutral() && disconnected.aim_sample == 0 &&
+            disconnected.aim_policy == 0, "disconnect retained background controller or aim state");
+        fixture.focus(true);
+        tooie::input::host().set_menu_open(true); host::tick(false);
+        require(tooie::input::selected_controller_instance() < 0, "missing-controller Clear setup selected another pad");
+        const auto disconnected_profiles = tooie::frontend::settings::get_string("tooie_input_profiles_v1", "");
+        const auto disconnected_extras = tooie::frontend::settings::get_string("tooie_input_profile_extras_v1", "");
+        const auto disconnected_active = tooie::input::active_controller_profile();
+        const auto disconnected_type = tooie::input::selected_controller_type();
+        const auto disconnected_menu = tooie::input::get_binding(Action::Menu, Device::Button, 0).code;
+        const auto disconnected_modifier = tooie::input::get_modifier_binding();
+        host::Request no_controller_clear{};
+        no_controller_clear.kind = host::RequestKind::ClearBinding;
+        no_controller_clear.action = Action::Menu; no_controller_clear.device = Device::Button;
+        require(host::enqueue(no_controller_clear), "missing-controller Clear request queue failed");
+        host::Request no_controller_modifier{};
+        no_controller_modifier.kind = host::RequestKind::Modifier;
+        no_controller_modifier.device = Device::Button;
+        no_controller_modifier.value = SDL_CONTROLLER_BUTTON_LEFTSHOULDER;
+        require(host::enqueue(no_controller_modifier), "missing-controller modifier request queue failed");
+        host::Request no_controller_duplicate{};
+        no_controller_duplicate.kind = host::RequestKind::DuplicateProfile;
+        require(host::enqueue(no_controller_duplicate), "missing-controller duplicate request queue failed");
+        host::Request no_controller_direct_c{};
+        no_controller_direct_c.kind = host::RequestKind::CreateDirectCProfile;
+        require(host::enqueue(no_controller_direct_c), "missing-controller direct-C request queue failed");
+        host::Request no_controller_labels{};
+        no_controller_labels.kind = host::RequestKind::ControllerLabels;
+        no_controller_labels.value = int(tooie::input::ControllerType::DualSense);
+        require(host::enqueue(no_controller_labels), "missing-controller labels request queue failed");
+        host::tick(false);
+        require(tooie::frontend::settings::get_string("tooie_input_profiles_v1", "") == disconnected_profiles &&
+            tooie::frontend::settings::get_string("tooie_input_profile_extras_v1", "") == disconnected_extras &&
+            tooie::input::active_controller_profile() == disconnected_active &&
+            tooie::input::selected_controller_type() == disconnected_type &&
+            tooie::input::get_binding(Action::Menu, Device::Button, 0).code == disconnected_menu &&
+            tooie::input::get_modifier_binding().device == disconnected_modifier.device &&
+            tooie::input::get_modifier_binding().code == disconnected_modifier.code,
+            "Clear/modifier/duplicate without a selected controller changed bindings or saved profiles");
         std::cout << "baseline input host A-G passed (virtual SDL controller; synthetic focus/keys; "
             "no native focus, keyboard-state or gameplay/hardware acceptance)\n";
         return 0;

@@ -14,5 +14,11 @@
 
 #ifndef __cplusplus
 #include <ultra64.h>
+/* Only the consumed offsets are named; this is not a reconstructed viewport. */
+typedef struct {
+    u8 unused_at_0[8];
+    s16 signed_at_8;
+    s16 signed_at_A;
+} TooieAspectInputs;
 extern u32 tooie_get_latched_widescreen_settings(void);
 #endif

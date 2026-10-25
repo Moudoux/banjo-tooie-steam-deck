@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Fixed baseline runtime source composition; no timer/codegen/product recipe."""
+"""Fixed baseline runtime source composition; the F6 player guest-clock timer/VI children are the only clock recipe."""
 import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 
@@ -18,33 +17,41 @@ INPUTS = {
     'librecomp/src/dp.cpp': '21d8601c2207137b296d4211f8fd5d45ae2284d41913298d66916580c74d2094',
     'librecomp/src/recomp.cpp': 'af9c6f983fb1620ff5b971836d7792ef0b83a47e77010ab89ddf2fa1fb87e143',
     'librecomp/src/pi.cpp': '30189d04fe830f26ee69ec0f3aae8a4e37ffedc74cfee3294d5ac135038f90ca',
+    'ultramodern/src/timer.cpp': '5919412bafcde237d911d1110059c39863b2a09baedba782d366d4804a32f72d',
 }
 # Only these named maintained patches are accepted; this is not a patch CLI.
 PATCHES = {
-    'events-sp-exception': ('12999e7eee75ee2b4509e3765ac797152ba46286709b1f31cca87b0b44e2467b', 'events.cpp', 2),
+    'events-q-vi-lock': ('a2cee8eafb01f4e6a5779174e6d9faa2e471fa855f621552c05c73f53b05321b', 'events.cpp', 3),
+    'timer-guest-clock': ('3f1db54412c4df52048c0607c47ac49a725629a1b55e156bceceaa06e4641cbb', 'timer.cpp', 8),
+    'events-guest-clock': ('594a6c424ac803ed54feb31c4c53e7fc5db8d4db97434324a8a552874fb4bd22', 'events.cpp', 3),
+    'events-sp-exception': ('73511703d287ce3fcf76eecafe16d97c8806a0dc448dca7f86529627dde2614f', 'events.cpp', 2),
     'events-next-framebuffer': ('6e17ed72a30d942af19ed4242c9e8a3f8f947bad9d709cc264498b1084b5ab27', 'events.cpp', 1),
     'events-dp-freeze': ('7f287aec255a5dcb9eaa2ae53082403ff9a4eaa67c22b0f56d65e4f5d5864cdf', 'events.cpp', 3),
     'threads-suspended-stop': ('9438dd3c67452b673f4e5bfe494b2c54fa88574e6a11c73f0758a7df64401322', 'ultramodern/src/threads.cpp', 2),
     'producer-quiescent-cleanup': ('9b4261af055d9677c061065c1d7588e79fcec74f679dac6cf12d3c069e2319fb', 'ultramodern/src/threads.cpp', 1),
     'threadqueue-removal': ('713659775b22eeac5c1e6f23322af35f68d66eec580819e6c0e41ee5a67b56da', 'ultramodern/src/threadqueue.cpp', 2),
     'dp-freeze': ('4006e77ef9591ac7584e84ad348eb237b09799b56962b0ed70d45100d53cfa23', 'dp.cpp', 2),
-    'recomp-terminal-fence': ('47b1b0c337b84fc5dc5eb702513f73b3f8a517f0e65c5629910733d347698ed8', 'recomp.cpp', 4),
+    'recomp-terminal-fence': ('eb157ab9876972d73b610edc5280cfd6475930591d119b3eb3877429cd12aae2', 'recomp.cpp', 4),
+    'mesgqueue-required-admission': ('912b8c1c6cd7e658ab63bcfbb6d4320c536c9104008e5512633abdd0919bf644', 'mesgqueue.cpp', 4),
 }
 EXPECTED = {
-    'baseline/lifecycle/events.cpp': '585ba081a6cdc99b2fcf90cb74f94ea33c01b2f2a92ede5324efa506a6a7089e',
+    'baseline/guest-clock/events.cpp': '720195ce6c8d2a77dc6c6b256e4ec10f0f6d744337d3dfe8fbb1221ce100298c',
+    'baseline/guest-clock/timer.cpp': '910d020a22203cc6d0c91f2c7aed0c0856835ab8bed2c6dffd948e35483de37c',
+    'baseline/lifecycle/events.cpp': 'c680d7ba54a66010eabaad23dfa26d1c7dea35030ed0ae75cec4e5306470e9b0',
     'baseline/scheduler-event/events.cpp': '7ad9ad3def0f061125db69ed608078558141aecfa1ed715588b807fdcdf5dee2',
     'baseline/first-frame-sync/events.cpp': 'aed57c028028a756d507a4c4adfb915171fac167cf543d40447c935e47d3bf88',
     'baseline/dp-freeze/events.cpp': '96f362c7a774c4629a2e9523ecea748a1865bc9cb54de177207c486a6e7ccf4c',
     'baseline/thread-refusals/threads.cpp': '64ddcfdd413bd1a893ab00bae1b7b2ad08f251af446687abd605fa0ae09dabde',
     'baseline/lifecycle/threads.cpp': 'a1227291c933fa003706575e407ad8b0a469f04fe44125b7de03ad16faff8469',
     'baseline/controller-cycle/threadqueue.cpp': '67f48b19bc92f2cd8abba882b53209d5bbba1d297c0ad0c159108eb4faa8e621',
-    'baseline/lifecycle/mesgqueue.cpp': 'ed3f3d6e2ad4894e3648143eb6375aa7ca67cb5df4c1e2bc394033f6915d1cee',
+    'baseline/lifecycle/mesgqueue.cpp': '0889f02f33c2da072eebdccaccc81bcdeba09993eb7ea3e020200feaeabfcf8d',
     'baseline/dp-freeze/dp.cpp': 'ac866e51f0cb90c07ee330bfd7579ef4ead8c9c30bfc0cb285d09e515c3df4e4',
-    'baseline/lifecycle/recomp.cpp': 'da3d4473968e5163f636fcbf842c6f57984c1c8bf1d5734b43c0dabcc72fcba1',
-    'runtime-continuous/pi.cpp': 'a46b4b641b8417fabb820dd4e5323c45787b86f7d0049f9380ca5e38db651337',
+    'baseline/lifecycle/recomp.cpp': '53f3f6480924483fcc3e19a7f90632abf2e6b3997bb6b85c6614ad66501bcc89',
+    'runtime-continuous/pi.cpp': 'e44d154c455cbd1d4d9a1cf61dc9d4c2ca74274b1515f6c0f23e735ce7a868ba',
 }
 RECIPES = {
-    'prepare_runtime_continuous.py': 'fbd11d23b7ee670803004ea610242d712263a35e248f68948179c6cd2427badb',
+    'owned_timer.py': '16566e4fdf843d5094eab27e05e72a98e5d4a06f9d9971a149bd40a40b3a6545',
+    'prepare_runtime_continuous.py': '404e24fe8646359715145f6ba81ab7d71e61317db80918a273f30ecffb80f7fb',
     'prepare_runtime_threadqueue.py': 'ffcdb4d858342572348608f7fd2114f729637b4686d3c14d3e3a6171174f7143',
 }
 
@@ -107,45 +114,34 @@ def materialize(root, runtime, build):
     inputs[recipe] = recipe.read_bytes()
     continuous = load_recipe(root / 'tools/prepare_runtime_continuous.py')
     queue = load_recipe(root / 'tools/prepare_runtime_threadqueue.py')
+    # messages()/saving() apply these; pinned in the recipe module, recorded here for the publication recheck.
+    for name, item in continuous.RECIPE_PATCHES.items():
+        read(root / 'patches/runtime' / (name + '.patch'), item[0])
 
     def patch(text, name):
-        # Fixed file headers/counts and unique full contexts; no fuzzy offsets.
-        lines = patches[name].splitlines(keepends=True)
         _, filename, expected_hunks = PATCHES[name]
-        require([x for x in lines if x.startswith(('--- ', '+++ '))] == ['--- a/' + filename + '\n', '+++ b/' + filename + '\n'], 'Patch headers drift')
-        starts = [i for i, line in enumerate(lines) if line.startswith('@@ ')]
-        require(len(starts) == expected_hunks, 'Patch hunk count drift: ' + name)
-        for n, at in enumerate(starts):
-            header = re.fullmatch(r'@@ -\d+,(\d+) \+\d+,(\d+) @@[^\n]*\n', lines[at])
-            require(header is not None, 'Unexpected pinned hunk header')
-            hunk = lines[at + 1:starts[n + 1] if n + 1 < len(starts) else len(lines)]
-            require(all(x[:1] in (' ', '-', '+') for x in hunk), 'Unexpected pinned hunk line')
-            before = ''.join(x[1:] for x in hunk if x[:1] in (' ', '-'))
-            after = ''.join(x[1:] for x in hunk if x[:1] in (' ', '+'))
-            require(len(before.splitlines()) == int(header[1]) and len(after.splitlines()) == int(header[2]), 'Pinned hunk lengths drift')
-            text = continuous.replace(text, before, after)
-        return text
+        return continuous.apply_patch(text, patches[name], filename, expected_hunks, name)
 
     outputs = {}
 
     def emit(relative, text):
         data = text.encode('utf-8')
-        require(sha(data) == EXPECTED[relative], 'Computed child drift: ' + relative)
+        require(sha(data) == EXPECTED[relative], 'Computed child drift: ' + relative + ' ' + sha(data))
         outputs[build / relative] = data
 
-    events = originals['ultramodern/src/events.cpp']
-    start = "        // If the game hasn't started yet, set a dummy VI mode and origin.\n"
-    end = '        events_context.vi.update_vi();\n'
-    require(events.count(start) == events.count(end) == 1 and events.index(start) < events.index(end), 'Q-VI scope drift')
-    events = continuous.replace(events, start, '        { // Q-VI-LOCK: shared seed/update ownership, released before delivery/callback.\n        std::lock_guard state_lock{ events_context.message_mutex };\n' + start)
-    events = continuous.replace(events, end, end + '        }\n')
-    events = continuous.replace(events, 'extern "C" PTR(void) osViGetCurrentFramebuffer() {\n', 'extern "C" PTR(void) osViGetCurrentFramebuffer() {\n    std::lock_guard lock{ events_context.message_mutex };\n')
+    events = patch(originals['ultramodern/src/events.cpp'], 'events-q-vi-lock')
     emit('baseline/scheduler-event/events.cpp', events)
     events = patch(events, 'events-next-framebuffer')
     emit('baseline/first-frame-sync/events.cpp', events)
     events = patch(events, 'events-dp-freeze')
     emit('baseline/dp-freeze/events.cpp', events)
-    emit('baseline/lifecycle/events.cpp', patch(events, 'events-sp-exception'))
+    events = patch(events, 'events-sp-exception')
+    emit('baseline/lifecycle/events.cpp', events)
+    # F6 player arm: the consumed SP-exception child plus only the guest-clock VI hunks.
+    emit('baseline/guest-clock/events.cpp', patch(events, 'events-guest-clock'))
+    # F6 player child of the unchanged copied 1x timer (baseline_timer + ordinary).
+    emit('baseline/guest-clock/timer.cpp',
+        patch(continuous.baseline_timer(originals['ultramodern/src/timer.cpp']), 'timer-guest-clock'))
     threads = patch(originals['ultramodern/src/threads.cpp'], 'threads-suspended-stop')
     emit('baseline/thread-refusals/threads.cpp', threads)
     threads = patch(threads, 'producer-quiescent-cleanup')
@@ -153,12 +149,13 @@ def materialize(root, runtime, build):
     emit('baseline/lifecycle/threads.cpp', continuous.threads(threads, True))
     queue_text = queue.normalize_lf(originals['ultramodern/src/threadqueue.cpp'].encode()).decode()
     emit('baseline/controller-cycle/threadqueue.cpp', patch(queue_text, 'threadqueue-removal'))
-    emit('baseline/lifecycle/mesgqueue.cpp', continuous.messages(originals['ultramodern/src/mesgqueue.cpp']))
+    emit('baseline/lifecycle/mesgqueue.cpp',
+        patch(continuous.messages(originals['ultramodern/src/mesgqueue.cpp']), 'mesgqueue-required-admission'))
     emit('baseline/dp-freeze/dp.cpp', patch(originals['librecomp/src/dp.cpp'], 'dp-freeze'))
     emit('baseline/lifecycle/recomp.cpp', patch(originals['librecomp/src/recomp.cpp'], 'recomp-terminal-fence'))
     emit('runtime-continuous/pi.cpp', continuous.saving(originals['librecomp/src/pi.cpp']))
     require(len(outputs) == len(EXPECTED), 'Incomplete fixed output set')
-    manifest = dict(scope='Fixed selected baseline runtime sources; timer separate; no historical raw acquisition', runtime_pin=PIN,
+    manifest = dict(scope='Fixed selected baseline runtime sources; timer separate; F6 player guest-clock timer/VI children; no historical raw acquisition', runtime_pin=PIN,
         inputs=[dict(path=str(p), sha256=sha(data)) for p, data in sorted(inputs.items())],
         outputs=[dict(path=str(p), sha256=sha(data)) for p, data in sorted(outputs.items())])
     outputs[build / 'baseline/selected-runtime/manifest.json'] = (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode()

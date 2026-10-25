@@ -56,12 +56,14 @@ The launcher and menus use Dear ImGui through RT64. The CIC algorithm in
   version 2.26.3; [zlib notice](third_party/notices/SDL2-zlib.txt). The separately
   locked SDL2 2.30.3 development bundle serves the retained native host.
 - [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler):
-  the Windows player uses RT64's bundled `dxcompiler.dll` (file version
-  1.7.0.4147) and `dxil.dll` (release 1.7.2212). The retained
-  [LLVM license](third_party/notices/DXC-v1.8.2502-LICENSE-LLVM.txt) and
-  [release notes](third_party/notices/DXC-v1.8.2502-ReleaseNotes.md) describe the
-  separately locked v1.8.2502 development archive.
-  The bundled `dxil.dll` was recorded by an earlier project review as matching the file in Microsoft's v1.7.2212 release archive (`dxc_2022_12_16.zip`). That archive's [README](third_party/notices/DXC-v1.7.2212-README.md) assigns its [Microsoft license terms](third_party/notices/DXC-v1.7.2212-LICENSE-MS.txt) to `dxil.dll`; both are reproduced unchanged. The exact build origin of the bundled `dxcompiler.dll`, and therefore its complete notice set, has not been established.
+  the Windows player ships the matched `dxcompiler.dll` and `dxil.dll` from the
+  official v1.8.2502 archive pinned in `dependencies.lock.json`.
+  Its [release notes](third_party/notices/DXC-v1.8.2502-ReleaseNotes.md) assign
+  the [LLVM/NCSA license](third_party/notices/DXC-v1.8.2502-LICENSE-LLVM.txt)
+  to these files. RT64's build-time compiler remains unchanged.
+  The older [README](third_party/notices/DXC-v1.7.2212-README.md) and
+  [Microsoft terms](third_party/notices/DXC-v1.7.2212-LICENSE-MS.txt) are retained
+  as notices for the historical validator; they do not describe the current pair.
 - [SDL_GameControllerDB](https://github.com/gabomdq/SDL_GameControllerDB):
   [zlib-style notice](third_party/notices/SDL-GameControllerDB.txt).
   `recompcontrollerdb.txt` is a modified N64/GameCube-oriented subset.
@@ -91,3 +93,14 @@ Earlier frontend work adapted code from
 [Zelda64Recomp](https://github.com/Zelda64Recomp/Zelda64Recomp).
 `src/register_overlays.cpp` follows BanjoRecomp's overlay registration.
 Their authors retain ownership; none of these projects endorse this project.
+
+The shared renderer also adapts transform tagging, model traversal and float
+vertex-stream mechanisms from BanjoRecomp commit
+`dbd52154bc1e00e56867b1fac94a8f907052f41b`, including
+`patches/transform_tagging.c` and `patches/marker_transform_tagging.c`.
+The maintained adapters retain upstream source references and distinguish
+Tooie-specific ownership, layout and drawing-path changes. Upstream authors
+retain their copyrights and applicable licenses; this is not an endorsement.
+
+BanjoRecomp is distributed under GNU GPL version 3; its pinned `COPYING` is
+retained in `third_party/notices/BanjoRecomp-GPL-3.0.txt`.

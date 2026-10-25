@@ -2,6 +2,9 @@
 #define TOOIE_PRE_BACKGROUND_H
 #include "camera_internal_02.h"
 _Static_assert(!(TOOIE_CAMERA_PRE_WORLD&0x80000000u),"saved PRE role top bit must be clear");
+/* Public tuples: SIMPLE/PROJECTION/NOPUSH/LINEAR and SIMPLE/MODELVIEW/PUSH/AUTO-order.
+ * Both interpolate position/rotation; scale/skew/perspective and tile/lookat use AUTO;
+ * vertex/texcoord use SKIP, edit NONE and aspect AUTO. */
 #define CAM_POLICY_PRE_SIMPLE 0x0201152Au
 #define CAM_POLICY_PRE_MODEL 0x02031529u
 #define CAM_NEAR_WORD 0xECu /* original CA6C0/E3C8C camera lens words */

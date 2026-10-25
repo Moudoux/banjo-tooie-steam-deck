@@ -139,10 +139,8 @@ settings**. **Resume** returns to the game and **Quit** exits.
 
 ## Known issues
 
-- Mayahem Temple can render black in the distance.
-- Widescreen can render incorrect geometry at the edges.
-- Mumbo title-demo shadows can distort at Display or Manual output.
-- The save-select arm animation remains low-rate.
+- Backpack shadows and shadows while sliding on slopes can render incorrectly.
+- The latest menu and transition-edge corrections need broader player testing.
 - F6 fast-forward is not available in this player.
 - The full game has not been verified start to finish.
 
@@ -165,7 +163,10 @@ Include the version, Windows version, GPU and driver, controller, settings,
 where it happened and steps to reproduce. Press plain F4 once when the issue
 appears to add a numbered marker with the time and current settings to the
 existing `player.log`. A message appears for four seconds to confirm the marker
-or report that it could not be written. F4 does not take a screenshot or video.
+or report that it could not be written. The player also saves bounded recent
+CPU-side rendering evidence to `issue-evidence-*.jsonl` in the profile folder.
+Press F4 as soon as the issue appears; it does not start a future recording.
+F4 does not take a screenshot or video.
 If F4 is assigned to an action or a binding capture is active, that input
 takes precedence and no marker is added.
 
@@ -175,8 +176,9 @@ To send an F4 report:
    problem, also record a short video; F4 does not record it.
 2. Close the game. Before starting it again, press Win+R and open
    `%LOCALAPPDATA%\BanjoTooieScurvyDogPort`.
-3. Copy `player.log` to a separate folder. Check the copy for usernames and local
-   paths; redact them if needed. ZIP **only that reviewed copy**. The next launch
+3. Copy `player.log` and the matching `issue-evidence-*.jsonl` report to a separate
+   folder. Check them for usernames and local paths; redact them if needed.
+   ZIP **only those reviewed copies**. The next launch
    moves the current log to `player-previous.log`; later launches replace it.
 4. Attach the ZIP and video to the GitHub issue. Include the marker number,
    scene, action and settings. If private delivery is preferable, email them to
@@ -184,5 +186,6 @@ To send an F4 report:
 
 Keep large videos separate from the small log ZIP. Never send the whole profile
 folder: it includes your ROM and saves. Do not upload ROMs, saves or generated
-game files. A marker identifies the time and requested settings; it does not
-contain actor, vertex or matrix captures.
+game files. The marker identifies the time and requested settings. The separate
+evidence report contains selected actor, matrix, vertex and history diagnostics;
+it is not a GPU image or proof that every draw was captured.

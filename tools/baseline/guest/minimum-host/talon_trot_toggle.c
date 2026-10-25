@@ -1,4 +1,5 @@
-/* Guest-owned Talon Trot toggle; original hold remains the default. */
+/* Guest-owned Talon Trot toggle; original hold remains the default.
+ * PATCH bodies retain/reconstruct the named originals; port changes are marked @recomp. */
 #include "common.h"
 #include "overlays/bs/state.h"
 #include "overlays/ba/input.h"
@@ -16,6 +17,7 @@ extern f32 func_800D8FF8(void);
 extern f32 func_800F0E00(f32, f32);
 extern PlayerState* func_800F46D8(PlayerState*);
 extern PlayerState* D_80135490[8];
+/* @recomp Port-owned toggle state, ownership helpers and trot_* inlines through trot_sample. */
 enum { NONE, AWAIT_RELEASE, ARMED, EXIT_PENDING };
 struct TrotToggleSlot { u32 owner; BanjoStateId last_current; u8 phase; };
 __attribute__((section(".tooie_trot_state"), aligned(4)))
@@ -72,6 +74,7 @@ INLINE void trot_sample(PlayerState* self) {
         if (bakey_pressed(self, BUTTON_Z)) SLOT.phase = EXIT_PENDING;
     }
 }
+/* bs_setState (0x8009E5C8): inherited body except the marked commit seam. */
 PATCH void bs_setState(PlayerState *self, BanjoStateId nextState) {
     if (nextState != BS_STATE_0_INVALID) {
         self->state->next = nextState;
@@ -81,7 +84,7 @@ PATCH void bs_setState(PlayerState *self, BanjoStateId nextState) {
         self->state->previous = self->state->current;
         self->state->current = self->state->next;
         self->state->next = NULL;
-        /* After commit, before init: every nested commit is observed in execution order. */
+        /* @recomp After commit, before init: every nested commit is observed in execution order. */
         if (trot_enabled())
             trot_commit(self, self->state->previous, self->state->current);
         if (func_8009CAF8(self, self->state->current) != NULL) {
@@ -89,26 +92,32 @@ PATCH void bs_setState(PlayerState *self, BanjoStateId nextState) {
         }
     }
 }
+/* bainput_update (0x8009819C): inherited body except the marked sampling tail. */
 PATCH void bainput_update(PlayerState *self) {
     if (self->input->dive_cooldown != 0.0f) {
         self->input->dive_cooldown = func_800F0E00(self->input->dive_cooldown - func_800D8FF8(), 0.0f);
     }
     bainput_enable(self, 6, 0);
+    /* @recomp Toggle sampling. */
     if (trot_enabled()) trot_sample(self);
 }
+/* func_80800710_bsbtrot (overlay +0x710): reconstructed original exit tests. */
 PATCH s32 func_80800710_bsbtrot(PlayerState* self) {
     if (self->unk164.word) return 1;
     if (func_8008E39C(self)) return 0;
+    /* @recomp Owned ON occurrences use EXIT_PENDING; otherwise retain original Z release. */
     if (!trot_enabled() || !trot_owned(self))
         return bakey_released(self, BUTTON_Z);
     return SLOT.phase == EXIT_PENDING;
 }
+/* func_800F86D8: reconstruction of the original eight-player pointer migration loop. */
 PATCH void func_800F86D8(void) {
     PlayerState** entry;
     for (entry = D_80135490; entry != D_80135490 + 8; ++entry) {
         PlayerState* old = *entry;
         if (old != NULL) {
             PlayerState* next = func_800F46D8(old);
+            /* @recomp Carry toggle ownership before publishing the migrated pointer. */
             tooie_trot_toggle_move((u32)old, (u32)next);
             *entry = next;
         }

@@ -1,10 +1,10 @@
 #pragma once
 /* Startup generation/cutscene policy plus live request; guest owns application. */
-#define BASELINE_PRESENT_ACTIVE 1u
-#define BASELINE_PRESENT_WIDE 2u /* Startup diagnostic; applied state is published by guest. */
+#define BASELINE_PRESENT_ACTIVE 1u /* Retained startup compatibility layout field; not applied state. */
+#define BASELINE_PRESENT_WIDE 2u /* Retained startup compatibility layout field; applied state is published by guest. */
 #define BASELINE_PRESENT_ORIGINAL_CUTSCENE 4u
 #define BASELINE_PRESENT_PILLARBOX_CAPABLE 8u
-#define BASELINE_PRESENT_ASPECT_SHIFT 4u
+#define BASELINE_PRESENT_ASPECT_SHIFT 4u /* Retained startup compatibility layout field; not applied state. */
 #define BASELINE_PRESENT_WIDE_REQUEST_SHIFT 6u
 #define BASELINE_PRESENT_WIDE_REQUEST_MASK 3u
 #define BASELINE_PRESENT_USE_GAME 0u

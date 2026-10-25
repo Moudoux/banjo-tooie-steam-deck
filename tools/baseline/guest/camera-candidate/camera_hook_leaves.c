@@ -9,6 +9,13 @@
 #if TOOIE_ACTOR_PALETTE
 #include "rt64_extended_gbi.h"
 #endif
+#if !defined(TOOIE_BK_PIPELINE) || (TOOIE_BK_PIPELINE != 0 && TOOIE_BK_PIPELINE != 1)
+#error Explicit boolean TOOIE_BK_PIPELINE selection required
+#endif
+#if TOOIE_BK_PIPELINE
+u32 tooie_bk_list_begin(Gfx**, u32, u32);
+void tooie_bk_list_end(Gfx**, u32);
+#endif
 extern volatile s16 D_8007BEDA;
 extern volatile u32 D_8007BCD0[2],D_80127658,D_8012D500,D_8012D558;
 _Static_assert(sizeof(struct TooieCameraState)==1380,"layout2 required");
@@ -82,7 +89,14 @@ _Static_assert(sizeof(struct TooieRenderBuffers) == 8 && sizeof(Gfx) == 8 &&
 
 __attribute__((section(".recomp_patch"), noinline))
 void func_800DD024(struct TooieRenderBuffers* buffers, u8* node) {
+#if TOOIE_BK_PIPELINE
+    /* @recomp BK func_80338904: identity MUL/PUSH and group before the original list call;
+       original-matrix pop and group pop after it. Supersedes the feather bracket here. */
+    u32 bkList = tooie_bk_list_begin((Gfx**)&buffers->gfx, (u32)node, 1u);
+#else
     u32 current = (u32)buffers->gfx;
+    /* @recomp Optional actor feather admission and prepaid public push around the
+       original type-three leaf command below. */
     u32 id = 0;
     if (tooie_render_bridge_state.palette_context.actor && D_8012CA18 == 0x6EAu &&
         CAM_STATE.owner_frame && CAM_STATE.control.active)
@@ -90,16 +104,33 @@ void func_800DD024(struct TooieRenderBuffers* buffers, u8* node) {
             node, cam_actor_camera_id(current));
     if (id) {
         GfxCommand* group = (GfxCommand*)current;
+        /* @recomp A nonzero id validated this slot and view. After a camera-ID change in
+           this view and epoch, keep the same explicit ID but skip every component, so the
+           camera-facing billboard is not paired across the cut. The public NoInterpolate
+           macro would force ID_IGNORE instead. */
+        u32 slot = tooie_render_bridge_state.palette_context.slot;
+        u32 view_bit = 1u << tooie_render_bridge_state.palette_context.view;
         gEXEnable(group);
-        gEXMatrixGroup(group + 1, id, G_EX_INTERPOLATE_SIMPLE,
-            G_EX_PUSH, G_MTX_MODELVIEW, G_EX_COMPONENT_INTERPOLATE,
-            G_EX_COMPONENT_INTERPOLATE, G_EX_COMPONENT_INTERPOLATE,
-            G_EX_COMPONENT_INTERPOLATE, G_EX_COMPONENT_INTERPOLATE,
-            G_EX_COMPONENT_SKIP, G_EX_COMPONENT_AUTO, G_EX_ORDER_LINEAR,
-            G_EX_EDIT_NONE, G_EX_ASPECT_AUTO, G_EX_COMPONENT_SKIP,
-            G_EX_COMPONENT_AUTO);
+        if (tooie_render_bridge_state.palette[slot].camera_cut_views & view_bit) {
+            gEXMatrixGroup(group + 1, id, G_EX_INTERPOLATE_SIMPLE,
+                G_EX_PUSH, G_MTX_MODELVIEW, G_EX_COMPONENT_SKIP,
+                G_EX_COMPONENT_SKIP, G_EX_COMPONENT_SKIP,
+                G_EX_COMPONENT_SKIP, G_EX_COMPONENT_SKIP,
+                G_EX_COMPONENT_SKIP, G_EX_COMPONENT_SKIP, G_EX_ORDER_LINEAR,
+                G_EX_EDIT_NONE, G_EX_ASPECT_AUTO, G_EX_COMPONENT_SKIP,
+                G_EX_COMPONENT_SKIP);
+        } else {
+            gEXMatrixGroup(group + 1, id, G_EX_INTERPOLATE_SIMPLE,
+                G_EX_PUSH, G_MTX_MODELVIEW, G_EX_COMPONENT_INTERPOLATE,
+                G_EX_COMPONENT_INTERPOLATE, G_EX_COMPONENT_INTERPOLATE,
+                G_EX_COMPONENT_INTERPOLATE, G_EX_COMPONENT_INTERPOLATE,
+                G_EX_COMPONENT_SKIP, G_EX_COMPONENT_AUTO, G_EX_ORDER_LINEAR,
+                G_EX_EDIT_NONE, G_EX_ASPECT_AUTO, G_EX_COMPONENT_SKIP,
+                G_EX_COMPONENT_AUTO);
+        }
         buffers->gfx = (Gfx*)(current + 24u);
     }
+#endif
 
     Gfx* cursor = buffers->gfx;
     s32 index = *(volatile s16*)(node + 8u);
@@ -109,13 +140,17 @@ void func_800DD024(struct TooieRenderBuffers* buffers, u8* node) {
     u32 list = list_base + (u32)(index * 8) + 8u;
     ((volatile u32*)cursor)[1] = osVirtualToPhysical((void*)list);
 
+#if TOOIE_BK_PIPELINE
+    tooie_bk_list_end((Gfx**)&buffers->gfx, bkList);
+#else
     if (id) {
-        /* The successful helper prepaid this pop; no second admission gate. */
+        /* @recomp The successful helper prepaid this pop; no second admission gate. */
         GfxCommand* tail = (GfxCommand*)buffers->gfx;
         gEXPopMatrixGroup(tail, G_MTX_MODELVIEW);
         buffers->gfx = (Gfx*)(tail + 1);
         if ((u32)buffers->gfx > tooie_render_bridge_state.last_end)
             tooie_render_bridge_state.last_end = (u32)buffers->gfx;
     }
+#endif
 }
 #endif

@@ -6,11 +6,14 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <climits>
 #include <cmath>
 #include <chrono>
+#include <cstdio>
 #include <fstream>
 #include <mutex>
 #include <map>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -60,6 +63,25 @@ std::string hid_product_name(const char* path) {
 #endif
 constexpr int baseline_digital_axis_threshold = 16384;
 constexpr size_t count = static_cast<size_t>(Action::Count);
+// Saved controller rows are positional: row i of every stored base and
+// "modified" table holds Action(i), and decode_rows requires exactly `count`
+// rows. Keyboard keys (names) and legacy controls.json names (import_legacy)
+// use the same order. Inserting, removing, reordering or appending an Action
+// changes what existing saves mean and needs a versioned migration first.
+constexpr std::array<Action, 31> persisted_rows{{
+    Action::A, Action::B, Action::Z, Action::Start, Action::L, Action::R,
+    Action::CUp, Action::CDown, Action::CLeft, Action::CRight,
+    Action::DUp, Action::DDown, Action::DLeft, Action::DRight,
+    Action::MoveUp, Action::MoveDown, Action::MoveLeft, Action::MoveRight,
+    Action::Menu, Action::SaveProgress, Action::Diagnostics, Action::IssueMarker,
+    Action::FastForward, Action::SkipCutscene, Action::FreeCameraReset,
+    Action::FreeCameraLeft, Action::FreeCameraRight, Action::FreeCameraUp,
+    Action::FreeCameraDown, Action::FreeCameraForward, Action::FreeCameraBack}};
+static_assert(count == persisted_rows.size() && [] {
+    for (size_t row = 0; row < persisted_rows.size(); ++row)
+        if (static_cast<size_t>(persisted_rows[row]) != row) return false;
+    return true;
+}(), "Action indices are persisted; change them only with a versioned profile migration");
 constexpr std::array<std::pair<Action, std::uint16_t>, 14> n64_buttons{{
     {Action::A,0x8000},{Action::B,0x4000},{Action::Z,0x2000},{Action::Start,0x1000},
     {Action::DUp,0x0800},{Action::DDown,0x0400},{Action::DLeft,0x0200},{Action::DRight,0x0100},
@@ -120,6 +142,8 @@ SDL_JoystickID manual_instance = -1;
 bool manual_required = false;
 bool wanted_auto = false;
 std::atomic<SDL_JoystickID> chosen{-1};
+// SDL owner samples once per initialization; formatters on any thread read.
+std::atomic_bool nintendo_button_labels{true};
 struct DeviceRecord {
     std::string friendly_name;
     ControllerType type = ControllerType::Other;
@@ -130,10 +154,27 @@ struct DeviceRecord {
         Binding modifier{Device::Button, -1};
         ModifierSoloBehavior solo = ModifierSoloBehavior::PassThrough;
         int trigger_press = 50, trigger_release = 45;
+        // Stored fields this build did not read; written back until an edit owns the field.
+        // A stored entry that is not an object is kept whole until an extras edit replaces it.
+        nlohmann::json retained = nlohmann::json::object();
+        // Stored legacy {"base", "modified"} profile whose modified layer could not be read, or
+        // could not move to an opaque extras entry; written back with only "base" updated
+        // until a modified-layer edit or reset owns it.
+        nlohmann::json legacy_base;
     };
     std::map<std::string, ProfileExtras> extras;
+    // Stored profiles this build cannot decode, by name: never listed or
+    // edited, written back unchanged, and their names stay reserved.
+    nlohmann::json unreadable_profiles = nlohmann::json::object();
+    nlohmann::json unreadable_extras = nlohmann::json::object();
 };
 std::map<std::string, DeviceRecord> device_records;
+// Stored device entries this build cannot save faithfully: {base, extras if stored}.
+// A non-object base, or a readable base whose extras entry is not an object. Written
+// back unchanged; a connected device with such an entry edits for this session only.
+std::map<std::string, std::pair<nlohmann::json, std::optional<nlohmann::json>>> unreadable_devices;
+// A stored string that is not a profile document is never overwritten this session.
+bool profile_store_unreadable = false;
 std::string active_device_id;
 std::string active_profile_key;
 BindingTable legacy_template{};
@@ -246,6 +287,9 @@ BindingTable defaults() {
         put(table, Action::CRight, Device::AxisPositive, SDL_CONTROLLER_AXIS_RIGHTX);
         put(table, Action::CUp, Device::AxisNegative, SDL_CONTROLLER_AXIS_RIGHTY);
         put(table, Action::CDown, Device::AxisPositive, SDL_CONTROLLER_AXIS_RIGHTY);
+        // Player F6 hold; inert unless the host offers set_fast_forward_held.
+        if (const auto* product = host().product; product && product->set_fast_forward_held)
+            put(table, Action::FastForward, Device::Keyboard, SDL_SCANCODE_F6);
         return table;
     }
     put(table, Action::Diagnostics, Device::Keyboard, SDL_SCANCODE_F3);
@@ -294,9 +338,30 @@ void copy_controller_bindings(BindingTable& to, const BindingTable& from) {
     for (size_t a = 0; a < count; ++a)
         for (unsigned i = 2; i < 8; ++i) to[a][i] = from[a][i];
 }
+// Caller holds binding_mutex; profile and latch ownership stay with the caller.
+void apply_profile_extras(const DeviceRecord::ProfileExtras& extra) {
+    modified_bindings = extra.modified;
+    modifier_binding = extra.modifier;
+    modifier_solo = extra.solo;
+    trigger_press_percent = extra.trigger_press;
+    trigger_release_percent = extra.trigger_release;
+}
+bool profile_name_taken(const DeviceRecord& record, const std::string& name) {
+    return record.profiles.contains(name) || record.unreadable_profiles.contains(name);
+}
+// An explicit edit owns these stored extras fields. A stored entry that is not
+// an object cannot hold them, so the edit replaces that entry whole.
+void own_fields(DeviceRecord::ProfileExtras& extra, std::initializer_list<const char*> fields) {
+    if (!extra.retained.is_object()) extra.retained = nlohmann::json::object();
+    for (const char* field : fields) extra.retained.erase(field);
+}
 DeviceRecord& record_for(const std::string& id) {
     auto& record = device_records[id];
-    if (record.profiles.empty()) record.profiles.emplace("Default", legacy_template);
+    if (record.profiles.empty()) {
+        std::string name = "Default";
+        for (int n = 2; profile_name_taken(record, name); ++n) name = "Default " + std::to_string(n);
+        record.profiles.emplace(std::move(name), legacy_template);
+    }
     if (!record.profiles.contains(record.active)) record.active = record.profiles.begin()->first;
     if (!record.extras.contains(record.active)) {
         DeviceRecord::ProfileExtras extra;
@@ -307,14 +372,18 @@ DeviceRecord& record_for(const std::string& id) {
     return record;
 }
 void save_profiles() {
+    if (profile_store_unreadable) return; // Both stored strings stay exactly as loaded.
     nlohmann::json devices = nlohmann::json::object();
     nlohmann::json extra_devices = nlohmann::json::object();
     for (auto& [id, record] : device_records) {
-        if (id.find("|live-instance:") != std::string::npos) continue;
+        if (id.find("|live-instance:") != std::string::npos || unreadable_devices.contains(id)) continue;
         if (id == active_profile_key && record.profiles.contains(record.active)) {
             auto& extra = record.extras[record.active];
-            extra.modified = modified_bindings; extra.modifier = modifier_binding; extra.solo = modifier_solo;
-            extra.trigger_press = trigger_press_percent; extra.trigger_release = trigger_release_percent;
+            extra.modified = modified_bindings;
+            extra.modifier = modifier_binding;
+            extra.solo = modifier_solo;
+            extra.trigger_press = trigger_press_percent;
+            extra.trigger_release = trigger_release_percent;
         }
         nlohmann::json profiles = nlohmann::json::object();
         nlohmann::json extras = nlohmann::json::object();
@@ -322,7 +391,8 @@ void save_profiles() {
             nlohmann::json rows = nlohmann::json::array();
             for (const auto& row : table) {
                 nlohmann::json codes = nlohmann::json::array();
-                for (unsigned i = 2; i < 8; ++i) codes.push_back(row[i].code);
+                for (unsigned i = 2; i < 8; ++i)
+                    codes.push_back(row[i].code);
                 rows.push_back(std::move(codes));
             }
             return rows;
@@ -330,35 +400,72 @@ void save_profiles() {
         for (const auto& [name, table] : record.profiles) {
             const auto extra_it = record.extras.find(name);
             const DeviceRecord::ProfileExtras extra = extra_it == record.extras.end()
-                ? DeviceRecord::ProfileExtras{} : extra_it->second;
+                ? DeviceRecord::ProfileExtras{}
+                : extra_it->second;
             // Alpha 3 and earlier read these arrays directly; keep this schema stable.
-            profiles[name] = encode_rows(table);
-            extras[name] = {{"modified", encode_rows(extra.modified)},
+            if (extra.legacy_base.is_null())
+                profiles[name] = encode_rows(table);
+            else
+                (profiles[name] = extra.legacy_base)["base"] = encode_rows(table);
+            if (!extra.retained.is_object()) {
+                extras[name] = extra.retained;
+                continue;
+            }
+            extras[name] = {
+                {"modified", encode_rows(extra.modified)},
                 {"modifier", {unsigned(extra.modifier.device), extra.modifier.code}},
-                {"solo", unsigned(extra.solo)}, {"trigger_press", extra.trigger_press},
-                {"trigger_release", extra.trigger_release}};
+                {"solo", unsigned(extra.solo)},
+                {"trigger_press", extra.trigger_press},
+                {"trigger_release", extra.trigger_release}
+            };
+            extras[name].update(extra.retained);
         }
-        devices[id] = {{"friendly_name", record.friendly_name},
-            {"type", unsigned(record.type)}, {"active", record.active}, {"profiles", std::move(profiles)}};
+        profiles.update(record.unreadable_profiles);
+        extras.update(record.unreadable_extras);
+        devices[id] = {
+            {"friendly_name", record.friendly_name},
+            {"type", unsigned(record.type)},
+            {"active", record.active},
+            {"profiles", std::move(profiles)}
+        };
         extra_devices[id] = std::move(extras);
     }
-    tooie::frontend::settings::set_string("tooie_input_profiles_v1", nlohmann::json({{"devices", devices}}).dump());
-    tooie::frontend::settings::set_string("tooie_input_profile_extras_v1", nlohmann::json({{"devices", extra_devices}}).dump());
+    for (const auto& [id, stored] : unreadable_devices) {
+        devices[id] = stored.first;
+        if (stored.second) extra_devices[id] = *stored.second;
+    }
+    tooie::frontend::settings::set_string("tooie_input_profiles_v1",
+        nlohmann::json({{"devices", devices}}).dump());
+    tooie::frontend::settings::set_string("tooie_input_profile_extras_v1",
+        nlohmann::json({{"devices", extra_devices}}).dump());
+}
+// Stored-schema integer read: values outside [lo, hi] never wrap into a valid code. Requires hi >= 0.
+bool stored_int(const nlohmann::json& value, int lo, int hi, int& out) {
+    if (!value.is_number_integer()) return false;
+    if (value.is_number_unsigned() && value.get<std::uint64_t>() > std::uint64_t(hi)) return false;
+    const auto checked = value.get<std::int64_t>();
+    if (checked < lo || checked > hi) return false;
+    out = int(checked);
+    return true;
 }
 void load_profiles() {
     device_records.clear();
-    const auto source = tooie::frontend::settings::get_string("tooie_input_profiles_v1", "");
-    if (source.empty()) return;
+    unreadable_devices.clear();
+    profile_store_unreadable = false;
     try {
-        const auto doc = nlohmann::json::parse(source);
-        if (!doc.contains("devices") || !doc["devices"].is_object()) return;
-        nlohmann::json extra_doc = nlohmann::json::object();
+        // Both strings are checked even when the base is empty: either one that
+        // cannot be read stays unchanged, including through startup legacy import.
+        const auto source = tooie::frontend::settings::get_string("tooie_input_profiles_v1", "");
         const auto extra_source = tooie::frontend::settings::get_string("tooie_input_profile_extras_v1", "");
-        if (!extra_source.empty()) {
-            try { extra_doc = nlohmann::json::parse(extra_source); }
-            catch (const std::exception&) { extra_doc = nlohmann::json::object(); }
-        }
-        if (!extra_doc.is_object()) extra_doc = nlohmann::json::object();
+        const auto doc = source.empty() ? nlohmann::json::object() : nlohmann::json::parse(source, nullptr, false);
+        const auto extra_doc = extra_source.empty() ? nlohmann::json::object() :
+            nlohmann::json::parse(extra_source, nullptr, false);
+        const auto unreadable = [](const nlohmann::json& stored) {
+            return !stored.is_object() || (stored.contains("devices") && !stored["devices"].is_object());
+        };
+        profile_store_unreadable = unreadable(doc) || unreadable(extra_doc);
+        if (profile_store_unreadable || !doc.contains("devices")) return;
+        const auto extra_devices = extra_doc.value("devices", nlohmann::json::object());
         auto decode_rows = [](const nlohmann::json& rows, BindingTable& table) {
             if (!rows.is_array() || rows.size() != count) return false;
             BindingTable decoded = table;
@@ -366,9 +473,8 @@ void load_profiles() {
                 const auto& row = rows[a];
                 if (!row.is_array() || row.size() != 6) return false;
                 for (unsigned i = 2; i < 8; ++i) {
-                    if (!row[i - 2].is_number_integer()) return false;
-                    const int code = row[i - 2].get<int>();
-                    if (code < -1 || code > 255) return false;
+                    int code;
+                    if (!stored_int(row[i - 2], -1, 255, code)) return false;
                     decoded[a][i].code = code;
                 }
             }
@@ -376,120 +482,200 @@ void load_profiles() {
             return true;
         };
         for (auto it = doc["devices"].begin(); it != doc["devices"].end(); ++it) {
-            if (!it.value().is_object()) continue;
+            const auto& entry = it.value();
+            const auto stored_extras = extra_devices.find(it.key());
+            const auto profiles = entry.find("profiles");
+            const auto keep_stored = [&] {
+                unreadable_devices.emplace(it.key(), std::pair{entry, stored_extras == extra_devices.end()
+                    ? std::nullopt : std::optional<nlohmann::json>(*stored_extras)});
+            };
+            if (!entry.is_object() || (profiles != entry.end() && !profiles->is_object())) {
+                keep_stored();
+                continue;
+            }
+            // Readable mappings stay usable; the device's opaque extras entry is never overwritten.
+            if (stored_extras != extra_devices.end() && !stored_extras->is_object())
+                keep_stored();
             DeviceRecord record;
-            record.friendly_name = it.value().value("friendly_name", std::string{});
-            const auto type = it.value().value("type", unsigned(ControllerType::Other));
-            if (type <= unsigned(ControllerType::SteamDeck)) record.type = ControllerType(type);
-            record.active = it.value().value("active", std::string("Default"));
-            const auto profiles = it.value().value("profiles", nlohmann::json::object());
-            if (profiles.is_object()) for (auto profile = profiles.begin(); profile != profiles.end(); ++profile) {
-                BindingTable base = legacy_template;
-                BindingTable modified{};
-                for (size_t a = 0; a < count; ++a)
-                    for (unsigned i = 2; i < 8; ++i) modified[a][i] = {Device((i - 2) / 2 + 1), -1};
-                DeviceRecord::ProfileExtras extra;
-                extra.modified = modified;
-                bool valid = false;
-                if (profile.value().is_array()) {
-                    // Schema 1 stored only the base layer as rows of six codes.
-                    valid = decode_rows(profile.value(), base);
-                } else if (profile.value().is_object() && profile.value().contains("base")) {
-                    // Read the short-lived development shape defensively, then write Alpha 3 compatible arrays.
-                    valid = decode_rows(profile.value()["base"], base);
-                    if (valid && profile.value().contains("modified")) decode_rows(profile.value()["modified"], extra.modified);
-                }
-                try {
-                    const auto device_extras = extra_doc.value("devices", nlohmann::json::object());
-                    if (device_extras.is_object() && device_extras.contains(it.key()) &&
-                        device_extras[it.key()].is_object() && device_extras[it.key()].contains(profile.key()) &&
-                        device_extras[it.key()][profile.key()].is_object()) {
-                        const auto& fields = device_extras[it.key()][profile.key()];
-                        if (fields.contains("modified")) decode_rows(fields["modified"], extra.modified);
-                        const auto modifier = fields.value("modifier", nlohmann::json::array());
-                        if (modifier.is_array() && modifier.size() == 2 && modifier[0].is_number_integer() && modifier[1].is_number_integer()) {
-                            const int d = modifier[0].get<int>(), code = modifier[1].get<int>();
-                            if (d > int(Device::Keyboard) && d <= int(Device::AxisNegative) && code >= -1 && code <= 255)
-                                extra.modifier = {Device(d), code};
-                        }
-                        const auto solo = fields.value("solo", unsigned(ModifierSoloBehavior::PassThrough));
-                        if (solo <= unsigned(ModifierSoloBehavior::ModifierOnly)) extra.solo = ModifierSoloBehavior(solo);
-                        extra.trigger_press = std::clamp(fields.value("trigger_press", 50), 1, 100);
-                        extra.trigger_release = std::clamp(fields.value("trigger_release", 45), 0, extra.trigger_press - 1);
+            if (const auto name = entry.find("friendly_name"); name != entry.end() && name->is_string())
+                record.friendly_name = name->get<std::string>();
+            int type;
+            if (entry.contains("type") && stored_int(entry["type"], 0, int(ControllerType::SteamDeck), type))
+                record.type = ControllerType(type);
+            if (const auto active = entry.find("active"); active != entry.end() && active->is_string())
+                record.active = active->get<std::string>();
+            const auto device_extras = stored_extras != extra_devices.end() && stored_extras->is_object()
+                ? *stored_extras : nlohmann::json::object();
+            if (profiles != entry.end())
+                for (auto profile = profiles->begin(); profile != profiles->end(); ++profile) {
+                    BindingTable base = legacy_template;
+                    DeviceRecord::ProfileExtras extra;
+                    for (size_t a = 0; a < count; ++a)
+                        for (unsigned i = 2; i < 8; ++i)
+                            extra.modified[a][i] = {Device((i - 2) / 2 + 1), -1};
+                    const auto stored = device_extras.find(profile.key());
+                    const bool opaque_extras = stored != device_extras.end() && !stored->is_object();
+                    bool valid = false;
+                    if (profile.value().is_array()) {
+                        // Schema 1 stored only the base layer as rows of six codes.
+                        valid = decode_rows(profile.value(), base);
+                    } else if (profile.value().is_object() && profile.value().contains("base")) {
+                        // Read the short-lived development shape defensively, then write Alpha 3 compatible arrays.
+                        // Embedded modified data that cannot move to the extras entry (unreadable here,
+                        // or that entry is opaque and written back whole) keeps this stored form instead.
+                        valid = decode_rows(profile.value()["base"], base);
+                        if (valid && profile.value().contains("modified") &&
+                            (!decode_rows(profile.value()["modified"], extra.modified) || opaque_extras))
+                            extra.legacy_base = profile.value();
                     }
-                } catch (const std::exception&) {
-                    extra = DeviceRecord::ProfileExtras{};
-                    extra.modified = modified;
-                }
-                if (valid && !profile.key().empty()) {
+                    if (!valid || profile.key().empty()) {
+                        record.unreadable_profiles[profile.key()] = profile.value();
+                        if (stored != device_extras.end()) record.unreadable_extras[profile.key()] = *stored;
+                        continue;
+                    }
+                    if (opaque_extras) {
+                        extra.retained = *stored; // Opaque: base mappings stay usable, defaults apply.
+                    } else if (stored != device_extras.end()) {
+                        // Each field read here moves into this build's model; the rest stays as stored.
+                        auto& fields = extra.retained = *stored;
+                        if (fields.contains("modified") && decode_rows(fields["modified"], extra.modified))
+                            fields.erase("modified");
+                        int d, code, solo, press, release;
+                        if (const auto modifier = fields.find("modifier"); modifier != fields.end() &&
+                            modifier->is_array() && modifier->size() == 2 &&
+                            stored_int((*modifier)[0], int(Device::Button), int(Device::AxisNegative), d) &&
+                            stored_int((*modifier)[1], -1, 255, code)) {
+                            extra.modifier = {Device(d), code};
+                            fields.erase(modifier);
+                        }
+                        if (fields.contains("solo") &&
+                            stored_int(fields["solo"], 0, int(ModifierSoloBehavior::ModifierOnly), solo)) {
+                            extra.solo = ModifierSoloBehavior(solo);
+                            fields.erase("solo");
+                        }
+                        // Checked before narrowing; stored integers keep the existing clamps.
+                        if (fields.contains("trigger_press") &&
+                            stored_int(fields["trigger_press"], INT_MIN, INT_MAX, press)) {
+                            extra.trigger_press = std::clamp(press, 1, 100);
+                            fields.erase("trigger_press");
+                        }
+                        if (fields.contains("trigger_release") &&
+                            stored_int(fields["trigger_release"], INT_MIN, INT_MAX, release)) {
+                            extra.trigger_release = release;
+                            fields.erase("trigger_release");
+                        }
+                        extra.trigger_release = std::clamp(extra.trigger_release, 0, extra.trigger_press - 1);
+                    }
                     record.profiles.emplace(profile.key(), std::move(base));
                     record.extras.emplace(profile.key(), std::move(extra));
                 }
-            }
-            if (!record.profiles.empty()) device_records.emplace(it.key(), std::move(record));
+            if (!record.profiles.empty() || !record.unreadable_profiles.empty())
+                device_records.emplace(it.key(), std::move(record));
         }
-    } catch (const std::exception&) { device_records.clear(); }
+    } catch (const std::exception&) {
+        // Fail closed: nothing from this load is written over the stored strings.
+        device_records.clear();
+        unreadable_devices.clear();
+        profile_store_unreadable = true;
+    }
 }
 void activate_device(const ControllerInfo* info) {
     std::string next_profile_key = info ? info->stable_id : "";
     if (info && info->ambiguous)
         next_profile_key += "|live-instance:" + std::to_string(info->instance);
-    if (next_profile_key != active_profile_key) reset_input_latches();
+
+    if (next_profile_key != active_profile_key)
+        reset_input_latches();
+
     std::lock_guard lock(binding_mutex);
     active_device_id = info ? info->stable_id : "";
     active_profile_key = next_profile_key;
+
     if (info && info->ambiguous && !device_records.contains(active_profile_key))
         device_records.emplace(active_profile_key, record_for(active_device_id));
+
     if (!active_profile_key.empty()) {
         auto& record = record_for(active_profile_key);
         copy_controller_bindings(bindings, record.profiles.at(record.active));
+
         const auto& extra = record.extras.at(record.active);
-        modified_bindings = extra.modified; modifier_binding = extra.modifier; modifier_solo = extra.solo;
-        trigger_press_percent = extra.trigger_press; trigger_release_percent = extra.trigger_release;
+        apply_profile_extras(extra);
     } else {
         copy_controller_bindings(bindings, legacy_template);
-        modified_bindings = {}; modifier_binding = {Device::Button, -1};
-        modifier_solo = ModifierSoloBehavior::PassThrough; trigger_press_percent = 50; trigger_release_percent = 45;
+        modified_bindings = {};
+        modifier_binding = {Device::Button, -1};
+        modifier_solo = ModifierSoloBehavior::PassThrough;
+        trigger_press_percent = 50;
+        trigger_release_percent = 45;
     }
+}
+
+// SDL owner, with controller_mutex held: stop the old handle before it can close.
+void stop_rumble() {
+    const auto it = std::find_if(opened.begin(), opened.end(), [](const auto& entry) {
+        return entry.info.instance == applied_rumble_device;
+    });
+    if (applied_rumble && it != opened.end())
+        SDL_GameControllerRumble(it->handle, 0, 0, 0);
+    applied_rumble = false;
+    applied_rumble_device = -1;
+    last_rumble_update = {};
+    desired_rumble.store(false, std::memory_order_release);
 }
 void choose_controller() {
     std::sort(opened.begin(), opened.end(), [](const auto& a, const auto& b) {
         return std::tie(a.info.guid, a.info.instance) < std::tie(b.info.guid, b.info.instance);
     });
+
     for (auto& entry : opened)
         entry.info.ambiguous = std::count_if(opened.begin(), opened.end(), [&](const auto& other) {
             return other.info.stable_id == entry.info.stable_id;
         }) > 1;
+
     auto it = manual_instance < 0 ? opened.end() :
-        std::find_if(opened.begin(), opened.end(), [](const auto& entry) { return entry.info.instance == manual_instance; });
+        std::find_if(opened.begin(), opened.end(), [](const auto& entry) {
+            return entry.info.instance == manual_instance;
+        });
+
     if (it == opened.end() && !manual_required && !wanted_device_id.empty()) {
         const auto matches = std::count_if(opened.begin(), opened.end(), [](const auto& entry) {
             return entry.info.stable_id == wanted_device_id;
         });
-        if (matches == 1) it = std::find_if(opened.begin(), opened.end(), [](const auto& entry) {
-            return entry.info.stable_id == wanted_device_id;
-        });
+        if (matches == 1)
+            it = std::find_if(opened.begin(), opened.end(), [](const auto& entry) {
+                return entry.info.stable_id == wanted_device_id;
+            });
     }
+
     if (it == opened.end() && !manual_required && wanted_device_id.empty() && !wanted_guid.empty()) {
         const auto matches = std::count_if(opened.begin(), opened.end(), [](const auto& entry) {
             return entry.info.guid == wanted_guid;
         });
-        if (matches == 1) it = std::find_if(opened.begin(), opened.end(), [](const auto& entry) {
-            return entry.info.guid == wanted_guid;
-        });
+        if (matches == 1)
+            it = std::find_if(opened.begin(), opened.end(), [](const auto& entry) {
+                return entry.info.guid == wanted_guid;
+            });
     }
-    if (it == opened.end() && !manual_required && wanted_device_id.empty() && wanted_guid.empty() && opened.size() == 1)
+
+    if (it == opened.end() && !manual_required && wanted_device_id.empty() &&
+        wanted_guid.empty() && opened.size() == 1)
         it = opened.begin();
+
     if (it == opened.end() && !manual_required && wanted_auto) {
         const auto previous = chosen.load(std::memory_order_acquire);
         it = std::find_if(opened.begin(), opened.end(), [previous](const auto& entry) {
             return entry.info.instance == previous;
         });
-        if (it == opened.end() && !opened.empty()) it = opened.begin();
+        if (it == opened.end() && !opened.empty())
+            it = opened.begin();
     }
+
     const auto selected = it == opened.end() ? -1 : it->info.instance;
+    if (selected != chosen.load(std::memory_order_acquire)) stop_rumble();
     chosen.store(selected, std::memory_order_release);
-    for (auto& entry : opened) entry.info.selected = entry.info.instance == selected;
+    for (auto& entry : opened)
+        entry.info.selected = entry.info.instance == selected;
+
     published_physical.store(selected >= 0, std::memory_order_release);
     published_rumble.store(it != opened.end() && it->info.rumble, std::memory_order_release);
     activate_device(it == opened.end() ? nullptr : &it->info);
@@ -571,6 +757,17 @@ SDL_GameController* selected_controller() {
     return it == opened.end() ? nullptr : it->handle;
 }
 bool same_binding(Binding a, Binding b) { return a.device == b.device && a.code == b.code; }
+bool digital_axis_down(int magnitude, bool was_latched) {
+    const int press = trigger_press_percent * 32767 / 100;
+    const int release = trigger_release_percent * 32767 / 100;
+    if (host().baseline) {
+        return magnitude > baseline_digital_axis_threshold;
+    }
+    if (was_latched) {
+        return magnitude > release;
+    }
+    return magnitude >= press;
+}
 bool physical_binding_down(Binding binding, SDL_GameController* controller, bool& latched) {
     if (!controller || binding.code < 0) return false;
     if (binding.device == Device::Button && binding.code < SDL_CONTROLLER_BUTTON_MAX)
@@ -578,10 +775,8 @@ bool physical_binding_down(Binding binding, SDL_GameController* controller, bool
     if ((binding.device == Device::AxisPositive || binding.device == Device::AxisNegative) &&
         binding.code < SDL_CONTROLLER_AXIS_MAX) {
         const int value = SDL_GameControllerGetAxis(controller, SDL_GameControllerAxis(binding.code));
-        const int press = trigger_press_percent * 32767 / 100;
-        const int release = trigger_release_percent * 32767 / 100;
         const int magnitude = binding.device == Device::AxisPositive ? value : -value;
-        latched = host().baseline ? magnitude > baseline_digital_axis_threshold : (latched ? magnitude > release : magnitude >= press);
+        latched = digital_axis_down(magnitude, latched);
         return latched;
     }
     return false;
@@ -613,14 +808,22 @@ bool down(const BindingTable& table, Action action, const Uint8* keys, SDL_GameC
                 const auto value = SDL_GameControllerGetAxis(controller, SDL_GameControllerAxis(binding.code));
                 bool& latched = axis_latches[static_cast<size_t>(action)][static_cast<size_t>(layer)][slot];
                 const int magnitude = binding.device == Device::AxisPositive ? value : -value;
-                const int press = trigger_press_percent * 32767 / 100;
-                const int release = trigger_release_percent * 32767 / 100;
-                latched = host().baseline ? magnitude > baseline_digital_axis_threshold : (latched ? magnitude > release : magnitude >= press);
+                latched = digital_axis_down(magnitude, latched);
                 if (latched) return true;
             }
             break;
         }
     }
+    return false;
+}
+// Baseline precedence for a shared input: gameplay keeps it and fast-forward
+// is withheld, as the F4 marker is. Bindings themselves are never changed.
+bool fast_forward_shares_gameplay_binding(const BindingTable& table) {
+    const auto& fast = table[static_cast<size_t>(Action::FastForward)];
+    for (size_t action = 0; action <= static_cast<size_t>(Action::Menu); ++action)
+        for (const Binding binding : table[action])
+            if (binding.code >= 0 && std::any_of(fast.begin(), fast.end(),
+                    [&](Binding held) { return same_binding(held, binding); })) return true;
     return false;
 }
 float axis(SDL_GameController* controller, SDL_GameControllerAxis which, float deadzone) {
@@ -678,10 +881,15 @@ void import_legacy(const std::filesystem::path& root, const std::string& preferr
                 for (unsigned s = 0; s < std::min<size_t>(2, it->size()); ++s) {
                     const auto& field = (*it)[s];
                     if (!field.is_object()) continue;
-                    const int type = field.value("input_type", 0), id = field.value("input_id", -1);
+                    int type = 0, id = -1;
+                    if (!field.contains("input_type") || !field.contains("input_id") ||
+                        !stored_int(field["input_type"], 1, 4, type) ||
+                        !stored_int(field["input_id"], -int(SDL_CONTROLLER_AXIS_MAX), int(SDL_NUM_SCANCODES) - 1, id))
+                        continue;
                     if (keyboard && type == 1 && id >= 0) put(target, Action(a), Device::Keyboard, id, s);
-                    else if (!keyboard && type == 3 && id >= 0) put(target, Action(a), Device::Button, id, s);
-                    else if (!keyboard && type == 4 && id != 0) put(target, Action(a),
+                    else if (!keyboard && type == 3 && id >= 0 && id < SDL_CONTROLLER_BUTTON_MAX)
+                        put(target, Action(a), Device::Button, id, s);
+                    else if (!keyboard && type == 4 && id != 0 && id <= SDL_CONTROLLER_AXIS_MAX) put(target, Action(a),
                         id > 0 ? Device::AxisPositive : Device::AxisNegative, std::abs(id) - 1, s);
                 }
             }
@@ -705,11 +913,19 @@ void import_legacy(const std::filesystem::path& root, const std::string& preferr
                     if (!controller.is_object() || !controller.contains("guid") ||
                         !controller["guid"].is_object()) continue;
                     const auto& guid = controller["guid"];
+                    // SDL supplies Uint16 identity parts; omitted fields retain their zero defaults.
+                    int vendor = 0, product = 0, version = 0, crc16 = 0;
+                    const auto identity_part = [&](const char* name, int& out) {
+                        const auto field = guid.find(name);
+                        return field == guid.end() || stored_int(*field, 0, 0xFFFF, out);
+                    };
+                    if (!identity_part("vendor", vendor) || !identity_part("product", product) ||
+                        !identity_part("version", version) || !identity_part("crc16", crc16)) continue;
                     const std::string identity = "SERIAL_" + guid.value("serial", std::string{}) +
-                        "_VID_" + std::to_string(guid.value("vendor", 0)) +
-                        "_PID_" + std::to_string(guid.value("product", 0)) +
-                        "_VERSION_" + std::to_string(guid.value("version", 0)) +
-                        "_CRC16_" + std::to_string(guid.value("crc16", 0));
+                        "_VID_" + std::to_string(vendor) +
+                        "_PID_" + std::to_string(product) +
+                        "_VERSION_" + std::to_string(version) +
+                        "_CRC16_" + std::to_string(crc16);
                     const auto profile_key = controller.value("profile", std::string{});
                     if (!profile_key.empty()) legacy_assignments.emplace(identity, profile_key);
                     if (identity == preferred) assigned_profile = profile_key;
@@ -724,30 +940,36 @@ void import_legacy(const std::filesystem::path& root, const std::string& preferr
             if (doc.contains("controller")) apply_profile(doc["controller"], false, table);
         }
     } catch (const std::exception&) {
-        // The old file is untouched. Malformed content leaves the defaults in place.
+        // The old file is untouched; a later error can leave earlier mappings applied.
     }
 }
 void dispatch(Action action) {
-    if (const auto* product = host().product) product->dispatch(action);
+    const auto* product = host().product;
+    if (product && product->dispatch) product->dispatch(action);
 }
 void set_fast_forward_rate(std::uint32_t rate) noexcept {
-    if (const auto* product = host().product) product->set_fast_forward_rate(rate);
+    const auto* product = host().product;
+    if (product && product->set_fast_forward_rate) product->set_fast_forward_rate(rate);
 }
 void set_fast_forward_held(bool held) noexcept {
-    if (const auto* product = host().product) product->set_fast_forward_held(held);
+    const auto* product = host().product;
+    if (product && product->set_fast_forward_held) product->set_fast_forward_held(held);
 }
 bool free_camera_enabled() noexcept {
     const auto* product = host().product;
-    return product && product->free_camera_enabled();
+    return product && product->free_camera_enabled && product->free_camera_enabled();
 }
 void set_free_camera_input_active(bool active) noexcept {
-    if (const auto* product = host().product) product->set_free_camera_input_active(active);
+    const auto* product = host().product;
+    if (product && product->set_free_camera_input_active) product->set_free_camera_input_active(active);
 }
 void set_free_camera_motion(float x, float y, float z) noexcept {
-    if (const auto* product = host().product) product->set_free_camera_motion(x, y, z);
+    const auto* product = host().product;
+    if (product && product->set_free_camera_motion) product->set_free_camera_motion(x, y, z);
 }
 void request_free_camera_reset() noexcept {
-    if (const auto* product = host().product) product->request_free_camera_reset();
+    const auto* product = host().product;
+    if (product && product->request_free_camera_reset) product->request_free_camera_reset();
 }
 
 #ifdef TOOIE_PERSISTENT_RUNTIME_EXPERIMENT
@@ -810,7 +1032,6 @@ void set_binding(Action action, Binding binding, BindingLayer layer, unsigned sl
     {
         std::lock_guard lock(binding_mutex);
         auto& table = layer == BindingLayer::Modified ? modified_bindings : bindings;
-        axis_latches[static_cast<size_t>(action)][static_cast<size_t>(layer)][index(binding.device, slot)] = false;
         table[static_cast<size_t>(action)][index(binding.device, slot)] = binding;
         reset_input_latches();
         if (binding.device != Device::Keyboard && !active_profile_key.empty()) {
@@ -818,6 +1039,10 @@ void set_binding(Action action, Binding binding, BindingLayer layer, unsigned sl
             auto& saved = record.profiles.at(record.active);
             auto& extra = record.extras.at(record.active);
             (layer == BindingLayer::Modified ? extra.modified : saved)[static_cast<size_t>(action)][index(binding.device, slot)] = binding;
+            if (layer == BindingLayer::Modified) {
+                own_fields(extra, {"modified"});
+                extra.legacy_base = nullptr;
+            }
             save_profiles();
         }
     }
@@ -836,6 +1061,7 @@ void reset_bindings() {
             auto& extra = record.extras.at(record.active);
             extra.modified = {}; extra.modifier = {Device::Button, -1};
             extra.solo = ModifierSoloBehavior::PassThrough; extra.trigger_press = 50; extra.trigger_release = 45;
+            extra.retained = nlohmann::json::object(); extra.legacy_base = nullptr;
             modified_bindings = extra.modified; modifier_binding = extra.modifier;
             modifier_solo = extra.solo; trigger_press_percent = 50; trigger_release_percent = 45;
             save_profiles();
@@ -929,7 +1155,8 @@ std::string binding_label_for_type(Binding binding, ControllerType type) {
         case ControllerType::GameCube: return std::array<const char*,4>{{"A", "B", "X", "Y"}}[i];
         case ControllerType::SteamDeck: return xbox[i];
         case ControllerType::Xbox: return xbox[i];
-        case ControllerType::NintendoPro: return nintendo[i];
+        case ControllerType::NintendoPro:
+            return nintendo_button_labels.load(std::memory_order_relaxed) ? xbox[i] : nintendo[i];
         case ControllerType::Steam: return steam[i];
         default: break;
         }
@@ -963,9 +1190,17 @@ std::string binding_label_for_type(Binding binding, ControllerType type) {
         }
         break;
     case SDL_CONTROLLER_BUTTON_LEFTSTICK:
-        return (type == ControllerType::DualSense || type == ControllerType::DualShock) ? "L3" : type == ControllerType::Xbox || type == ControllerType::SteamDeck ? "LS" : "Left Stick Click";
+        switch (type) {
+        case ControllerType::DualSense: case ControllerType::DualShock: return "L3";
+        case ControllerType::Xbox: case ControllerType::SteamDeck: return "LS";
+        default: return "Left Stick Click";
+        }
     case SDL_CONTROLLER_BUTTON_RIGHTSTICK:
-        return (type == ControllerType::DualSense || type == ControllerType::DualShock) ? "R3" : type == ControllerType::Xbox || type == ControllerType::SteamDeck ? "RS" : "Right Stick Click";
+        switch (type) {
+        case ControllerType::DualSense: case ControllerType::DualShock: return "R3";
+        case ControllerType::Xbox: case ControllerType::SteamDeck: return "RS";
+        default: return "Right Stick Click";
+        }
     case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
         switch (type) {
         case ControllerType::DualSense: case ControllerType::DualShock: return "L1";
@@ -1114,14 +1349,21 @@ std::string active_controller_profile() {
     std::lock_guard lock(binding_mutex);
     return active_profile_key.empty() ? "" : record_for(active_profile_key).active;
 }
+bool saved_profiles_unreadable() {
+    std::lock_guard lock(binding_mutex);
+    return profile_store_unreadable ||
+        (!active_profile_key.empty() && unreadable_devices.contains(active_profile_key));
+}
 bool create_controller_profile(std::string name) {
     if (name.empty() || name.size() > 48) return false;
     std::lock_guard lock(binding_mutex);
     if (active_device_id.empty()) return false;
     auto& record = record_for(active_profile_key);
-    if (record.profiles.contains(name)) return false;
+    if (profile_name_taken(record, name)) return false;
     record.profiles.emplace(name, bindings);
-    record.extras[name] = record.extras.at(record.active);
+    auto& copy = record.extras[name] = record.extras.at(record.active);
+    copy.retained = nlohmann::json::object(); // The copy holds only settings in effect.
+    copy.legacy_base = nullptr;
     record.active = name;
     save_profiles();
     return true;
@@ -1136,8 +1378,7 @@ bool select_controller_profile(std::string name) {
     reset_input_latches();
     copy_controller_bindings(bindings, it->second);
     auto& extra = record.extras[name];
-    modified_bindings = extra.modified; modifier_binding = extra.modifier; modifier_solo = extra.solo;
-    trigger_press_percent = extra.trigger_press; trigger_release_percent = extra.trigger_release;
+    apply_profile_extras(extra);
     save_profiles();
     return true;
 }
@@ -1146,7 +1387,7 @@ bool rename_controller_profile(std::string name) {
     std::lock_guard lock(binding_mutex);
     if (active_device_id.empty()) return false;
     auto& record = record_for(active_profile_key);
-    if (record.profiles.contains(name)) return false;
+    if (profile_name_taken(record, name)) return false;
     auto node = record.profiles.extract(record.active);
     node.key() = name;
     record.profiles.insert(std::move(node));
@@ -1167,8 +1408,7 @@ void reset_active_controller_profile() {
     for (size_t a = 0; a < count; ++a) for (unsigned i = 2; i < 8; ++i)
         extra.modified[a][i] = {Device((i - 2) / 2 + 1), -1};
     copy_controller_bindings(bindings, record.profiles.at(record.active));
-    modified_bindings = extra.modified; modifier_binding = extra.modifier; modifier_solo = extra.solo;
-    trigger_press_percent = extra.trigger_press; trigger_release_percent = extra.trigger_release;
+    apply_profile_extras(extra);
     save_profiles();
 }
 bool delete_controller_profile(std::string name) {
@@ -1187,8 +1427,7 @@ bool delete_controller_profile(std::string name) {
         reset_input_latches();
         copy_controller_bindings(bindings, fallback->second);
         const auto& extra = record.extras.at(record.active);
-        modified_bindings = extra.modified; modifier_binding = extra.modifier; modifier_solo = extra.solo;
-        trigger_press_percent = extra.trigger_press; trigger_release_percent = extra.trigger_release;
+        apply_profile_extras(extra);
     }
     record.profiles.erase(name);
     record.extras.erase(name);
@@ -1201,8 +1440,12 @@ void set_modifier_binding(Binding binding) {
     std::lock_guard lock(binding_mutex);
     modifier_binding = binding;
     modifier_axis_latch = false; chord_suppressed_base.clear(); chord_axis_latches.clear();
-    if (!active_profile_key.empty()) record_for(active_profile_key).extras.at(
-        record_for(active_profile_key).active).modifier = binding;
+    if (!active_profile_key.empty()) {
+        auto& record = record_for(active_profile_key);
+        auto& extra = record.extras.at(record.active);
+        extra.modifier = binding;
+        own_fields(extra, {"modifier"});
+    }
     save_profiles();
 }
 ModifierSoloBehavior get_modifier_solo_behavior() {
@@ -1211,8 +1454,12 @@ ModifierSoloBehavior get_modifier_solo_behavior() {
 void set_modifier_solo_behavior(ModifierSoloBehavior behavior) {
     if (behavior > ModifierSoloBehavior::ModifierOnly) return;
     std::lock_guard lock(binding_mutex); modifier_solo = behavior;
-    if (!active_profile_key.empty()) record_for(active_profile_key).extras.at(
-        record_for(active_profile_key).active).solo = behavior;
+    if (!active_profile_key.empty()) {
+        auto& record = record_for(active_profile_key);
+        auto& extra = record.extras.at(record.active);
+        extra.solo = behavior;
+        own_fields(extra, {"solo"});
+    }
     save_profiles();
 }
 bool set_trigger_thresholds(int press_percent, int release_percent) {
@@ -1224,6 +1471,7 @@ bool set_trigger_thresholds(int press_percent, int release_percent) {
         auto& record = record_for(active_profile_key);
         auto& extra = record.extras.at(record.active);
         extra.trigger_press = press_percent; extra.trigger_release = release_percent;
+        own_fields(extra, {"trigger_press", "trigger_release"});
     }
     save_profiles(); return true;
 }
@@ -1251,6 +1499,8 @@ void set_preferred_guid(std::string guid) {
 void initialize_settings(const std::filesystem::path& config_root, bool allow_background_controller) {
     baseline_background_controller = allow_background_controller;
     sync_background_joystick_events(background_input_enabled());
+    nintendo_button_labels.store(
+        SDL_GetHintBoolean(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS, SDL_TRUE), std::memory_order_relaxed);
     auto next = defaults();
     const auto saved_guid = tooie::frontend::settings::get_string("tooie_preferred_controller_guid", "");
     legacy_preferred_guid=saved_guid;
@@ -1286,13 +1536,14 @@ void initialize_settings(const std::filesystem::path& config_root, bool allow_ba
         for (int i = 0, n = SDL_NumJoysticks(); i < n; ++i) connect(i);
         choose_controller();
     }
-    if (host().product)
+    if (const auto* product = host().product; product && product->set_fast_forward_rate)
         set_fast_forward_rate(tooie::frontend::settings::get_int("tooie_fast_forward_rate", 2));
 }
 void shutdown() noexcept {
     mapped_activity.store(false, std::memory_order_release);
     baseline_x.store(0, std::memory_order_release); baseline_y.store(0, std::memory_order_release);
     std::lock_guard lock(controller_mutex);
+    stop_rumble();
     for (auto& e : opened) SDL_GameControllerClose(e.handle);
     opened.clear(); chosen = -1;
     published_enabled.store(false); published_physical.store(false); published_rumble.store(false);
@@ -1336,6 +1587,7 @@ void handle_event(const SDL_Event& event) {
         if (event.cdevice.which == capture_instance.load(std::memory_order_acquire) && capture_active()) cancel_capture();
         std::lock_guard lock(controller_mutex);
         if (event.cdevice.which == chosen.load(std::memory_order_acquire)) {
+            stop_rumble();
             const auto removed = std::find_if(opened.begin(), opened.end(), [&](const auto& entry) {
                 return entry.info.instance == event.cdevice.which;
             });
@@ -1344,7 +1596,8 @@ void handle_event(const SDL_Event& event) {
         }
         std::erase_if(opened, [&](auto& e) {
             if (e.info.instance != event.cdevice.which) return false;
-            SDL_GameControllerClose(e.handle); return true;
+            SDL_GameControllerClose(e.handle);
+            return true;
         });
         choose_controller();
         return;
@@ -1356,12 +1609,33 @@ void handle_event(const SDL_Event& event) {
     const bool axis_event = axis_motion && (host().baseline ? baseline_axis(event.caxis.value) != 0 :
         std::abs(int(event.caxis.value)) >= trigger_press_percent * 32767 / 100);
     const bool capture_axis_event = axis_motion && std::abs(int(event.caxis.value)) > 22000;
+    // Temporary capture-only probe: distinguish SDL delivery from capture filtering.
+    if (scanning.load(std::memory_order_acquire) &&
+        (button_event || axis_motion || event.type == SDL_JOYBUTTONDOWN ||
+         event.type == SDL_JOYAXISMOTION || event.type == SDL_JOYHATMOTION)) {
+        std::lock_guard capture_lock(capture_mutex);
+        std::fprintf(stderr,
+            "binding-capture event=%u instance=%d control=%u value=%d selected=%d capture=%d device=%u armed=%u focused=%u transition=%u suppressed=%u\n",
+            event.type, event.cbutton.which, unsigned(event.cbutton.button),
+            axis_motion || event.type == SDL_JOYAXISMOTION ? int(event.caxis.value) : int(event.cbutton.state),
+            chosen.load(), capture_instance.load(), unsigned(scanned_device), unsigned(capture_armed),
+            unsigned(frontend_window && SDL_GetKeyboardFocus() == frontend_window),
+            unsigned(focus_transition_pending), unsigned(input_suppressed()));
+    }
     if (button_event && event.cbutton.which == chosen.load() && event.cbutton.button < SDL_CONTROLLER_BUTTON_MAX) {
-        if (event_buttons_device != event.cbutton.which) { event_buttons_down.fill(false); event_buttons_device = event.cbutton.which; }
+        if (event_buttons_device != event.cbutton.which) {
+            event_buttons_down.fill(false);
+            event_buttons_device = event.cbutton.which;
+        }
         event_buttons_down[event.cbutton.button] = button;
     }
     if (axis_motion && event.caxis.which == chosen.load() && event.caxis.axis < SDL_CONTROLLER_AXIS_MAX) {
-        if (event_axes_device != event.caxis.which) { event_axes_values.fill(0); event_axis_latches.clear(); event_modifier_axis_latch = false; event_axes_device = event.caxis.which; }
+        if (event_axes_device != event.caxis.which) {
+            event_axes_values.fill(0);
+            event_axis_latches.clear();
+            event_modifier_axis_latch = false;
+            event_axes_device = event.caxis.which;
+        }
         event_axes_values[event.caxis.axis] = Sint16(event.caxis.value);
     }
     if (button_event && event.cbutton.which == chosen.load() && !button) {
@@ -1392,7 +1666,10 @@ void handle_event(const SDL_Event& event) {
     if (!focused && !background_gameplay) return;
     if (focused && focus_transition_pending) return;
     if (focused && input_suppressed()) {
-        if (key && event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) { cancel_capture(); return; }
+        if (key && event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
+            cancel_capture();
+            return;
+        }
         std::lock_guard capture_lock(capture_mutex);
         if (!scanning.load(std::memory_order_acquire) || !capture_armed) return;
         Binding found{scanned_device, -1};
@@ -1408,17 +1685,26 @@ void handle_event(const SDL_Event& event) {
                     set_binding(scanned_action, {device, -1}, scanned_layer, scanned_slot);
             set_binding(scanned_action, found, scanned_layer, scanned_slot);
             scanning.store(false, std::memory_order_release);
-            capture_releasing = true; release_neutral_since = {};
+            capture_releasing = true;
+            release_neutral_since = {};
         }
         return;
     }
     BindingTable table, modified_table;
     Binding active_modifier;
     ModifierSoloBehavior solo_behavior;
-    { std::lock_guard lock(binding_mutex); table = bindings; modified_table = modified_bindings;
-      active_modifier = modifier_binding; solo_behavior = modifier_solo; }
+    {
+        std::lock_guard lock(binding_mutex);
+        table = bindings;
+        modified_table = modified_bindings;
+        active_modifier = modifier_binding;
+        solo_behavior = modifier_solo;
+    }
     SDL_GameController* controller = nullptr;
-    { std::lock_guard lock(controller_mutex); controller = selected_controller(); }
+    {
+        std::lock_guard lock(controller_mutex);
+        controller = selected_controller();
+    }
     const Binding event_binding = key ? Binding{Device::Keyboard, event.key.keysym.scancode} :
         button ? Binding{Device::Button, event.cbutton.button} :
         Binding{event.caxis.value > 0 ? Device::AxisPositive : Device::AxisNegative, event.caxis.axis};
@@ -1437,9 +1723,7 @@ void handle_event(const SDL_Event& event) {
             binding.code < 0 || binding.code >= SDL_CONTROLLER_AXIS_MAX || event_axes_device != chosen.load()) return false;
         const int value = event_axes_values[binding.code];
         const int magnitude = binding.device == Device::AxisPositive ? value : -value;
-        const int press = trigger_press_percent * 32767 / 100;
-        const int release = trigger_release_percent * 32767 / 100;
-        latched = host().baseline ? magnitude > baseline_digital_axis_threshold : (latched ? magnitude > release : magnitude >= press);
+        latched = digital_axis_down(magnitude, latched);
         return latched;
     };
     const bool modifier_axis_down = event_axis_down(active_modifier, event_modifier_axis_latch);
@@ -1494,7 +1778,10 @@ void handle_event(const SDL_Event& event) {
         for (unsigned a = 0; a <= unsigned(Action::Menu); ++a)
             if (matches(Action(a))) mapped_activity.store(true, std::memory_order_release);
     }
-    if (!axis_event && focused && matches(Action::Menu)) {
+    // The baseline/player reserves Escape even when every Menu cell is cleared.
+    // Capture cancellation above keeps ownership of Escape while recording.
+    const bool escape_menu = host().baseline && key && event.key.keysym.scancode == SDL_SCANCODE_ESCAPE;
+    if (!axis_event && focused && (escape_menu || matches(Action::Menu))) {
         last_menu_binding = true; transient_buttons.store(0, std::memory_order_release);
         host().set_menu_open(!host().menu_open()); return;
     }
@@ -1518,7 +1805,6 @@ void tick(SDL_Window* window, bool gameplay, bool menu_open) {
 #ifdef TOOIE_PERSISTENT_RUNTIME_EXPERIMENT
     apply_persistent_input_reset();
 #endif
-    (void)menu_open;
     frontend_window = window;
     const bool background_controller = background_input_enabled();
     sync_background_joystick_events(background_controller);
@@ -1529,21 +1815,30 @@ void tick(SDL_Window* window, bool gameplay, bool menu_open) {
     ModifierSoloBehavior solo_behavior;
     {
         std::lock_guard lock(binding_mutex);
-        table = bindings; modified_table = modified_bindings;
-        active_modifier = modifier_binding; solo_behavior = modifier_solo;
+        table = bindings;
+        modified_table = modified_bindings;
+        active_modifier = modifier_binding;
+        solo_behavior = modifier_solo;
     }
     SDL_GameController* controller;
     {
         std::lock_guard lock(controller_mutex);
         controller = selected_controller();
-        const bool wanted = desired_rumble.load(std::memory_order_acquire);
-        const auto strength = std::clamp(tooie::frontend::settings::get_number("rumble_strength", 100.0), 0.0, 100.0);
+        const double raw_strength = tooie::frontend::settings::get_number("rumble_strength", 100.0);
+        const double strength = std::isfinite(raw_strength) ? std::clamp(raw_strength, 0.0, 100.0) : 100.0;
+        const bool capable = controller && published_rumble.load(std::memory_order_acquire);
+        const bool allowed = capable && focused && gameplay && !menu_open &&
+            !input_suppressed() && strength > 0;
+        if (!allowed) desired_rumble.store(false, std::memory_order_release);
+        const bool wanted = allowed && desired_rumble.load(std::memory_order_acquire);
         const auto intensity = static_cast<Uint16>(std::lround(strength * 655.35));
         const auto now = std::chrono::steady_clock::now();
-        if (controller && (wanted != applied_rumble || chosen.load() != applied_rumble_device ||
+        if (capable && (wanted != applied_rumble || chosen.load() != applied_rumble_device ||
             (wanted && now - last_rumble_update > std::chrono::milliseconds(500)))) {
             SDL_GameControllerRumble(controller, wanted ? intensity : 0, wanted ? intensity : 0, 1000);
-            applied_rumble = wanted; applied_rumble_device = chosen.load(); last_rumble_update = now;
+            applied_rumble = wanted;
+            applied_rumble_device = chosen.load();
+            last_rumble_update = now;
         }
         published_menu_pad = {};
         if (focused && controller) {
@@ -1744,10 +2039,17 @@ void tick(SDL_Window* window, bool gameplay, bool menu_open) {
     published_enabled.store(enabled, std::memory_order_release);
     const bool fast_pressed = is_down(Action::FastForward);
     if (!fast_pressed) suppress_fast_forward = false;
+    // Baseline: release is required after menu close, after a modified keyboard
+    // press, or while a gameplay action shares the input.
+    if (host().baseline && fast_pressed && !suppress_fast_forward &&
+        (menu_closed || fast_forward_shares_gameplay_binding(table) ||
+         (down(table, Action::FastForward, keys, nullptr) &&
+          (SDL_GetModState() & (KMOD_SHIFT | KMOD_ALT | KMOD_CTRL | KMOD_GUI)))))
+        suppress_fast_forward = true;
     const bool fast = utility_allowed && fast_pressed && !suppress_fast_forward;
     if (fast && !last_fast_forward) note_discrete_action(DiscreteInputAction::FastForward);
     last_fast_forward = fast;
-    if (host().product)
+    if (const auto* product = host().product; product && product->set_fast_forward_rate)
         set_fast_forward_rate(tooie::frontend::settings::get_int("tooie_fast_forward_rate", 2));
     set_fast_forward_held(fast);
     const bool camera_enabled = enabled && focused && !focus_regained &&
@@ -1802,9 +2104,11 @@ void persistent_reset_transients() noexcept {
 }
 #endif
 void get_right_analog(int port, float* x, float* y) noexcept {
-    const auto s = snapshot();
-    if (x) *x = port == 0 && s.game_enabled ? s.right_x : 0;
-    if (y) *y = port == 0 && s.game_enabled ? s.right_y : 0;
+    // Baseline snapshot keeps N64 right axes at zero. This separate sample
+    // reads the existing gated mapper publication; no new controller poll.
+    const bool enabled = port == 0 && published_enabled.load(std::memory_order_acquire);
+    if (x) *x = enabled ? published_rx.load(std::memory_order_acquire) / 32767.0f : 0;
+    if (y) *y = enabled ? published_ry.load(std::memory_order_acquire) / 32767.0f : 0;
 }
 void set_rumble(int port, bool enabled) noexcept {
     if (port == 0) desired_rumble.store(enabled, std::memory_order_release);

@@ -1,7 +1,7 @@
-Banjo-Tooie: Scurvy Dog Port 0.1.0-alpha.4.4-dev - Windows x64
+Banjo-Tooie: Scurvy Dog Port 0.1.0-alpha.4.4 - Windows x64
 ================================================
 
-Local, unreleased development candidate. Unofficial alpha.
+Unofficial alpha release.
 The game is not included; you need your own copy.
 There is no installer.
 
@@ -61,18 +61,18 @@ AUDIO
 Mute Talon Trot movement sound is optional and applies to the next movement sound.
 
 KNOWN ISSUES
-- Widescreen can show incorrect geometry at the edges.
-- Mayahem Temple can render black in the distance.
-- Mumbo title-demo shadows can distort at Display or Manual output.
-- The save-select arm animation remains low-rate.
+- Backpack shadows and shadows while sliding on slopes can render incorrectly.
+- The latest menu and transition-edge corrections need broader player testing.
 - F6 fast-forward is not available in this player.
 - The full game has not been verified start to finish.
 
 Report problems:
 https://github.com/some-scurvy-dog/banjo-tooie-scurvy-dog-port/issues
-Press F4 during the problem to mark player.log (not a video capture).
-After closing the game, copy player.log from the profile before launching again.
-Review it for usernames/local paths, then ZIP only that copy and attach it to the
+Press F4 as soon as the problem appears. It marks player.log and saves bounded
+recent rendering evidence to issue-evidence-*.jsonl in the profile folder.
+F4 does not take a screenshot or video; record visual problems separately.
+After closing the game, copy player.log and the matching evidence report.
+Review them for usernames/local paths, then ZIP only those copies and attach to the
 issue. For private delivery, email somescurvydog@gmail.com with the issue number,
 version and marker number. Include a short video separately for visual problems.
 Never attach ROMs, saves, the whole profile or unreviewed logs.

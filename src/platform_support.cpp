@@ -110,6 +110,16 @@ struct Hasher {
 
 namespace tooie::platform {
 std::string digest(std::span<const uint8_t> bytes,bool sha256) {
+#ifdef _WIN32
+    // Windows 10+ one-shot hash on the immutable pseudo-handle; no provider is opened or closed.
+    if (!bytes.empty() && bytes.size()<=std::numeric_limits<ULONG>::max()) {
+        std::array<uint8_t,32> output{};
+        const ULONG output_size=sha256?32u:20u;
+        crypto_check(BCryptHash(sha256?BCRYPT_SHA256_ALG_HANDLE:BCRYPT_SHA1_ALG_HANDLE,nullptr,0,
+            const_cast<PUCHAR>(bytes.data()),static_cast<ULONG>(bytes.size()),output.data(),output_size),"BCryptHash");
+        return hexadecimal(std::span(output).first(output_size));
+    }
+#endif
     Hasher hash(sha256);
     hash.update(bytes);
     return hash.finish();

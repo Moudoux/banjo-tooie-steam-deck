@@ -147,6 +147,8 @@ public:
     bool owns_port() const { return scripted(); }
     bool started() const { return begun; }
     bool finished() const { return done; }
+    // Whether read() currently returns the published physical state.
+    bool delivers_physical() const { return !stopped && !latched && !scripted() && focused; }
     void publish(State value, bool physical_event, bool stop, uint64_t now, bool has_focus = true, Events* events = nullptr) {
         now = clock(now);
         physical = value;

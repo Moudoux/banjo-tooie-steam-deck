@@ -107,7 +107,7 @@ WORKER = '''void timer_thread(RDRAM_ARG1) {
                     const auto wait_deadline = ticks_to_timepoint(selected->deadline);
                     wait_duration = wait_deadline - std::chrono::steady_clock::now();
                     if (*wait_duration <= std::chrono::steady_clock::duration::zero()) {
-                        // Pinned void API hides enqueue false; retain that inherited limit.
+                        // Native admission follows enqueue_external_message's policy.
                         // Thrown allocation remains visible to the failure owner below.
                         ultramodern::enqueue_external_message(selected->queue, selected->message, false, true);
                         if (selected->interval != 0) {

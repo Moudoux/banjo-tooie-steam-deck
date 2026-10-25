@@ -1,4 +1,6 @@
 #pragma once
+#include <algorithm>
+#include <string_view>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -22,12 +24,76 @@ struct Arguments {
     std::filesystem::path input_script;              // QA only, bounded by explicit seconds.
     unsigned seconds = 0;                           // 0 runs until Quit.
     bool qa = false;
+    // QA only: an explicit graphics API for a measured control run. Default keeps the player's
+    // existing API selection; nothing is stored in the profile.
+    enum class Api { Default, Vulkan, D3D12 } api = Api::Default;
 };
 // No arguments for play, or QA: --profile-dir FOLDER [--rom FILE] [--import-save FILE]
-// [--seconds 1..900 [--input-script FILE]].
-Arguments parse_arguments(const std::vector<std::wstring>& arguments);
+// [--seconds 1..900 [--input-script FILE]] [--api vulkan|d3d12].
+namespace detail {
+template <class String>
+bool is(const String& text, std::string_view ascii) {
+    return text.size() == ascii.size() && std::equal(ascii.begin(), ascii.end(), text.begin(),
+        [](char a, typename String::value_type b) { return typename String::value_type(a) == b; });
+}
+// One QA grammar for both native argument encodings; values become paths unconverted.
+template <class String>
+Arguments parse_arguments(const std::vector<String>& arguments) {
+    Arguments result;
+    if (arguments.empty()) return result;
+    const auto usage = [] {
+        return Failure("Usage: BanjoTooieScurvyDogPort [--profile-dir FOLDER [--rom FILE] [--import-save FILE] "
+            "[--seconds 1..900 [--input-script FILE]] [--api vulkan|d3d12]]");
+    };
+    bool seconds_seen = false;
+    for (std::size_t i = 0; i < arguments.size(); i += 2) {
+        if (i + 1 == arguments.size()) throw usage();
+        const auto& name = arguments[i];
+        const auto& value = arguments[i + 1];
+        const auto take = [&](std::filesystem::path& slot) {
+            if (!slot.empty() || value.empty()) throw usage();
+            slot = value;
+        };
+        if (is(name, "--profile-dir")) take(result.profile);
+        else if (is(name, "--rom")) take(result.rom);
+        else if (is(name, "--import-save")) take(result.import_save);
+        else if (is(name, "--input-script")) take(result.input_script);
+        else if (is(name, "--seconds")) {
+            if (seconds_seen) throw usage();
+            seconds_seen = true;
+            unsigned seconds = 0;
+            bool valid = !value.empty() && value.size() <= 3;
+            for (const auto c : value) {
+                if (c < '0' || c > '9') valid = false;
+                else seconds = seconds * 10 + unsigned(c - '0');
+            }
+            if (!valid || seconds < 1 || seconds > 900) throw Failure("--seconds must be 1..900");
+            result.seconds = seconds;
+        } else if (is(name, "--api")) {
+            if (result.api != Arguments::Api::Default) throw usage();
+            if (is(value, "vulkan")) result.api = Arguments::Api::Vulkan;
+            else if (is(value, "d3d12")) result.api = Arguments::Api::D3D12;
+            else throw Failure("--api must be vulkan or d3d12");
+        } else throw usage();
+    }
+    if (result.profile.empty())
+        throw Failure("QA options require --profile-dir; start without arguments for normal play.");
+    // The existing engineering script owns port 0 only for a bounded QA run.
+    if (!result.input_script.empty() && result.seconds == 0)
+        throw Failure("--input-script requires an explicit --seconds bound.");
+    result.qa = true;
+    return result;
+}
+}
+#ifdef _WIN32
+inline Arguments parse_arguments(const std::vector<std::wstring>& arguments) { return detail::parse_arguments(arguments); }
 // Wide command line without the executable; Unicode paths survive.
 std::vector<std::wstring> command_line();
+#else
+// Native argv bytes without the executable; paths are never transcoded.
+inline Arguments parse_arguments(const std::vector<std::string>& arguments) { return detail::parse_arguments(arguments); }
+std::vector<std::string> command_line(int argc, char** argv);
+#endif
 
 // Compatibility identifier: the Alpha 4 marker name and bytes, so existing
 // explicit --profile-dir profiles and migrated profiles stay valid.
@@ -53,10 +119,19 @@ public:
     Profile& operator=(Profile&&) = delete;
     ~Profile();
     const std::filesystem::path& root() const noexcept { return root_; }
+#ifdef _WIN32
+    const std::filesystem::path& storage() const noexcept { return root_; }
 private:
     Profile(std::filesystem::path root, void* handle) : root_(std::move(root)), handle_(handle) {}
     std::filesystem::path root_;
     void* handle_ = nullptr;
+#else
+    const std::filesystem::path& storage() const noexcept { return storage_; }
+private:
+    Profile(std::filesystem::path root, int directory, std::filesystem::path storage);
+    std::filesystem::path root_, storage_;
+    int directory_ = -1;
+#endif
 };
 
 // Normal play's one-time copy of the previous default profile, made before the

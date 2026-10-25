@@ -34,6 +34,9 @@ def sha(p):
 
 
 def main():
+    if not __debug__:  # also false when PYTHONOPTIMIZE is set
+        raise SystemExit('prepare_trot_toggle_fixture.py: required validation uses assert; '
+                         'run without -O and with PYTHONOPTIMIZE unset')
     p = argparse.ArgumentParser()
     p.add_argument('--candidate', type=Path, required=True)
     p.add_argument('--elf', type=Path, required=True)

@@ -3,6 +3,22 @@
 #define TOOIE_SILO_BRIDGE_H
 #define TOOIE_BRIDGE_GUEST 1
 #include "render_bridge.h"
+/* compile_objects(shared=True) is used only by camera-pool compositions.
+ * Standalone bridge storage retains its original physical extent. This bound
+ * permits paid in-draw operations; admission spans use TOOIE_BRIDGE_LOWER_LIST_BYTES. */
+#ifndef TOOIE_BRIDGE_PHYSICAL_LIST_BYTES
+#define TOOIE_BRIDGE_PHYSICAL_LIST_BYTES 0x8FC0u
+#endif
+#if TOOIE_BRIDGE_PHYSICAL_LIST_BYTES != 0x8FC0u && TOOIE_BRIDGE_PHYSICAL_LIST_BYTES != 0x5BEC0u
+#error Invalid bridge physical command-list extent
+#endif
+/* Lower admission span: standalone storage keeps 0x8FC0. In the camera-pool composition it is the
+ * physical extent minus the 6400-byte camera tail (camera_identity.h TOOIE_BRIDGE_LOWER_BYTES). */
+#if TOOIE_BRIDGE_PHYSICAL_LIST_BYTES == 0x8FC0u
+#define TOOIE_BRIDGE_LOWER_LIST_BYTES 0x8FC0u
+#else
+#define TOOIE_BRIDGE_LOWER_LIST_BYTES (TOOIE_BRIDGE_PHYSICAL_LIST_BYTES-6400u)
+#endif
 #define SI static inline __attribute__((always_inline))
 #define SS tooie_render_bridge_state
 #define SC SS.silo_context
@@ -14,10 +30,13 @@ extern u32 D_8007BCD0[2], D_8007BCD8[2], D_8007BCE8[2], D_8007BCF0[2];
 extern s16 D_8007BEDA;
 extern u32 D_8012C948[], D_8012C838, D_8012CF8C, D_8012CEC4;
 extern u8 D_8012CA11;
+extern s32 D_8012C824;
+extern u32 D_8012C840;
 extern void* volatile D_8012C968;
 extern u8 D_8012CE58[];
 void* func_80104248(Actor*);
 void* func_80100368(Actor*);
+void* func_800AE080(s16);
 s32 func_800A89F8(void), func_800EB854(void);
 typedef struct TooieRenderBuffers { Gfx* volatile gfx; Mtx* volatile mtx; } SiloBuffers;
 SI void silo_count(volatile u32* v) { if (*v != 0xFFFFFFFFu) *v += 1u; }
@@ -25,15 +44,27 @@ SI int silo_range(u32 p, u32 n, u32 mask) {
     return p >= 0x80000000u && p <= 0x81000000u-n && !(p & mask);
 }
 SI u32 silo_pair(const Unk80132ED0* d) { return ((u32)d->unk14<<16)|d->unk16; }
+#if TOOIE_NPC665 && TOOIE_ACTOR_PALETTE
+/* Original title53 event1F reaches 015D0; metadata prefix is two halfwords. */
+SI int title53_owner(u32 actor,u32 pair,u32 data) {
+    return pair==0x065E0000u && (*(volatile u16*)(actor+0x76u)>>7)==0x53u &&
+        (*(volatile u32*)(actor+0x74u)&0x10000000u) && silo_range(data,0x44u,3u) &&
+        *(volatile u16*)(data+2u)==0x317u && *(volatile u32*)(data+0x38u)==0x80107C2Cu &&
+        *(volatile u32*)(data+0x40u)==0x80803D0Cu;
+}
+void* func_80100094(Actor*,u32);
+#endif
 SI void silo_epoch(void) {
     if (SS.epoch != SS.seen_epoch) {
         SS.seen_epoch=SS.epoch; SS.extra_bytes=0; SS.last_end=0; SS.poisoned=0;
+        SS.primary_bytes=0;
+        SS.secondary_ledger.bytes=0;
     }
 }
 SI void silo_retire(volatile struct TooieSiloSlot* e) {
     if (e->block_and_valid & TOOIE_BRIDGE_BLOCK_VALID) {
 #if TOOIE_NPC665
-        if(e->flags==TOOIE_NPC665_ROUTE)
+        if(e->flags==TOOIE_NPC665_ROUTE || e->flags==TOOIE_SKELETAL_ROUTE)
             npc665_invalidated(((u32)e-(u32)SS.silo)/72u);
 #endif
         if (SS.silo_valid_count) SS.silo_valid_count -= 1u;
@@ -45,6 +76,16 @@ SI int silo_finite(u32 p, u32 count) {
     if (!silo_range(p,count*4u,3u)) return 0;
     for (i=0;i<count;++i) if ((*(volatile u32*)(p+i*4u)&0x7F800000u)==0x7F800000u) return 0;
     return 1;
+}
+/* DE498 consumes C968 as AE080(descriptor+0x10) or shared scratch C840. This renewal-only
+ * key joins the direct pointer, or C824 input class 1/2 for scratch; never C840's address
+ * and no proof of producer. AE080 is unchecked; source allocates handles 1..249 (8001B668). */
+SI u32 actor_pose_key(u32 descriptor,u32 pose) {
+    s32 handle=*(volatile s16*)(descriptor+0x10u);
+    u32 scratch=*(volatile u32*)&D_8012C840;
+    if (!handle) return pose==scratch ? (*(volatile u32*)&D_8012C824 ? 2u : 1u) : 0u;
+    if (handle<0 || handle>=250 || pose==scratch) return 0;
+    return (u32)func_800AE080((s16)handle)==pose ? pose : 0u;
 }
 SI u32 silo_root_word(u32 i) {
     if (!i) return D_8012C948[0];
@@ -155,6 +196,8 @@ SI u32 silo_begin(SiloBuffers* b,u8* node) {
     SC.seen_roles|=1u<<(role-1u); SC.active_roles|=1u<<(role-1u);
     return role;
 }
+/* @recomp Root-role Enable, then a public MODELVIEW group with role-derived ID.
+ * Word2 is the named packed leaf policy; word3 is reserved zero. */
 SI void silo_push(SiloBuffers* b,u32 role,u32 applied) {
     volatile u32* p=(volatile u32*)b->gfx;
     if(role==1u) { p[0]=0xE0525464u; p[1]=0x10000064u; p+=2; }
@@ -164,6 +207,7 @@ SI void silo_push(SiloBuffers* b,u32 role,u32 applied) {
     SS.silo_occurrence.mtx[role-1u]=applied;
     SS.silo_occurrence.role_mask|=1u<<(role-1u);
 }
+/* @recomp Public MODELVIEW group pop: word1 has count1 and projection-selector0. */
 SI void silo_pop(SiloBuffers* b,u32 role) {
     volatile u32* p=(volatile u32*)b->gfx;
     p[0]=0x6400000Du; p[1]=1u; b->gfx=(Gfx*)(p+2);

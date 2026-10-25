@@ -9,6 +9,7 @@ import difflib
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 
 PIN = 'ca568b6ad79b9029d14077f0c3ffa757727c5559'
@@ -16,11 +17,45 @@ CLEANUP_SHA = '70582b56f42f0ad6935cb9821f7582a788a12da9f3dff5aa48a67109a9501f74'
 BASELINE_THREADS_SHA = '64ddcfdd413bd1a893ab00bae1b7b2ad08f251af446687abd605fa0ae09dabde'
 BASELINE_COMPOSED_SHA = '1dd1f42bd82ff50226e5ba2d0824ae1d3f343e08f518d0e208a8feb2adb9c48e'
 CLEANUP_PATCH_SHA = '9b4261af055d9677c061065c1d7588e79fcec74f679dac6cf12d3c069e2319fb'
+PATCH_ROOT = Path(__file__).resolve().parents[1] / 'patches/runtime'
+# Tracked edits for recipes with one behaviour over one pinned original; every mode
+# applies the same bytes. This module is itself pinned by the selected composer.
+RECIPE_PATCHES = {
+    'mesgqueue-lifecycle-wait': ('2e4d6eaa8a609424d04b304f14844265aee7095bc4d355b75d1afef2e362eced', 'mesgqueue.cpp', 3),
+    'pi-save-persistence': ('bd015254e4ee9a5c0ff13f3ac3ddda780e9e22e9a7691a7d9daa9fd29ed1685e', 'pi.cpp', 10),
+}
 def sha(data): return hashlib.sha256(data).hexdigest()
 def replace(text, old, new, count=1):
     if text.count(old) != count:
         raise RuntimeError(f'Expected {count} exact contexts, got {text.count(old)}: {old[:120]!r}')
     return text.replace(old,new)
+
+def apply_patch(text, patch, filename, expected_hunks, name):
+    # Fixed file headers/counts and unique full contexts; no fuzzy offsets.
+    def require(condition, message):
+        if not condition:
+            raise RuntimeError(message)
+    lines = patch.splitlines(keepends=True)
+    require([x for x in lines if x.startswith(('--- ', '+++ '))] == ['--- a/' + filename + '\n', '+++ b/' + filename + '\n'], 'Patch headers drift')
+    starts = [i for i, line in enumerate(lines) if line.startswith('@@ ')]
+    require(len(starts) == expected_hunks, 'Patch hunk count drift: ' + name)
+    for n, at in enumerate(starts):
+        header = re.fullmatch(r'@@ -\d+,(\d+) \+\d+,(\d+) @@[^\n]*\n', lines[at])
+        require(header is not None, 'Unexpected pinned hunk header')
+        hunk = lines[at + 1:starts[n + 1] if n + 1 < len(starts) else len(lines)]
+        require(all(x[:1] in (' ', '-', '+') for x in hunk), 'Unexpected pinned hunk line')
+        before = ''.join(x[1:] for x in hunk if x[:1] in (' ', '-'))
+        after = ''.join(x[1:] for x in hunk if x[:1] in (' ', '+'))
+        require(len(before.splitlines()) == int(header[1]) and len(after.splitlines()) == int(header[2]), 'Pinned hunk lengths drift')
+        text = replace(text, before, after)
+    return text
+
+def recipe_patch(text, name):
+    expected, filename, hunks = RECIPE_PATCHES[name]
+    data = (PATCH_ROOT / (name + '.patch')).read_bytes()
+    if sha(data) != expected:
+        raise RuntimeError('Pinned recipe patch drift: ' + name)
+    return apply_patch(text, data.decode('utf-8'), filename, hunks, name)
 
 def threads(text, baseline_threads_only=False):
     text = '#include "runtime_lifecycle.hpp"\n'+text
@@ -142,62 +177,7 @@ def threads(text, baseline_threads_only=False):
     return text
 
 def messages(text):
-    text='#include "runtime_lifecycle.hpp"\n'+text
-    text='#ifdef TOOIE_PERSISTENT_RUNTIME_EXPERIMENT\n#include "persistent_state_scheduler.hpp"\n#endif\n'+text
-    text=replace(text,'    external_messages.wait_dequeue(to_send);','''    if (tooie::lifecycle::enabled()) {
-        while (!external_messages.wait_dequeue_timed(to_send, std::chrono::milliseconds{10})) {
-            tooie::lifecycle::poll();
-#ifdef TOOIE_PERSISTENT_RUNTIME_EXPERIMENT
-            // No message was dequeued: safe to park without losing a native
-            // QueuedMessage local. Never place this after a successful dequeue.
-            tooie::persistent_state::scheduler::before_external_wait();
-#endif
-        }
-        tooie::lifecycle::poll();
-    } else {
-        external_messages.wait_dequeue(to_send);
-    }''')
-    text+='''
-#ifdef TOOIE_PERSISTENT_RUNTIME_EXPERIMENT
-extern "C" bool tooie_persistent_external_export(std::vector<tooie::persistent_state::ExternalMessage>* output) noexcept {
-    if(!output || external_messages.size_approx()>4096)return false;
-    std::vector<QueuedMessage> temporary;
-    try {
-        // Complete allocations before the first destructive dequeue.
-        temporary.reserve(4097);output->clear();output->reserve(4097);
-    } catch(...) {return false;}
-    try {
-        QueuedMessage value;
-        while(external_messages.try_dequeue(value)) {
-            temporary.push_back(value);
-            if(temporary.size()>4096)break;
-            output->push_back({value.mq,value.mesg,value.jam,value.requeue_if_blocked});
-        }
-        for(const auto& message:temporary)
-            if(!external_messages.enqueue(message))throw std::runtime_error("external FIFO requeue allocation failed");
-        if(temporary.size()>4096)throw std::runtime_error("external FIFO changed during frozen export");
-        return true;
-    } catch(...) {
-        // A partial requeue cannot be rolled back through this queue API.
-        // Do not return to gameplay or attempt a second duplicate requeue.
-        tooie::lifecycle::fail(std::current_exception());
-        tooie::persistent_state::devices::terminal_abort(tooie::persistent_state::devices::producer_epoch());
-        return false;
-    }
-}
-extern "C" bool tooie_persistent_external_import(const std::vector<tooie::persistent_state::ExternalMessage>* input) noexcept {
-    if(!input||input->size()>4096)return false;
-    try {
-        QueuedMessage value;
-        while(external_messages.try_dequeue(value)) {}
-        for(const auto& message:*input)
-            if(!external_messages.enqueue({message.queue,message.message,message.jam,message.requeue_if_blocked}))return false;
-        return true;
-    } catch(...) {return false;}
-}
-#endif
-'''
-    return text
+    return recipe_patch(text, 'mesgqueue-lifecycle-wait')
 
 BASELINE_TIMER_STOP = '''
 void tooie::lifecycle::stop_and_join_timer() {
@@ -568,55 +548,8 @@ def translation(text):
     assert(false);''')
 
 def saving(text):
-    text='#include "runtime_lifecycle.hpp"\n#include "runtime_save_root.hpp"\n#include "save_persistence.hpp"\n'+text
-    text=replace(text,'void update_save_file() {\n    bool saving_failed = false;',
-        'void update_save_file() {\n    bool saving_failed = false;\n    uint64_t saved_generation = 0;')
-    text=replace(text,'    std::filesystem::path save_folder_path = config_path / save_folder;',
-        '    std::filesystem::path save_folder_path = tooie::runtime_save_folder(config_path);')
-    text=replace(text,'            save_file.write(save_context.save_buffer.data(), save_context.save_buffer.size());',
-        '            save_file.write(save_context.save_buffer.data(), save_context.save_buffer.size());\n'
-        '            saved_generation = tooie::save_persistence::generation();\n'
-        '            if (tooie::lifecycle::enabled()) {\n'
-        '                save_file.flush();\n'
-        '                save_file.close();\n'
-        '                saving_failed = !save_file.good();\n'
-        '            }')
-    text=replace(text,'    if (saving_failed) {\n        ultramodern::error_handling::message_box(',
-        '    tooie::save_persistence::acknowledge(saved_generation ? saved_generation : tooie::save_persistence::generation(), !saving_failed);\n'
-        '    if (saving_failed) {\n        ultramodern::error_handling::message_box(')
-    for seam in [
-        '        memcpy(&save_context.save_buffer[offset], in, count);',
-        '            save_context.save_buffer[offset + i] = MEM_B(i, rdram_address);\n        }',
-        '        std::fill_n(save_context.save_buffer.begin() + start, size, value);',
-    ]:
-        text=replace(text,seam,seam+'\n        tooie::save_persistence::buffer_changed();')
-    text=replace(text,'    if (saving_failed) {\n        ultramodern::error_handling::message_box(',
-        '    if (saving_failed) {\n'
-        '        if (tooie::lifecycle::enabled())\n'
-        '            tooie::lifecycle::fail(std::make_exception_ptr(std::runtime_error("Continuous save persistence failed")));\n'
-        '        ultramodern::error_handling::message_box(')
-    text=replace(text,'''        if (save_context.swap_file_pending_sempahore.tryWait()) {
-            save_context.swap_file_ready_sempahore.signal();
-        }
-    }
-}''','''        if (save_context.swap_file_pending_sempahore.tryWait()) {
-            save_context.swap_file_ready_sempahore.signal();
-        }
-    }
-    if (tooie::lifecycle::enabled()) {
-        // The frontend can set exited before the outer continuous host admits
-        // shutdown. Do not drain while a guest producer may still write; wait
-        // for the host stop boundary and its owned producers to quiesce.
-        if (!tooie::lifecycle::wait_for_shutdown_quiescence(std::chrono::seconds{10})) {
-            tooie::lifecycle::fail(std::make_exception_ptr(std::runtime_error("Save drain requires shutdown quiescence")));
-            return;
-        }
-        bool pending_write = false;
-        while (save_context.write_sempahore.tryWait()) pending_write = true;
-        if (pending_write) update_save_file();
-    }
-}''')
-    return text
+    # Save root, temporary-file promotion, generation tracking and final drain.
+    return recipe_patch(text, 'pi-save-persistence')
 
 def standard_start(text):
     # Sole product child of the exact pinned source. Baseline never selects it.

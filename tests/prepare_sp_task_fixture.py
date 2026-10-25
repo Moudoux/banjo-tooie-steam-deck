@@ -6,8 +6,12 @@ from pathlib import Path
 import subprocess
 import sys
 
+# Each mode is the exact events child its configuration compiles: 'selected' the
+# terminal-fence lifecycle child, 'player' the F6 guest-clock child the player
+# links instead, 'parent' the pre-exception DP-freeze child.
 PINS = {
-    'selected': '585ba081a6cdc99b2fcf90cb74f94ea33c01b2f2a92ede5324efa506a6a7089e',
+    'selected': 'c680d7ba54a66010eabaad23dfa26d1c7dea35030ed0ae75cec4e5306470e9b0',
+    'player': '720195ce6c8d2a77dc6c6b256e4ec10f0f6d744337d3dfe8fbb1221ce100298c',
     'parent': '96f362c7a774c4629a2e9523ecea748a1865bc9cb54de177207c486a6e7ccf4c',
 }
 

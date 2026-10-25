@@ -3,6 +3,7 @@
 
 namespace tooie::input {
 // Each executable links one real host adapter. SDL devices remain in the mapper.
+// Any callback may be null: that utility is then not offered by this host.
 struct ProductActions {
     void (*dispatch)(Action);
     void (*set_fast_forward_rate)(std::uint32_t) noexcept;

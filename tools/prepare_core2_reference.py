@@ -31,7 +31,7 @@ def prepare_core2_reference(app,evidence, *, rom_path=None, decompressed_rom_pat
         combined+=data;offset+=2+consumed;dest=(dest+len(data)+15)&~15
     if combined!=expected or ((offset+15)&~15)!=end:
         difference=next((i for i,(a,b) in enumerate(zip(combined,expected)) if a!=b),None)
-        raise RuntimeError(f'Core2 reference mismatch: combined={len(combined)} ELF={len(expected)} first={difference} consumed={offset:#x} aligned={(offset+1)&~1:#x} ROM_end={end:#x} streams={streams}')
+        raise RuntimeError(f'Core2 reference mismatch: combined={len(combined)} ELF={len(expected)} first={difference} consumed={offset:#x} aligned={(offset+15)&~15:#x} ROM_end={end:#x} streams={streams}')
     decompressed=decompressed_rom_path.read_bytes()
     assert expected==decompressed[symbols['core2_ROM_START']:symbols['core2_ROM_START']+len(expected)]
     record=dict(core2=dict(vram=base,size=len(expected),rom=symbols['core2_ROM_START'],

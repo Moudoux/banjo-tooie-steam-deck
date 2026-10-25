@@ -9,6 +9,17 @@
 #include "../tools/baseline/guest/silo-candidate/render_bridge.h"
 #include <cstddef>
 #endif
+#ifdef TOOIE_BK_B4_FIXTURE
+// B4 BK selection: DCF48's only label is the BK bone group (bk_pipeline.c set/pop_model_matrix_group).
+#include "bk_pipeline_selection_layout.h"
+static_assert(TOOIE_BK_PIPELINE_SELECTED==1u,"B4 bone fixture requires the BK image selection");
+#ifndef TOOIE_PLAYER_STATE_ADDRESS
+#error The B4 bone fixture runs in the Silo candidate composition
+#endif
+#ifndef TOOIE_BK_GROUP_FRAME_BYTES
+#error Define TOOIE_BK_GROUP_FRAME_BYTES from the bk object frames (larger of set/pop_model_matrix_group)
+#endif
+#endif
 #ifndef TOOIE_DCF48_FRAME_BYTES
 #error Define TOOIE_DCF48_FRAME_BYTES from the actual compiled prologue
 #endif
@@ -94,7 +105,11 @@ void invoke(uint8_t* rdram) {
         c.f25.u64==25&&c.f26.u64==26&&c.f27.u64==27&&c.f28.u64==28&&c.f29.u64==29&&
         c.f30.u64==30&&c.f31.u64==31,"callee-saved FPR restoration");
     uint32_t deepest=TOOIE_DCF48_FRAME_BYTES;
-#ifdef TOOIE_PLAYER_STATE_ADDRESS
+#ifdef TOOIE_BK_B4_FIXTURE
+    // B4: besides the original callees DCF48 calls only the BK group helper pair.
+    deepest*=semantic_mode&&apply_count>1?2u:1u;
+    deepest+=TOOIE_BK_GROUP_FRAME_BYTES;
+#elif defined(TOOIE_PLAYER_STATE_ADDRESS)
     deepest*=semantic_mode&&apply_count>1?2u:1u;
     deepest+=TOOIE_PLAYER_BONE_PUSH_FRAME_BYTES>TOOIE_PLAYER_BONE_POP_FRAME_BYTES?
         TOOIE_PLAYER_BONE_PUSH_FRAME_BYTES:TOOIE_PLAYER_BONE_POP_FRAME_BYTES;
@@ -217,6 +232,67 @@ void semantic_fixture(unsigned which){
     semantic_mode=false;nested_child=false;poison_child=false;
 }
 #endif
+#ifdef TOOIE_BK_B4_FIXTURE
+// B4: the actual translated DCF48 with the actual BK group helpers (bk_pipeline.c). 0 owned,
+// 1 unowned (original bytes only), 2 pop without an entry load (no BK group to pop), 3 nested.
+constexpr uint32_t bk_state=TOOIE_BK_STATE, bk_owner_id=0x20000000u;
+// tooie_bk_state layout1 (bk_pipeline.h): current ID, offset, bones flag, diagnostics.groups.
+constexpr uint32_t bk_cur_id=52, bk_offset=60, bk_bones=64, bk_groups=728+12;
+// SIMPLE (bones in use), PUSH, MODELVIEW; vertices/texcoords SKIP: the leaf fixture's bone policy.
+constexpr uint32_t bk_bone_policy=0x02008AA9u;
+void bk_bone_fixture(unsigned which){
+    std::vector<uint8_t> ram(16*1024*1024);auto* rdram=ram.data();
+    events.clear();apply_count=0;mutate_node_after_lookup=false;
+    semantic_mode=which==3;nested_child=which==3;poison_child=false;
+    child_enabled=which>=2;mutation=which==2?2:0;
+    put(rdram,bk_state+bk_cur_id,which==1?0u:bk_owner_id);
+    put(rdram,animation_global,which==2?0u:animation);put(rdram,animation,68);put(rdram,animation+4,68);
+    put(rdram,buffers,gfx);put(rdram,buffers+4,mtx);
+    put_byte(rdram,node+9,which==3?0:0xFF);put_byte(rdram,node+8,child_enabled?128:0);
+    put_byte(rdram,node+128+9,67);put_byte(rdram,node+128+8,0);
+    for(uint32_t a=gfx-16;a<gfx+96;a+=4) put(rdram,a,0xCCCCCCCC);
+    invoke(rdram);
+    const auto group=[&](uint32_t at,uint32_t id){
+        require(word(rdram,at)==0x6400000Cu&&word(rdram,at+4)==id&&word(rdram,at+8)==bk_bone_policy&&!word(rdram,at+12),
+            "BK bone group after the original matrix load");
+    };
+    const auto pop=[&](uint32_t at){
+        require(word(rdram,at)==0xD8380002u&&word(rdram,at+4)==0x40u&&word(rdram,at+8)==0x6400000Du&&
+            word(rdram,at+12)==1u,"original matrix pop, then the BK group pop");
+    };
+    std::vector<Event> expected;uint32_t end=gfx;
+    if(which==0){
+        expected={Lookup,Combine,Apply,Pop};
+        require(word(rdram,gfx)==0xDA380002u&&word(rdram,gfx+4)==mtx,"original LOAD/PUSH first");
+        group(gfx+8,bk_owner_id+1u);pop(gfx+24);end=gfx+40;
+    }else if(which==1){
+        expected={Lookup,Combine,Apply,Pop};
+        require(word(rdram,gfx)==0xDA380002u&&word(rdram,gfx+4)==mtx&&word(rdram,gfx+8)==0xD8380002u&&
+            word(rdram,gfx+12)==0x40u,"an unowned bone keeps the original commands only");
+        end=gfx+16;
+    }else if(which==2){
+        expected={Child,Pop};
+        require(word(rdram,gfx)==child_opcode&&word(rdram,gfx+4)==child_payload&&word(rdram,gfx+8)==0xD8380002u&&
+            word(rdram,gfx+12)==0x40u,"a pop without the entry load pops no BK group");
+        end=gfx+16;
+    }else{
+        expected={Lookup,Combine,Apply,Child,Lookup,Combine,Apply,Pop,Pop};
+        require(word(rdram,gfx)==0xDA380002u&&word(rdram,gfx+4)==mtx,"outer LOAD/PUSH");group(gfx+8,bk_owner_id+1u);
+        require(word(rdram,gfx+24)==0xDA380002u&&word(rdram,gfx+28)==mtx+64u,"inner LOAD/PUSH");group(gfx+32,bk_owner_id+2u);
+        pop(gfx+48);pop(gfx+64);end=gfx+80;
+    }
+    require(events==expected,"original ordered calls");
+    require(word(rdram,buffers)==end,"exact Gfx cursor advancement");
+    require(word(rdram,buffers+4)==mtx+(which==3?128u:which==2?0u:64u),"original Mtx advancement");
+    for(uint32_t a=gfx-16;a<gfx;a+=4) require(word(rdram,a)==0xCCCCCCCCu,"Gfx leading canary");
+    for(uint32_t a=end;a<gfx+96;a+=4) require(word(rdram,a)==0xCCCCCCCCu,"no additional commands");
+    require(word(rdram,bk_state+bk_offset)==(which==3?2u:1u)&&word(rdram,bk_state+bk_bones)==1u,
+        "BK func_803387F8: offset++ and uses_bones at every bone command");
+    require(word(rdram,bk_state+bk_groups)==(which==0?1u:which==3?2u:0u),"one BK group per owned matrix load");
+    require(word(rdram,bk_state+bk_cur_id)==(which==1?0u:bk_owner_id),"bones never change the owner ID");
+    semantic_mode=false;nested_child=false;
+}
+#endif
 }
 extern "C" void func_800ADE2C(uint8_t* rdram, recomp_context* c) {
     events.push_back(Lookup);
@@ -276,12 +352,17 @@ int main() {
         run(true,true,1,false);  // Child clears C968: no pop.
         run(false,true,2,false); // Child installs C968: pop without entry load.
         run(true,false,0,false); // Leaf still pops; no dispatcher call.
-        unsigned player_cases=0;
-#ifdef TOOIE_PLAYER_STATE_ADDRESS
+        unsigned player_cases=0,bk_cases=0;
+#if defined(TOOIE_BK_B4_FIXTURE)
+        // B4: DCF48 no longer reaches the row bone tokens. Their direct helper controls (2..8) still
+        // run here; the DCF48-driven row cases (0, 1) run in the BK-OFF composition.
+        for(unsigned which=2;which<9;++which){semantic_fixture(which);++player_cases;}
+        for(unsigned which=0;which<4;++which){bk_bone_fixture(which);++bk_cases;}
+#elif defined(TOOIE_PLAYER_STATE_ADDRESS)
         for(unsigned which=0;which<9;++which){semantic_fixture(which);++player_cases;}
 #endif
         std::cout<<"DCF48 actual-body fixture passed: 5 paths; player_cases="<<player_cases
-            <<"; frame="<<TOOIE_DCF48_FRAME_BYTES<<'\n';
+            <<"; bk_cases="<<bk_cases<<"; frame="<<TOOIE_DCF48_FRAME_BYTES<<'\n';
         return 0;
     } catch(const std::exception& e) { std::cerr<<e.what()<<'\n';return 1; }
 }

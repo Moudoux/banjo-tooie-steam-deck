@@ -8,6 +8,8 @@ import re
 import struct
 import subprocess
 
+import elf_binding
+
 
 def need(ok, why):
     if not ok:
@@ -18,7 +20,7 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def archive_members(path):
+def archive_members(path, elf=False):
     data = Path(path).read_bytes()
     need(data[:8] == b'!<arch>\n', 'Invalid COFF archive signature')
     pos, names, members = 8, b'', {}
@@ -26,6 +28,7 @@ def archive_members(path):
         header = data[pos:pos + 60]
         need(len(header) == 60 and header[58:60] == b'`\n', 'Invalid archive header')
         name, size = header[:16].decode().strip(), int(header[48:58])
+        if elf: need(header[48:58].strip().isdigit(), 'Invalid GNU archive member size')
         body = data[pos + 60:pos + 60 + size]
         need(len(body) == size, 'Truncated archive member')
         if name == '//':
@@ -33,16 +36,20 @@ def archive_members(path):
         elif name not in ('/', '/SYM64/'):
             if name.startswith('/') and name[1:].isdigit():
                 start = int(name[1:])
-                end = names.find(b'\x00', start)
-                if end < 0:
+                end = names.find(b'/\n' if elf else b'\x00', start)
+                if end < 0 and not elf:
                     end = names.find(b'/\n', start)
                 need(0 <= start <= end, 'Invalid archive long name')
                 name = names[start:end].decode()
             else:
                 name = name.rstrip('/')
             name = name.replace('\\', '/')
+            if elf:
+                need('/' not in name and name not in ('.', '..'), 'GNU archive member must be a basename')
+                elf_binding.elf_type(body, (elf_binding.ET_REL,))
             need(name not in members, 'Duplicate archive member')
             members[name] = (size, hashlib.sha256(body).hexdigest())
+        if elf and size % 2: need(data[pos + 60 + size:pos + 61 + size] == b'\n', 'Invalid GNU archive padding')
         pos += 60 + size + size % 2
     need(pos == len(data), 'Archive trailing span mismatch')
     return members
@@ -50,6 +57,12 @@ def archive_members(path):
 
 def commands(args):
     rows = json.loads((args.build / 'compile_commands.json').read_text())
+    if args.format == 'elf':
+        rows = [elf_binding.compile_command(x, args.build) for x in rows
+                if (Path(x['directory']) / x['file']).resolve().parent == args.raw]
+        need(len(rows) == args.expected_count > 0, 'Selected raw command count mismatch')
+        need(len({x['output'] for x in rows}) == len(rows), 'Duplicate selected GNU object output')
+        return sorted(rows, key=lambda x: x['output'])
     rows = [x for x in rows if Path(x['file']).resolve().parent == args.raw]
     need(len(rows) == args.expected_count > 0, 'Selected raw command count mismatch')
     for row in rows:
@@ -59,6 +72,10 @@ def commands(args):
 
 
 def check_archive(args, snapshot):
+    # Windows and ELF qualifications never substitute for each other.
+    need(snapshot.get('format', 'pe') == args.format, 'Qualification format differs from the selected binary format')
+    if args.format == 'elf':
+        return check_elf_archive(args, snapshot)
     need(snapshot['raw_root'] == str(args.raw), 'Qualification raw root mismatch')
     need(commands(args) == snapshot['commands'], 'Qualified compile command mismatch')
     for row in snapshot['files']:
@@ -70,11 +87,35 @@ def check_archive(args, snapshot):
         need(obj.stat().st_size == size and sha(obj) == digest, 'Qualified object changed: ' + name)
 
 
-def qualify(args):
+def elf_objects(args, selected):
+    members = archive_members(args.archive, elf=True)
+    outputs = elf_binding.object_bijection(selected)
+    need(set(members) == set(outputs), 'GNU archive basenames differ from selected raw objects')
+    return members, outputs
+
+
+def check_elf_archive(args, snapshot):
+    need(snapshot['raw_root'] == str(args.raw), 'Qualification raw root mismatch')
+    selected = commands(args)
+    need(selected == snapshot['commands'], 'Qualified compile command mismatch')
+    for row in snapshot['files']:
+        need(sha(row['path']) == row['sha256'], 'Qualified source/dependency changed: ' + row['path'])
+    need(elf_binding.objdump_identity(args.tools) == snapshot['authority']['objdump'], 'Qualified GNU objdump identity changed')
+    members, outputs = elf_objects(args, selected)
+    need(members == {x['member']: (x['bytes'], x['sha256']) for x in snapshot['objects']}, 'Archive member identity/size/hash mismatch')
+    need({x['member']: x['name'] for x in snapshot['objects']} == outputs, 'Archive member/object bijection mismatch')
+    for row in snapshot['objects']:
+        obj = args.build / row['name']
+        need(obj.stat().st_size == row['bytes'] and sha(obj) == row['sha256'], 'Qualified object changed: ' + row['name'])
+
+
+def accepted_inputs(args, object_suffix):
     need(args.evidence and args.compile_log and args.accepted_archive_sha, 'Manual evidence arguments required')
     need(not args.snapshot.exists() or args.replace, 'Qualification exists; explicit --replace required')
     evidence = json.loads(args.evidence.read_text())
     selected = commands(args)
+    if args.format == 'elf':
+        evidence['commands'] = [elf_binding.compile_command(x, args.build) for x in evidence['commands']]
     need(sorted(evidence['commands'], key=lambda x: x['output']) == selected, 'Accepted commands differ')
     declared = {str(Path(x['path']).resolve()): x for x in evidence['files']}
     need(len(declared) == len(evidence['files']), 'Duplicate evidence input')
@@ -91,9 +132,16 @@ def qualify(args):
         need(child.parent == args.raw and sha(child) == digest, 'Canonical raw output mismatch')
         declared[str(child)] = dict(path=str(child), sha256=digest)
     evidence['files'] = list(declared.values())
-    built = re.findall(r'Building C object .*[/\\](funcs_\d+\.c)\.obj', args.compile_log.read_text())
+    built = re.findall(r'Building C object .*[/\\](funcs_\d+\.c)' + object_suffix, args.compile_log.read_text())
     need(Counter(built) == Counter(Path(x['file']).name for x in selected), 'Missing/duplicate successful compile evidence')
     need(sha(args.archive) == args.accepted_archive_sha, 'Archive differs from independently accepted bytes')
+    return evidence, selected
+
+
+def qualify(args):
+    if args.format == 'elf':
+        return qualify_elf(args)
+    evidence, selected = accepted_inputs(args, r'\.obj')
     members = archive_members(args.archive)
     expected = {x['output'].replace('\\', '/') for x in selected}
     need(len(members) == len(selected) and set(members) == expected, 'Accepted archive membership differs')
@@ -118,6 +166,38 @@ def qualify(args):
                     objects=[dict(name=n, bytes=v[0], sha256=v[1]) for n, v in sorted(members.items())],
                     authority=dict(accepted_archive_sha256=args.accepted_archive_sha, compile_evidence_sha256=sha(args.compile_log),
                                    source_evidence_sha256=sha(args.evidence), previous_snapshot_sha256=previous))
+    check_archive(args, snapshot)
+    args.snapshot.parent.mkdir(parents=True, exist_ok=True)
+    args.snapshot.write_text(json.dumps(snapshot, indent=2) + '\n')
+
+
+def qualify_elf(args):
+    evidence, selected = accepted_inputs(args, r'\.o\b')
+    objdump = elf_binding.objdump_identity(args.tools)
+    members, outputs = elf_objects(args, selected)
+    hooks, relocation_units = [], []
+    for row in selected:
+        source = Path(row['file']).read_text()
+        unit_hooks = Counter(re.findall(r'\b(baseline_\w+)\s*\(', source))
+        if not unit_hooks:
+            continue
+        actual_hooks, forms = elf_binding.hook_relocations(objdump['path'], args.build / row['output'])
+        need(set(actual_hooks) == set(unit_hooks), 'Source/relocation hook-name mismatch')
+        member = row['output'].replace('\\', '/').rsplit('/', 1)[-1]
+        relocation_units.append(dict(source=Path(row['file']).name, source_counts=dict(unit_hooks),
+                                     compiled_counts=dict(actual_hooks), relocation_forms=dict(forms)))
+        for match in re.finditer(r'RECOMP_FUNC void (\w+)\(', source):
+            end = source.find('RECOMP_FUNC void ', match.end())
+            body = source[match.start():end if end >= 0 else len(source)]
+            targets = sorted(set(re.findall(r'\b(baseline_\w+)\s*\(', body)))
+            if targets:
+                hooks.append(dict(caller=match[1], owner=args.archive.name + '(' + member + ')', member=member, targets=targets))
+    previous = sha(args.snapshot) if args.snapshot.exists() else None
+    snapshot = dict(format='elf', raw_root=str(args.raw), commands=selected, files=evidence['files'], hooks=hooks,
+                    relocation_units=relocation_units,
+                    objects=[dict(name=outputs[m], member=m, bytes=v[0], sha256=v[1]) for m, v in sorted(members.items())],
+                    authority=dict(accepted_archive_sha256=args.accepted_archive_sha, compile_evidence_sha256=sha(args.compile_log),
+                                   source_evidence_sha256=sha(args.evidence), previous_snapshot_sha256=previous, objdump=objdump))
     check_archive(args, snapshot)
     args.snapshot.parent.mkdir(parents=True, exist_ok=True)
     args.snapshot.write_text(json.dumps(snapshot, indent=2) + '\n')
@@ -148,6 +228,30 @@ def check_native(args, snapshot):
     return dict(exe_sha256=sha(args.exe), map_sha256=sha(args.map), archive_sha256=sha(args.archive), snapshot_sha256=sha(args.snapshot))
 
 
+def check_native_elf(args, snapshot):
+    tool = snapshot['authority']['objdump']['path']  # identity re-verified by check_archive
+    elf = elf_binding.Elf(args.exe)
+    gmap = elf_binding.GnuMap(args.map, args.build)
+    gmap.bind(elf, args.exe)
+    archive = args.archive.resolve()
+    linked = []
+    for row in snapshot['hooks']:
+        caller, owner, _ = elf_binding.bound_symbol(elf, gmap, row['caller'], elf_binding.STT_FUNC, True)
+        need(owner == (archive, row['member']) and row['owner'] == archive.name + '(' + row['member'] + ')',
+             'Wrong native raw caller owner')
+        branches = elf_binding.direct_branches(tool, args.exe, row['caller'], caller['value'], caller['size'])
+        targets = {}
+        for target in row['targets']:
+            hook, hook_owner, _ = elf_binding.bound_symbol(elf, gmap, target, elf_binding.STT_FUNC, True)
+            need(hook_owner[0] != archive, 'Raw hook target resolved inside the raw archive: ' + target)
+            need(('call', hook['value'], target) in branches or ('jmp', hook['value'], target) in branches,
+                 'Missing native raw hook call: ' + target)
+            targets[target] = dict(address=hook['value'], owner=elf_binding.owner_text(hook_owner, args.build))
+        linked.append(dict(caller=row['caller'], address=caller['value'], owner=row['owner'], targets=targets))
+    return dict(format='elf', exe_sha256=sha(args.exe), map_sha256=sha(args.map), archive_sha256=sha(args.archive),
+                snapshot_sha256=sha(args.snapshot), objdump_sha256=snapshot['authority']['objdump']['sha256'], hooks=linked)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode', choices=('qualify', 'archive', 'native', 'prelaunch'))
@@ -158,6 +262,7 @@ def main():
     parser.add_argument('--expected-count', type=int, required=True)
     parser.add_argument('--accepted-archive-sha')
     parser.add_argument('--replace', action='store_true')
+    parser.add_argument('--format', choices=('pe', 'elf'), default='pe')
     args = parser.parse_args()
     args.build, args.raw = args.build.resolve(), args.raw.resolve()
     if args.mode == 'qualify':
@@ -167,7 +272,7 @@ def main():
         check_archive(args, snapshot)
         if args.mode in ('native', 'prelaunch'):
             need(args.exe and args.map and args.receipt, 'Native paths required')
-            receipt = check_native(args, snapshot)
+            receipt = check_native_elf(args, snapshot) if args.format == 'elf' else check_native(args, snapshot)
             if args.mode == 'native':
                 args.receipt.write_text(json.dumps(receipt, indent=2) + '\n')
             else:

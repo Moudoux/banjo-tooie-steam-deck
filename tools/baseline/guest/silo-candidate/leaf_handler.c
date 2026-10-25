@@ -11,6 +11,13 @@
 #include "../backpack621-candidate/backpack621_owner.h"
 #endif
 #include "core1/mlmtx.h"
+#if !defined(TOOIE_BK_PIPELINE) || (TOOIE_BK_PIPELINE != 0 && TOOIE_BK_PIPELINE != 1)
+#error Explicit boolean TOOIE_BK_PIPELINE selection required
+#endif
+#if TOOIE_BK_PIPELINE
+u32 tooie_bk_list_begin(Gfx**, u32, u32);
+void tooie_bk_list_end(Gfx**, u32);
+#endif
 #define PATCH __attribute__((section(".recomp_patch"), noinline))
 
 typedef struct {
@@ -73,6 +80,14 @@ PATCH void func_800DD998(LeafBuffers* buffers, u8* node) {
             }
         }
 
+#if TOOIE_BK_PIPELINE
+        /* @recomp BK func_80338904 display-list node in the BT pair form: group plus identity
+         * MUL/NOPUSH ahead of the original list + LOAD/PUSH reload, which stay adjacent and
+         * unchanged. F070/callback rewrote these vertices after the root float rerun, so any
+         * enclosing float segments are suspended (mode 2). Supersedes the row leaf labels here. */
+        u32 bkList=tooie_bk_list_begin((Gfx**)&buffers->gfx,(u32)member,2u);
+#else
+        /* @recomp Correspondence brackets wrap the original leaf command pair. */
         u32 playerLeafToken=0;
 #if TOOIE_NPC665
         u32 npcLeafToken=0;
@@ -89,8 +104,11 @@ PATCH void func_800DD998(LeafBuffers* buffers, u8* node) {
         else
 #endif
         playerLeafToken=tooie_player_leaf_begin(buffers);
+#endif
         Gfx* cursor = buffers->gfx;
         buffers->gfx = cursor + 1;
+        /* Original 800DD998 returning gSPDisplayList (G_DL_PUSH); the list below
+         * retains its original index arithmetic and osVirtualToPhysical conversion. */
         ((volatile u32*)cursor)[0] = 0xDE000000u;
         s32 index = *(volatile s16*)(member + 8);
         u32 list = (u32)D_8012C960 + (u32)(index * 8) + 8u;
@@ -99,14 +117,19 @@ PATCH void func_800DD998(LeafBuffers* buffers, u8* node) {
         /* Reload gfx after the external conversion, as in the original. */
         cursor = buffers->gfx;
         buffers->gfx = cursor + 1;
+        /* Original F3DEX2 MODELVIEW/LOAD/PUSH reload of the current 64-byte slot. */
         ((volatile u32*)cursor)[0] = 0xDA380002u;
         ((volatile u32*)cursor)[1] = (u32)buffers->mtx;
+#if TOOIE_BK_PIPELINE
+        tooie_bk_list_end((Gfx**)&buffers->gfx,bkList);
+#else
         if (playerLeafToken) tooie_player_leaf_end(buffers);
 #if TOOIE_NPC665
         if(npcLeafToken) tooie_npc665_leaf_end((struct TooieRenderBuffers*)buffers);
 #endif
 #if TOOIE_BACKPACK621
         if(backpack621LeafToken) tooie_backpack621_leaf_end((struct TooieRenderBuffers*)buffers);
+#endif
 #endif
         member += 2;
     } while (*(volatile s16*)(member + 8));

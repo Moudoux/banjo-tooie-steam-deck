@@ -1,7 +1,7 @@
 """Regenerate CPU translations from an explicit user-owned NTSC-U ROM."""
 from pathlib import Path
 from elftools.elf.elffile import ELFFile
-import argparse, hashlib, json, os, re, subprocess, sys, toml
+import argparse, hashlib, json, os, re, subprocess, sys, tempfile, toml
 try:
     import tomllib
 except ModuleNotFoundError:
@@ -128,7 +128,39 @@ def compare_reference(generated,reference):
         raise RuntimeError(f'generated corpus differs from retained reference: {result}')
     return result
 
+# The selected player consumes exactly these products; downstream preparers pin them.
+PLAYER_INPUTS=('config/selected.syms.toml','config/overlay-ids.txt',
+               'generated/core2-expected.bin','generated/heap-patch-products/heap.o')
+def install_player_inputs(app,scratch):
+    """Install absent player prerequisites; never replace or touch an existing file."""
+    # Logical roots only: generated_directory alone would accept an alias into local/.
+    for root in (app/'generated',app/'config'):
+        if root.resolve()!=root:raise RuntimeError(f'{root} must not be an alias for --player-inputs')
+    canonical={'config':configuration_directory(app),'generated':generated_directory(app)}
+    rows,pending=[],[]
+    # Preflight all four before any install.
+    for name in PLAYER_INPUTS:
+        area,rest=name.split('/',1)
+        data=(scratch/area/rest).read_bytes();target=canonical[area]/rest
+        # A symlinked parent (e.g. heap-patch-products) or a dangling link resolves elsewhere.
+        if target.resolve()!=target or os.path.islink(target):
+            raise RuntimeError(f'{name} destination does not resolve to its canonical path')
+        if os.path.lexists(target):
+            if not target.is_file() or target.read_bytes()!=data:
+                raise RuntimeError(f'existing {name} differs from this preparation; --player-inputs never replaces it')
+        else:pending.append((target,data))
+        rows.append(dict(path=name,sha256=hashlib.sha256(data).hexdigest(),installed=not os.path.lexists(target)))
+    for target,data in pending:
+        target.parent.mkdir(parents=True,exist_ok=True)
+        if target.parent.resolve()!=target.parent:
+            raise RuntimeError(f'{target.parent} changed to an alias during installation')
+        with target.open('xb') as output:output.write(data)  # exclusive create
+    return dict(scratch=str(scratch),player_inputs=rows)
+
 def main():
+    # Imported metadata/instrumentation preparers check identity with assert.
+    if not __debug__:  # also false when PYTHONOPTIMIZE is set
+        raise SystemExit('prepare_codegen.py: required validation uses assert; run without -O and with PYTHONOPTIMIZE unset')
     validate_pinned_hashes()
     app=Path(__file__).resolve().parents[1]
     p=argparse.ArgumentParser(description=__doc__)
@@ -137,12 +169,19 @@ def main():
     p.add_argument('--n64recomp',required=True,type=Path)
     p.add_argument('--evidence',required=True,type=Path)
     p.add_argument('--coverage',type=Path,default=app/'config/startup_coverage.json')
-    p.add_argument('--work-dir',type=Path,default=app/'.codegen')
+    p.add_argument('--work-dir',type=Path,help='Default .codegen; --player-inputs always uses its scratch root')
     p.add_argument('--reference-generated',type=Path)
     p.add_argument('--generated-dir',type=Path,
                    help='Bounded temporary output root; default is canonical generated')
+    p.add_argument('--player-inputs',action='store_true',
+                   help='Prepare only the selected player prerequisites in a fresh .codegen scratch root; '
+                        'install each only if absent or byte-identical. No corpus, lifter or receipt.')
     a=p.parse_args();rom=a.rom.resolve();decomp=a.decomp_root.resolve();exe=a.n64recomp.resolve()
-    evidence=a.evidence.resolve();coverage_file=a.coverage.resolve();work=a.work_dir.resolve()
+    evidence=a.evidence.resolve();coverage_file=a.coverage.resolve();work=(a.work_dir or app/'.codegen').resolve()
+    if a.player_inputs and (a.generated_dir or a.work_dir or a.reference_generated):
+        p.error('--player-inputs uses its own scratch root and has no reference comparison')
+    if a.player_inputs and evidence.exists() and any(evidence.iterdir()):
+        p.error('--player-inputs requires a fresh --evidence directory')
     generated=generated_directory(app,a.generated_dir)
     config_dir=configuration_directory(app,generated)
     source_config=app/'config'
@@ -175,9 +214,18 @@ def main():
         raise RuntimeError(f'rebuilt ROM differs from canonical decompressed ROM: {linked_rom}')
     for path in [exe,overlays_file,coverage_file,source_config/'boundary_adjustments.json',source_config/'runtime_exclusions.json']:
         if not path.is_file():raise FileNotFoundError(path)
+    if a.player_inputs:
+        # Every step below writes only into this fresh scratch root (the existing
+        # bounded --generated-dir route); canonical files are compared at the end.
+        if (app/'.codegen').resolve()!=app/'.codegen':
+            raise RuntimeError('.codegen must not be an alias for --player-inputs scratch')
+        (app/'.codegen').mkdir(exist_ok=True)
+        generated=generated_directory(app,Path(tempfile.mkdtemp(prefix='player-inputs-',dir=app/'.codegen'))/'generated')
+        config_dir=configuration_directory(app,generated);work=generated.parent/'work'
     evidence.mkdir(parents=True,exist_ok=True);(evidence/'logs').mkdir(exist_ok=True);work.mkdir(parents=True,exist_ok=True);generated.mkdir(parents=True,exist_ok=True);config_dir.mkdir(parents=True,exist_ok=True)
-    previous=capture_output_times(app,generated,config_dir)
-    (generated/'codegen-receipt.json').unlink(missing_ok=True)
+    if not a.player_inputs:
+        previous=capture_output_times(app,generated,config_dir)
+        (generated/'codegen-receipt.json').unlink(missing_ok=True)
 
     overlays=tomllib.loads(overlays_file.read_text())['overlay']
     if len(overlays)!=884:raise RuntimeError(f'expected 884 overlay slots, found {len(overlays)}')
@@ -218,8 +266,16 @@ def main():
     if stable[350]!='.chweldarbossfireball' or stable[679]!='.gcstatusDll':raise RuntimeError('overlay slot drift')
     overlay_ids=config_dir/'overlay-ids.txt';overlay_ids.write_text('\n'.join(stable)+'\n')
     coverage['selected_ids']={name:i for i,name in enumerate(stable) if name!='*'};(evidence/'startup-coverage.json').write_text(json.dumps(coverage,indent=2)+'\n')
-    prepare_core1_metadata(app,evidence,elf_path=elf,baseline_symbols=selected_path,generated_dir=generated);prepare_main_metadata(app,evidence,elf_path=elf,generated_dir=generated)
+    if not a.player_inputs:
+        prepare_core1_metadata(app,evidence,elf_path=elf,baseline_symbols=selected_path,generated_dir=generated);prepare_main_metadata(app,evidence,elf_path=elf,generated_dir=generated)
     prepare_core2_reference(app,evidence,rom_path=rom,decompressed_rom_path=decomp_rom,elf_path=elf,generated_dir=generated)
+    if a.player_inputs:
+        # The complete existing heap pipeline and its validators, in scratch.
+        prepare_heap_patch(app,exe,selected,elf,evidence,generated_dir=generated)
+        if any(sha(path) != digest for path, digest in stable_hashes.items()):
+            raise RuntimeError('Codegen inputs changed during generation; rerun after edits freeze')
+        print(json.dumps(install_player_inputs(app,generated.parent),indent=2))
+        return 0
     prepare_overlay_validation(app.parent,generated/'overlay-validation.json',coverage=coverage_file,source=decomp,rom=rom,elf_path=elf)
     prepare_boot_reference(rom,decomp_rom,elf,generated)
     prepare_native_fixture(decomp,selected_path,generated/'native_fixture.h',elf)

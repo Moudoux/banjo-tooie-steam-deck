@@ -68,6 +68,9 @@ ControllerType selected_controller_type();
 void set_selected_controller_type(ControllerType type);
 std::vector<std::string> controller_profiles();
 std::string active_controller_profile();
+// The stored profiles (all, or the selected controller's entry) could not be read.
+// They stay unchanged, so this session's controller edits are not saved.
+bool saved_profiles_unreadable();
 bool create_controller_profile(std::string name);
 bool select_controller_profile(std::string name);
 bool rename_controller_profile(std::string name);

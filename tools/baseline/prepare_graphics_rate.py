@@ -3,10 +3,14 @@ import hashlib
 from prepare_cpu625 import facts
 from elftools.elf.elffile import ELFFile
 BODY='func_800E7EF4'
-IMPORTS={'D_8007BEDA','func_80014F4C','func_800A9800'}
+CALLS=['func_80015184','func_800A9800'] # Requested-period getter, original completion.
+IMPORTS=set(CALLS)|{'D_8007BEDA','tooie_demo_timing_state'}
+# LO16 consumers: LH slot index, ADDIU tail address, LW pending demo divisor.
+LO16_OPCODES={'D_8007BEDA':33,'tooie_graphics_rate_tail':9,'tooie_demo_timing_state':35}
 
 def compile_owner(root,out,run,flags,win):
     source=root/'tools/baseline/guest/camera-candidate/graphics_rate.c'
+    header=root/'tools/baseline/guest/camera-candidate/demo_timing.h'
     obj=out/'graphics_rate.o'
     # Source range1..60 dominates DIVU; suppress only this object's unsupported TEQ guard.
     command=flags+['-mno-check-zero-division','-c',win(source),'-o',win(obj)]
@@ -35,7 +39,7 @@ def compile_owner(root,out,run,flags,win):
             target=table.get_symbol(relocation['r_info_sym'])
             if kind==4:
                 if opcode==3:
-                    assert target['st_shndx']=='SHN_UNDEF' and target.name in {'func_80014F4C','func_800A9800'}
+                    assert target['st_shndx']=='SHN_UNDEF' and target.name in CALLS
                     calls.append(target.name)
                 else:
                     assert opcode==2 and target['st_info']['type']=='STT_SECTION' and target['st_shndx']==code_index
@@ -43,13 +47,14 @@ def compile_owner(root,out,run,flags,win):
                     assert begin<=destination<end and not destination%4
                     local_jumps.append(dict(offset=offset,destination=destination))
             else:
-                assert kind in (5,6) and target.name in {'D_8007BEDA','tooie_graphics_rate_tail'}
-                assert opcode==(15 if kind==5 else 33 if target.name=='D_8007BEDA' else 9)
+                assert kind in (5,6) and target.name in LO16_OPCODES
+                assert opcode==(15 if kind==5 else LO16_OPCODES[target.name])
                 data_relocations.append((kind,target.name))
-        assert calls==['func_80014F4C','func_800A9800'],calls
+        assert calls==CALLS,calls
+        # Measured selected compiler shape; target also proved inside this body above.
         assert len(local_jumps)==1,local_jumps
-        assert data_relocations==[(5,'D_8007BEDA'),(6,'D_8007BEDA'),
-                                  (5,'tooie_graphics_rate_tail'),(6,'tooie_graphics_rate_tail')]
+        # Scheduling may interleave the three HI16/LO16 pairs; their set is exact.
+        assert sorted(data_relocations)==sorted((kind,name) for name in LO16_OPCODES for kind in (5,6)),data_relocations
         words=[int.from_bytes(code[i:i+4],'big') for i in range(begin,end,4)]
         assert not any(w>>26==0 and w&63==9 for w in words), 'No indirect JALR added'
         assert not any(w>>26==0 and w&63==0x34 for w in words), 'Selected recompiler does not support TEQ'
@@ -57,7 +62,7 @@ def compile_owner(root,out,run,flags,win):
     record['external_calls']=calls;record['local_jumps']=local_jumps
     record['data_relocation_targets']=[list(x) for x in data_relocations]
     record['compile_argv']=[str(x) for x in command]
-    record['inputs']={str(source):hashlib.sha256(source.read_bytes()).hexdigest()}
+    record['inputs']={str(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in (source,header)}
     return record
 
 def linked(elf,previous_end):
@@ -67,4 +72,10 @@ def linked(elf,previous_end):
     assert state['sh_addr']==(previous_end+7)&~7 and state['sh_addr']+48<=0x81000000
     assert symbols['tooie_graphics_rate_tail']['st_value']==state['sh_addr'] and symbols['tooie_graphics_rate_tail']['st_size']==48
     assert symbols[BODY]['st_shndx']==elf.get_section_index('.recomp_patch') and symbols[BODY]['st_size']>0
-    return dict(state=state['sh_addr'],state_bytes=48,image_end=state['sh_addr']+48,body=BODY)
+    # The link ignores unresolved symbols, so prove the demo divisor resolved to its 8-byte state.
+    demo=elf.get_section_by_name('.tooie_demo_timing_state')
+    assert demo and demo['sh_size']==8 and 'tooie_demo_timing_state' in symbols
+    assert symbols['tooie_demo_timing_state']['st_shndx']==elf.get_section_index('.tooie_demo_timing_state')
+    assert symbols['tooie_demo_timing_state']['st_value']==demo['sh_addr']
+    return dict(state=state['sh_addr'],state_bytes=48,image_end=state['sh_addr']+48,body=BODY,
+        demo_state=demo['sh_addr'])

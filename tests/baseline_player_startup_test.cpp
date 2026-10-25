@@ -122,6 +122,24 @@ int main(int argc, char** argv) try {
     check(refused([] { parse_arguments({L"--profile-dir", L"a", L"--seconds", L"0", L"--input-script", L"s.txt"}); }),
         "input script duration must be within bounds");
 
+    // QA graphics API control: explicit, QA-only, validated; zero arguments keep the default.
+    check(play.api == Arguments::Api::Default, "zero-argument play keeps the default graphics API");
+    check(qa.api == Arguments::Api::Default && scripted.api == Arguments::Api::Default,
+        "QA without --api keeps the default graphics API");
+    const auto d3d12 = parse_arguments({L"--profile-dir", root.wstring(), L"--seconds", L"150", L"--api", L"d3d12"});
+    check(d3d12.qa && d3d12.api == Arguments::Api::D3D12 && d3d12.seconds == 150 && d3d12.profile == root,
+        "bounded QA requests D3D12 explicitly");
+    const auto vulkan = parse_arguments({L"--api", L"vulkan", L"--profile-dir", root.wstring()});
+    check(vulkan.qa && vulkan.api == Arguments::Api::Vulkan && vulkan.seconds == 0, "QA requests Vulkan explicitly in any order");
+    check(refused([] { parse_arguments({L"--api", L"d3d12"}); }), "API request requires a QA profile");
+    check(refused([] { parse_arguments({L"--profile-dir", L"a", L"--api", L"auto"}); }), "automatic API is not a QA control");
+    check(refused([] { parse_arguments({L"--profile-dir", L"a", L"--api", L"D3D12"}); }), "API value is exact lowercase");
+    check(refused([] { parse_arguments({L"--profile-dir", L"a", L"--api", L"d3d12", L"--api", L"vulkan"}); }),
+        "duplicate API refused");
+    check(refused([] { parse_arguments({L"--profile-dir", L"a", L"--api"}); }), "API without a value refused");
+    check(failure_text([] { parse_arguments({L"--profile-dir", L"a", L"--api", L"metal"}); }) == "--api must be vulkan or d3d12",
+        "API refusal is readable");
+
     // Ownership: marked before any ROM choice, exclusive, reusable after a cancelled first launch.
     const auto fresh = root / L"fresh";
     {

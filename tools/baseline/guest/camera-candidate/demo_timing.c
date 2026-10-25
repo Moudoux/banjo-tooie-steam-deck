@@ -1,7 +1,7 @@
 /* Guest-owned recorded divisor for the original replay wait. */
+#include "demo_timing.h"
 typedef unsigned int u32;
 typedef int s32;
-struct DemoTimingState { u32 pending, active; };
 __attribute__((section(".tooie_demo_timing_state")))
 struct DemoTimingState tooie_demo_timing_state = {0, 0};
 #define DEMO_HELPER __attribute__((section(".tooie_demo_timing_helpers")))

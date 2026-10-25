@@ -250,57 +250,62 @@ func = "func_800C2AB8"
 before_vram = 2148281168
 text = "if (ctx->r19 != 0) baseline_sfx_sweep_service(rdram, ctx);"
 
+# Instruction preimages are fixed by the pinned decompressed ROM 8c9d316b...
+# (prepare_baseline_raw.py PINS), not by tools/prepare_codegen.py::INSTRUCTION_PATCHES,
+# which checks only its own copy. Raw output changes require archive requalification
+# (verify_baseline_binding.py).
 [[patches.instruction]]
-# P02: 0x8001DE70 -> 0x3C0E8030 (LUI t6,0x8030; KSEG0 cached RDRAM address).
+# P02: 0x8001DE70 0x3C0EA030 LUI t6,0xA030 -> 0x3C0E8030 LUI t6,0x8030; KSEG0 cached RDRAM alias for integrity load, consumer original. Preimage pinned by decompressed ROM identity; raw generation does not assert it per site.
 func = "func_8001DE64"
-vram = 2147606128
-value = 1007583280
+vram = 0x8001DE70
+value = 0x3C0E8030
 
 [[patches.instruction]]
-# P02: 0x8001DE80 -> 0x3C188030 (LUI t8,0x8030; KSEG0 cached RDRAM address).
+# P02: 0x8001DE80 0x3C18A030 LUI t8,0xA030 -> 0x3C188030 LUI t8,0x8030; KSEG0 cached RDRAM alias for integrity load, consumer original. Preimage pinned by decompressed ROM identity; raw generation does not assert it per site.
 func = "func_8001DE64"
-vram = 2147606144
-value = 1008238640
+vram = 0x8001DE80
+value = 0x3C188030
 
 [[patches.instruction]]
-# P04: 0x80082138 -> 0x340A0000 (ORI t2,zero,0; synchronous PI status result).
+# P04: 0x80082138 0x8D2A0000 LW t2,0(t1) -> 0x340A0000 ORI t2,zero,0; synchronous PI status result. Preimage pinned by decompressed ROM identity; raw generation does not assert it per site.
 func = "func_80082088"
-vram = 2148016440
-value = 873070592
+vram = 0x80082138
+value = 0x340A0000
 
 [[patches.instruction]]
-# P04: 0x80082144 -> 0x340A0000 (ORI t2,zero,0; synchronous PI status result).
+# P04: 0x80082144 0x8D2A0000 LW t2,0(t1) -> 0x340A0000 ORI t2,zero,0; synchronous PI status result. Preimage pinned by decompressed ROM identity; raw generation does not assert it per site.
 func = "func_80082088"
-vram = 2148016452
-value = 873070592
+vram = 0x80082144
+value = 0x340A0000
 
 [[patches.instruction]]
-# P04: 0x80082148 -> 0x00000000 (NOP; separate r21 hook loads the ROM word at r21+0x40).
+# P04: 0x80082148 0x8EB50040 LW s5,0x40(s5) -> 0x00000000 NOP; the r21 hook retains the ROM-word read.
+# Preimage recorded in deps/banjo-tooie/asm/core2/1E5B6F0.s at 0x80082148; raw generation does not check it.
 func = "func_80082088"
-vram = 2148016456
-value = 0
+vram = 0x80082148
+value = 0x00000000
 
 [[patches.instruction]]
-# P01: 0x800137EC -> 0x03E00008 (JR ra; saved-return math wrapper).
+# P01: 0x800137EC 0x00A00008 JR a1 -> 0x03E00008 JR ra; host return for saved-RA math wrapper, delay slot original. Preimage pinned by decompressed ROM identity; raw generation does not assert it per site.
 func = "func_800137D4"
-vram = 2147563500
-value = 65011720
+vram = 0x800137EC
+value = 0x03E00008
 
 [[patches.instruction]]
-# P01: 0x80013810 -> 0x03E00008 (JR ra; saved-return math wrapper).
+# P01: 0x80013810 0x00A00008 JR a1 -> 0x03E00008 JR ra; host return for saved-RA math wrapper, delay slot original. Preimage pinned by decompressed ROM identity; raw generation does not assert it per site.
 func = "func_800137F4"
-vram = 2147563536
-value = 65011720
+vram = 0x80013810
+value = 0x03E00008
 
 [[patches.instruction]]
-# P01: 0x80013A74 -> 0x03E00008 (JR ra; saved-return math wrapper).
+# P01: 0x80013A74 0x00E00008 JR a3 -> 0x03E00008 JR ra; host return for saved-RA math wrapper, delay slot original. Preimage pinned by decompressed ROM identity; raw generation does not assert it per site.
 func = "func_80013A5C"
-vram = 2147564148
-value = 65011720
+vram = 0x80013A74
+value = 0x03E00008
 
 [[patches.instruction]]
-# P01: 0x80013A98 -> 0x03E00008 (JR ra; saved-return math wrapper).
+# P01: 0x80013A98 0x00E00008 JR a3 -> 0x03E00008 JR ra; host return for saved-RA math wrapper, delay slot original. Preimage pinned by decompressed ROM identity; raw generation does not assert it per site.
 func = "func_80013A7C"
-vram = 2147564184
-value = 65011720
+vram = 0x80013A98
+value = 0x03E00008
 

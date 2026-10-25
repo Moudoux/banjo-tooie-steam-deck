@@ -14,6 +14,7 @@
 #ifdef BASELINE_PLAYER
 #include "player_startup.hpp"
 #include "player_version.hpp"
+#include "issue_evidence.hpp"
 #endif
 #include <atomic>
 #ifdef BASELINE_VI_CONTROLLER_CYCLE
@@ -29,13 +30,21 @@
 #include <stdexcept>
 #include <string_view>
 #include <thread>
+#ifdef _WIN32
 #include <windows.h>
+#elif !defined(BASELINE_PLAYER)
+// Linux supports the descriptor-anchored player; engineering admission is Windows-only.
+#error Linux baseline builds require BASELINE_PLAYER
+#endif
 
 namespace {
 std::atomic<bool> runtime_error_reported = false;
 #ifdef BASELINE_PLAYER
-std::atomic<bool> runtime_error_report_done = false; // First reporter's handler returned.
+std::atomic<bool> runtime_error_report_done = false; // First report's text is retained.
+std::mutex retained_error_mutex;
+std::string retained_error; // Shown only by main after terminal closure.
 #endif
+#ifdef _WIN32
 constexpr char profile_marker[] = "TooieBaseline isolated profile v1\n";
 class ProfileLock {
     HANDLE handle = INVALID_HANDLE_VALUE;
@@ -56,6 +65,8 @@ public:
     }
     ~ProfileLock() { if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle); }
 };
+#endif
+
 struct Options {
     std::filesystem::path rom, profile, input_script;
     std::string condition;
@@ -122,17 +133,22 @@ RspUcodeFunc* reject_rsp(const OSTask* task) {
 }
 void console_error(const char* message) {
 #ifdef BASELINE_PLAYER
-    // Stock runtime message boxes arrive here; a player has no console.
+    // Stock runtime message boxes arrive here from any thread; a player has no console.
     const bool first = !runtime_error_reported.exchange(true, std::memory_order_relaxed);
-#endif
+#else
     runtime_error_reported.store(true, std::memory_order_relaxed);
+#endif
     std::fprintf(stderr, "baseline runtime error: %s\n", message);
     std::fflush(stderr);
 #ifdef BASELINE_PLAYER
     if (first) {
-        try { baseline::player::show_error(std::string("The game hit a problem and may close.\n\n") + message); }
-        catch (...) {
-            std::fputs("baseline runtime error dialog text unavailable\n", stderr);
+        // Never a dialog here: retain the first text; the SDL owner publishes quit and
+        // main shows it only after terminal closure.
+        try {
+            std::lock_guard lock(retained_error_mutex);
+            retained_error = message;
+        } catch (...) {
+            std::fputs("baseline runtime error text could not be retained\n", stderr);
             std::fflush(stderr);
         }
         runtime_error_report_done.store(true, std::memory_order_release);
@@ -149,6 +165,9 @@ Options player_options(const baseline::player::Arguments& arguments, const std::
     options.manual = arguments.seconds == 0;
     if (!options.manual) options.seconds = arguments.seconds;
     options.input_script = arguments.input_script;
+    // QA control only: an explicit API request replaces the default; without one it stays.
+    if (arguments.api == baseline::player::Arguments::Api::D3D12) options.api = ultramodern::renderer::GraphicsApi::D3D12;
+    else if (arguments.api == baseline::player::Arguments::Api::Vulkan) options.api = ultramodern::renderer::GraphicsApi::Vulkan;
     // Same rule as the engineering command line: a script needs explicit seconds, never manual.
     baseline::input::require_script_bound(!options.input_script.empty(), !options.manual, options.manual);
     return options;
@@ -195,14 +214,26 @@ bool select_player_rom(const baseline::player::Arguments& arguments, std::u8stri
         if (!baseline::player::ask_retry(problem + "\n\nChoose another file?")) return false;
     }
 }
+// Main thread only, after terminal closure with the watchdog retired.
+void show_retained_error() noexcept {
+    try {
+        std::string text;
+        {
+            std::lock_guard lock(retained_error_mutex);
+            text = retained_error;
+        }
+        if (!text.empty()) baseline::player::show_error("The game hit a problem and closed.\n\n" + text);
+    } catch (...) {
+        std::fputs("baseline retained error dialog unavailable\n", stderr);
+    }
+}
 #endif
 }
 
 #ifdef BASELINE_TERMINAL_FENCE
-bool baseline::runtime_error_report_pending() noexcept {
+bool baseline::runtime_error_retained() noexcept {
 #ifdef BASELINE_PLAYER
-    return runtime_error_reported.load(std::memory_order_acquire) &&
-        !runtime_error_report_done.load(std::memory_order_acquire);
+    return runtime_error_report_done.load(std::memory_order_acquire);
 #else
     return false; // Engineering errors go to stderr only.
 #endif
@@ -215,7 +246,11 @@ int main(int argc, char** argv) {
     try {
 #ifdef BASELINE_PLAYER
         // Zero-argument play or an explicit QA folder; the profile stays owned until exit.
+#ifdef _WIN32
         const auto player_arguments = baseline::player::parse_arguments(baseline::player::command_line());
+#else
+        const auto player_arguments = baseline::player::parse_arguments(baseline::player::command_line(argc, argv));
+#endif
         // Unattended QA reports every later failure in the log and exit code, never a dialog.
         if (player_arguments.qa) baseline::player::set_log_only_errors();
         auto profile_root = player_arguments.profile;
@@ -227,8 +262,13 @@ int main(int argc, char** argv) {
         }
         const auto player_profile = baseline::player::Profile::acquire(profile_root);
         baseline::player::open_log(player_profile.root());
+        // Reports belong beside player.log, not in the nested settings directory.
+        baseline::issue_evidence::start(player_profile.root(), baseline::player::build::version);
+        struct DiagnosticLifetime {
+            ~DiagnosticLifetime() { baseline::issue_evidence::stop(); }
+        } diagnostic_lifetime;
         if (!migration_note.empty()) std::fprintf(stderr, "%s\n", migration_note.c_str());
-        const auto options = player_options(player_arguments, player_profile.root());
+        const auto options = player_options(player_arguments, player_profile.storage());
 #else
         const auto options = parse(argc, argv);
 #endif
@@ -359,32 +399,59 @@ int main(int argc, char** argv) {
                 baseline::input_callbacks(), {nullptr, nullptr, baseline::update_gfx},
                 {baseline::vi_complete, nullptr}, {console_error}, {});
         } catch (const std::exception& error) {
+            // Runtime-owned failure without established closure: log only, never a dialog.
             std::fprintf(stderr, "baseline standard start threw: %s; process failure, ownership unaccepted\n", error.what());
             std::fflush(stderr);
-#ifdef BASELINE_PLAYER
-            baseline::player::show_error(std::string("The game could not start.\n\n") + error.what());
-#endif
             std::quick_exit(EXIT_FAILURE);
         }
 #ifdef BASELINE_VI_CONTROLLER_CYCLE
+#ifdef BASELINE_TERMINAL_FENCE
+        // The fence alone reports closure: every worker, the saver and the timer joined.
+        const bool closed = tooie::lifecycle::terminal_closed();
+#endif
 #ifdef BASELINE_SAVE_COMPOSITION
-        std::fprintf(stderr, "baseline saver receipt: returned=1 written=%llu persisted=%llu failed=%llu\n",
+        // Saver join and closure are claimed only from the fence's closure proof; generation
+        // confirmation is a separate counter fact.
+        const auto latest_save = tooie::save_persistence::generation();
+        std::fprintf(stderr, "baseline saver receipt: runtime_returned=1 saver_joined=%d closure=%d written=%llu persisted=%llu failed=%llu confirmed=%d\n",
+            int(closed), int(closed),
             static_cast<unsigned long long>(tooie::save_persistence::written.load(std::memory_order_acquire)),
             static_cast<unsigned long long>(tooie::save_persistence::persisted.load(std::memory_order_acquire)),
-            static_cast<unsigned long long>(tooie::save_persistence::failed.load(std::memory_order_acquire)));
+            static_cast<unsigned long long>(tooie::save_persistence::failed.load(std::memory_order_acquire)),
+            int(latest_save == 0 || tooie::save_persistence::complete(latest_save)));
 #endif
-        std::fprintf(stderr, "baseline terminal: standard-start allocation retained; process ending via _Exit; all-worker joins and save completion unclaimed\n");
-        baseline::emit_audio_summary();
-#if TOOIE_BASELINE_HOST
 #ifdef BASELINE_TERMINAL_FENCE
-        // A failed fence can return before joins/Deinit; retain until _Exit.
-        if(!tooie::lifecycle::failure()) baseline::close_devices();
+        std::fprintf(stderr, "baseline terminal: standard-start allocation retained; process ending via _Exit; closure=%d; save generation confirmation is separate\n", int(closed));
 #else
+        std::fprintf(stderr, "baseline terminal: standard-start allocation retained; process ending via _Exit; all-worker joins and save completion unclaimed\n");
+#endif
+        baseline::emit_audio_summary();
+#ifdef BASELINE_TERMINAL_FENCE
+        if (!closed) {
+            // Workers may be live: retain everything, no dialog, failure exit under the armed watchdog.
+            std::fputs("baseline terminal: closure not established; resources retained, graceful completion not claimed\n", stderr);
+            std::fflush(nullptr);
+            std::_Exit(1);
+        }
+#endif
+#if TOOIE_BASELINE_HOST
         baseline::close_devices();
 #endif
+#ifdef BASELINE_PLAYER
+        // This normal terminal path uses _Exit, so it does not run RAII destructors.
+        baseline::issue_evidence::stop();
 #endif
         std::fflush(nullptr);
 #ifdef BASELINE_TERMINAL_FENCE
+        {
+            std::lock_guard lock(deadline_mutex);
+            returned = true;
+        }
+        deadline_cv.notify_one();
+        watchdog.join();
+#ifdef BASELINE_PLAYER
+        show_retained_error();
+#endif
         std::_Exit((runtime_error_reported.load(std::memory_order_relaxed) || tooie::lifecycle::failure()) ? 1 : 0);
 #else
         std::_Exit(runtime_error_reported.load(std::memory_order_relaxed) ? 1 : 0);

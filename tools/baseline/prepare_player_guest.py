@@ -1,6 +1,6 @@
 """Maintained player guest recipe: baseline raw, boot/core1/heap, Silo, then the
 selected 621 composition with the existing shadow policy, qualified hand labels
-and a public refresh-rate command using the completed graphics interval.
+and a public refresh-rate command using the intended game/demo cadence.
 
 Run under the existing WSL codegen environment after tools/prepare_codegen.py has
 produced config/, generated/heap-patch-products/ and generated/core2-expected.bin
@@ -18,13 +18,19 @@ BASELINE = 'build/windows-dev/baseline'
 CAMERA = BASELINE + '/render-bridge-camera-candidate/composition-v2'
 OUTPUTS = [BASELINE + '/raw', BASELINE + '/heap-patch', BASELINE + '/render-bridge-silo-candidate', CAMERA,
            BASELINE + '/core1-publication', BASELINE + '/core2-publication', BASELINE + '/ipl3-scatter']
-# Accepted player selection; shadow_observer stays OFF.
+# Explicit render-bridge flags; shadow_observer stays OFF. Quiet/Toggled Talon
+# Trot follow backpack621 + shadow-coefficients + minimum-host in camera preparation.
+# The receipt and independent image pins below identify the complete selection.
 SELECTION = ['--actor-palette', '--demo-timing', '--shadow-fix', '--pre-background', '--cpu625',
-             '--minimum-host', '--npc665', '--backpack621', '--shadow-coefficients']
+             '--minimum-host', '--npc665', '--backpack621', '--shadow-coefficients', '--first-person-aim', '--flap-flip-landing']
 # Historical quiet-only image: 3ab2614823ac33e1d6f271aeb0ba6a34f8457efcbf5b75da6d2c4b952f7c7e7e
-IMAGE_SHA256 = 'b72419590be2a0f657e70232dc199eee5fe970bcddfe460dbf05510840f7db83'
-IMAGE_BYTES = 299640
-LAYOUT_SHA256 = '1176c1ca4aa81535788f1e56c2a1eaa138d7bcf47869a86583af23e6a43627d2'
+PRE_MUSIC_IMAGE_SHA256 = '290755f1ecd95da325877c5dab99ed807c8bc373db04ec1c8a3a85fc633f6aaf'
+PRE_MUSIC_IMAGE_BYTES = 320976
+PRE_MUSIC_LAYOUT_SHA256 = 'b726ebea67ddb48241d9fe590a41048ca7d89c576158ac36297098526746b8c7'
+# Unqualified music composition: root installs only measured, independently checked pins.
+IMAGE_SHA256 = '263e1d27d21ebd9d1604f7096cf6f97466b1b74041dbd745cce278980b21b3d8'
+IMAGE_BYTES = 1830544
+LAYOUT_SHA256 = '230267fc2b821e27c9f9dff5b4a76af1952a8df2c3df6a143d4a8e07303b0061'
 ROM_SHA256 = '9ec37fba6890362eba86fb855697a9cff1519275531b172083a1a6a045483583'
 DECOMPRESSED_SHA256 = '8c9d316b2edca686ec8393ddf95d480a7dfd9879ef434dbcfc4ea3000f2ffe89'
 # Native publication references that Baseline.cmake authenticates at configure.
@@ -58,6 +64,10 @@ def prepare_native_references(root, rom):
 
 
 def main():
+    # The camera/render/Silo steps check identity with assert; never skip them.
+    if not __debug__:  # also false when PYTHONOPTIMIZE is set
+        raise SystemExit('prepare_player_guest.py: required validation uses assert; '
+                         'run without -O and with PYTHONOPTIMIZE unset')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=Path.cwd())
     parser.add_argument('--rom', type=Path, required=True, help='User-supplied NTSC-U ROM; never copied')
@@ -83,12 +93,14 @@ def main():
     def run(command, label):
         with (camera / label).open('w') as log:
             subprocess.run(list(map(str, command)), cwd=root, stdout=log, stderr=subprocess.STDOUT, check=True)
+    # P04a: the carrier's CPU625 object uses the image's derived ckpack copy-storage selection
+    # (CPU625 + Flap Flip, prepare_camera_bridge.prepare), so the 621 custody check compares like objects.
     camera_owner.compile_backpack621_carrier(root, camera, run, actor_palette=True, pre_background=True,
-                                             cpu625=True, npc665=True)
+                                             cpu625=True, npc665=True, ckpack_copy_storage=True)
     step('prepare_render_bridge.py', '--camera', '--raw', '--image', *SELECTION)
     image, receipt = camera / 'boot.bin', json.loads((camera / 'receipt.json').read_text())
     if (sha(image) != IMAGE_SHA256 or image.stat().st_size != IMAGE_BYTES or
-            sha(camera / 'render_bridge_layout.h') != LAYOUT_SHA256 or receipt.get('shadow_coefficients') is not True or receipt.get('talon_trot_toggle') is not True):
+            sha(camera / 'render_bridge_layout.h') != LAYOUT_SHA256 or receipt.get('shadow_coefficients') is not True or receipt.get('talon_trot_toggle') is not True or receipt.get('first_person_aim') is not True or receipt.get('flap_flip_landing') is not True):
         raise ValueError('selected player guest image/layout/policy differs')
     record = dict(selection=SELECTION, image_sha256=IMAGE_SHA256, image_bytes=IMAGE_BYTES,
                   layout_sha256=LAYOUT_SHA256, raw_binding_sha256=sha(camera / 'RAW_BINDING.json'),

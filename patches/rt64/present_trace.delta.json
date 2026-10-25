@@ -1,0 +1,161 @@
+{
+  "schema": 1,
+  "name": "rt64_present_trace",
+  "delta_revision": 2,
+  "upstream": {
+    "dependency": "rt64",
+    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "path": "src/hle/rt64_present_queue.cpp",
+    "sha256": "023dc3f4bc74bf6863e37ad1781fb32eaa543a7713bd8b9a3757b2262a1a1e52",
+    "lines": 549
+  },
+  "output": {
+    "filename": "rt64_present_queue.cpp",
+    "sha256": "69b1a452650b419e63772ed848edd6f86463562cf49dcc685a23d909f6e545a1",
+    "lines": 593
+  },
+  "operations": [
+    {
+      "original_start": 5,
+      "original_end": 5,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "#include \"pacing_present_probe.hpp\"\n"
+      ]
+    },
+    {
+      "original_start": 269,
+      "original_end": 269,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "            const bool traceStages = tooie_rt64_present_trace_enabled();\n",
+        "            tooie::pacing::PresentStageTimes traceTimes{};\n",
+        "            const auto tracePhaseStart = traceStages ? tooie_rt64_present_trace_clock_ns() : 0;\n",
+        "            std::uint64_t traceStageStart = 0;\n"
+      ]
+    },
+    {
+      "original_start": 272,
+      "original_end": 272,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                if (traceStages) traceStageStart = tooie_rt64_present_trace_clock_ns();\n"
+      ]
+    },
+    {
+      "original_start": 277,
+      "original_end": 277,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                if (traceStages) {\n",
+        "                    traceTimes.interp_ns = tooie_rt64_present_trace_clock_ns() - traceStageStart;\n",
+        "                    traceTimes.measured |= 1u;\n",
+        "                }\n"
+      ]
+    },
+    {
+      "original_start": 302,
+      "original_end": 302,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                if (traceStages) traceStageStart = tooie_rt64_present_trace_clock_ns();\n"
+      ]
+    },
+    {
+      "original_start": 303,
+      "original_end": 303,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                if (traceStages) {\n",
+        "                    traceTimes.acquire_ns = tooie_rt64_present_trace_clock_ns() - traceStageStart;\n",
+        "                    traceTimes.measured |= 2u;\n",
+        "                }\n"
+      ]
+    },
+    {
+      "original_start": 367,
+      "original_end": 367,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                    if (traceStages) traceStageStart = tooie_rt64_present_trace_clock_ns();\n"
+      ]
+    },
+    {
+      "original_start": 368,
+      "original_end": 368,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                    if (traceStages) {\n",
+        "                        traceTimes.worker_ns = tooie_rt64_present_trace_clock_ns() - traceStageStart;\n",
+        "                        traceTimes.measured |= 4u;\n",
+        "                    }\n"
+      ]
+    },
+    {
+      "original_start": 393,
+      "original_end": 393,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                    if (traceStages) traceStageStart = tooie_rt64_present_trace_clock_ns();\n"
+      ]
+    },
+    {
+      "original_start": 394,
+      "original_end": 394,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                    if (traceStages) {\n",
+        "                        traceTimes.sleep_ns = tooie_rt64_present_trace_clock_ns() - traceStageStart;\n",
+        "                        traceTimes.measured |= 8u;\n",
+        "                    }\n"
+      ]
+    },
+    {
+      "original_start": 397,
+      "original_end": 397,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                    if (traceStages) traceStageStart = tooie_rt64_present_trace_clock_ns();\n"
+      ]
+    },
+    {
+      "original_start": 398,
+      "original_end": 398,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                    if (traceStages) {\n",
+        "                        traceTimes.present_wait_ns = tooie_rt64_present_trace_clock_ns() - traceStageStart;\n",
+        "                        traceTimes.measured |= 16u;\n",
+        "                    }\n"
+      ]
+    },
+    {
+      "original_start": 402,
+      "original_end": 402,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                if (traceStages) traceStageStart = tooie_rt64_present_trace_clock_ns();\n"
+      ]
+    },
+    {
+      "original_start": 403,
+      "original_end": 403,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                if (traceStages) {\n",
+        "                    const auto traceEnd = tooie_rt64_present_trace_clock_ns();\n",
+        "                    traceTimes.present_ns = traceEnd - traceStageStart;\n",
+        "                    traceTimes.phase_ns = traceEnd - tracePhaseStart;\n",
+        "                    traceTimes.measured |= 32u | 64u;\n",
+        "                }\n",
+        "                // color_fb remains unobserved: no target pointer after workload unlock.\n",
+        "                tooie_rt64_present_trace_staged(present.presentId, present.workloadId, uint32_t(presentationMode),\n",
+        "                    present.screenVI.origin, present.screenVI.fbAddress(), 0,\n",
+        "                    present.screenVI.xTransform.word, present.screenVI.yTransform.word,\n",
+        "                    present.screenVI.hRegion.word, present.screenVI.vRegion.word,\n",
+        "                    uint32_t(i), uint32_t(framesToPresent), viOriginalRate, targetRate,\n",
+        "                    swapChainValid, ext.swapChain->isVsyncEnabled(), traceStages ? &traceTimes : nullptr);\n"
+      ]
+    }
+  ]
+}

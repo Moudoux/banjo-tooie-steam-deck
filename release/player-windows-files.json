@@ -1,14 +1,14 @@
 {
   "schema": 1,
   "product": "Banjo-Tooie: Scurvy Dog Port",
-  "version": "0.1.0-alpha.4.4-dev",
-  "tag": "v0.1.0-alpha.4.4-dev",
-  "archive": "BanjoTooieScurvyDogPort-Alpha4.4-dev-Windows-x64.zip",
+  "version": "0.1.0-alpha.4.4",
+  "tag": "v0.1.0-alpha.4.4",
+  "archive": "BanjoTooieScurvyDogPort-Alpha4.4-Windows-x64.zip",
   "executable": "BanjoTooieScurvyDogPort.exe",
   "reviewRule": "Package exactly these paths plus package-manifest.json. Build rows come from the gated build directory; source rows must be tracked files of the clean release commit. Keep every existing third-party notice; never prune attribution.",
   "guest": {
-    "sha256": "b72419590be2a0f657e70232dc199eee5fe970bcddfe460dbf05510840f7db83",
-    "bytes": 299640
+    "sha256": "263e1d27d21ebd9d1604f7096cf6f97466b1b74041dbd745cce278980b21b3d8",
+    "bytes": 1830544
   },
   "rawFunctionCount": 416,
   "build": {
@@ -47,7 +47,10 @@
       "TOOIE_BASELINE_SAVE_COMPOSITION",
       "TOOIE_BASELINE_SILO_CANDIDATE",
       "TOOIE_BASELINE_TERMINAL_FENCE",
-      "TOOIE_BASELINE_VI_CONTROLLER_CYCLE"
+      "TOOIE_BASELINE_VI_CONTROLLER_CYCLE",
+      "TOOIE_BASELINE_PRESENT_TRACE",
+      "TOOIE_BASELINE_RT64_VULKAN_ACQUIRE_PACING",
+      "TOOIE_BASELINE_MATRIX_TRACE"
     ],
     "off": [
       "TOOIE_BASELINE_CAMERA_CPU_OBSERVER",
@@ -87,13 +90,13 @@
       "path": "dxcompiler.dll",
       "from": "build",
       "source": "baseline/player-bin/dxcompiler.dll",
-      "sameAsDependency": "rt64/src/contrib/dxc/bin/x64/dxcompiler.dll"
+      "sameAsDependency": "DXC-v1.8.2502-Windows/bin/x64/dxcompiler.dll"
     },
     {
       "path": "dxil.dll",
       "from": "build",
       "source": "baseline/player-bin/dxil.dll",
-      "sameAsDependency": "rt64/src/contrib/dxc/bin/x64/dxil.dll"
+      "sameAsDependency": "DXC-v1.8.2502-Windows/bin/x64/dxil.dll"
     },
     {
       "path": "README.txt",
@@ -262,6 +265,10 @@
     },
     {
       "path": "third_party/notices/X-Scale-CIC-BSD.txt",
+      "from": "source"
+    },
+    {
+      "path": "third_party/notices/BanjoRecomp-GPL-3.0.txt",
       "from": "source"
     }
   ]
