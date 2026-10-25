@@ -6,10 +6,12 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <vector>
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
@@ -118,7 +120,10 @@ struct Job {
     Snapshot<PlayerTransformRecord> player_transforms;
     Snapshot<PlayerProjectionRecord> player_projections;
     sound_trace::Snapshot audio;
+    std::vector<uint8_t> rdram; // Guest RDRAM at F4, empty when unknown.
 };
+constexpr size_t rdram_bytes=0x800000;
+std::atomic<const uint8_t*> guest_rdram{};
 struct State {
     std::mutex mutex;
     std::condition_variable wake;
@@ -589,6 +594,27 @@ Json coverage() {
         {"transition_source_draw_semantics","indexed RSP triangles; current raw world pose with selected CPU projection; RSP NDC y=-clip_y/w; no velocity, clipping, raster conversion or opaque coverage"},
         {"player_matrix_encoding","f32_bits_hex_row_major"}};
 }
+// Map, controlled player and its position (the chain tools read from a dump), from the F4
+// snapshot. The guest's floats are host-native words in the recomp layout.
+Json game_state(const std::vector<uint8_t>& rdram, const std::string& report) {
+    const auto word=[&](uint32_t address, uint32_t& out) {
+        if (address<0x80000000u || address-0x80000000u>rdram_bytes-4 || (address&3)) return false;
+        std::memcpy(&out,rdram.data()+(address-0x80000000u),4); return true;
+    };
+    const auto half=[&](uint32_t address) {
+        uint16_t value{}; std::memcpy(&value,rdram.data()+((address-0x80000000u)^2u),2); return value;
+    };
+    Json row{{"type","game_state"},{"map",half(0x80132DC2u)},
+        {"rdram_file",report.substr(0,report.size()-6)+"-rdram.bin"},{"rdram_layout","recomp_le_words"}};
+    uint32_t slot{}, player{}, position{};
+    if (word(0x801354DCu,slot) && slot<8 && word(0x80135490u+4*slot,player) && word(player+0xE4u,position)) {
+        float xyz[3]{};
+        for (int i=0; i<3; ++i) { uint32_t bits{}; if (word(position+4*i,bits)) std::memcpy(&xyz[i],&bits,4); }
+        row["player_slot"]=slot; row["player"]=player; row["player_position_address"]=position;
+        row["player_position"]={xyz[0],xyz[1],xyz[2]};
+    }
+    return row;
+}
 struct FileCloser { void operator()(FILE* file) const noexcept { if(file) std::fclose(file); } };
 Completion export_job(const Job& job, const std::filesystem::path& root,
     const std::string& run, const std::string& version, const std::string& hash, const char* hash_error) {
@@ -640,6 +666,7 @@ Completion export_job(const Job& job, const std::filesystem::path& root,
             "flags_declare_absent_fields");
         if (ok) ok=write_domain(writer,"player_projection",job.player_projections,player_projection_capacity,
             "flags_declare_absent_fields");
+        if (ok && !job.rdram.empty()) ok=writer.append(game_state(job.rdram,result.filename));
         failure=ok ? "" : writer.error;
         // Both destinations use job.audio, captured once on F4. The worker does all I/O.
         if (!sound_trace::dump(stderr,job.marker,job.audio) && ok) { ok=false; failure="audio_log"; }
@@ -653,6 +680,12 @@ Completion export_job(const Job& job, const std::filesystem::path& root,
     FILE* closing=file.release();
     if (std::fclose(closing)!=0) { ok=false; failure="file_close"; }
     result.bytes=writer.bytes;
+    if (ok && !job.rdram.empty()) {
+        const auto stem=result.filename.substr(0,result.filename.size()-6); // Drop ".jsonl".
+        std::unique_ptr<FILE,FileCloser> dump(open_exclusive(root/(stem+"-rdram.bin")));
+        if (!dump || std::fwrite(job.rdram.data(),1,job.rdram.size(),dump.get())!=job.rdram.size() ||
+            std::fclose(dump.release())!=0) { ok=false; failure="rdram_write"; }
+    }
     result.success=ok;
     if (!ok) result.error=*failure ? failure : "file_write";
     return result;
@@ -780,6 +813,8 @@ bool capture(unsigned marker) noexcept {
         job->publications=detail::publications.snapshot();
         job->player_transforms=detail::player_transforms.snapshot();
         job->player_projections=detail::player_projections.snapshot();
+        if (const uint8_t* rdram=detail::guest_rdram.load(std::memory_order_acquire))
+            job->rdram.assign(rdram,rdram+detail::rdram_bytes); // Racy by design: one diagnostic copy.
         {
             std::lock_guard guard(detail::state.mutex);
             if (detail::state.stopping) {
@@ -797,6 +832,9 @@ bool capture(unsigned marker) noexcept {
         try { detail::publish(Completion{marker,false,"","capture_failed",0}); } catch (...) {}
         return false;
     }
+}
+void set_guest_rdram(const uint8_t* rdram) noexcept {
+    detail::guest_rdram.store(rdram,std::memory_order_release);
 }
 std::optional<Completion> poll() {
     std::lock_guard guard(detail::state.mutex);

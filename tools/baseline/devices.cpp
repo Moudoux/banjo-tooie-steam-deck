@@ -362,6 +362,7 @@ public:
         core.HEADER = header.data(); core.RDRAM = rdram;
 #if BASELINE_PLAYER
         guest_rdram = rdram;
+        issue_evidence::set_guest_rdram(rdram);
 #endif
         core.DMEM = dmem.data(); core.IMEM = imem.data();
         core.checkInterrupts = check_interrupts;

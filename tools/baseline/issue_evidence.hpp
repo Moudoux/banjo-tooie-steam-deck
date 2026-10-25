@@ -150,4 +150,8 @@ void start(const std::filesystem::path& log_root, const std::string& version) no
 void stop() noexcept;
 bool capture(unsigned marker) noexcept;
 std::optional<Completion> poll();
+// The one exception to "no guest memory": capture also copies the 8 MB guest RDRAM
+// (recomp layout) once, written next to the report as <report>-rdram.bin, so the
+// reported spot (map, player, camera) can be reproduced exactly.
+void set_guest_rdram(const uint8_t* rdram) noexcept;
 } // namespace baseline::issue_evidence

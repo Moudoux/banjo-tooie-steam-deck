@@ -283,6 +283,15 @@ Steam Deck features:
   kept): the same scripted run snapped at workloads 884 and 887 every time
   without the recipe and never with it. Also worth reporting upstream (RT64).
 
+- **F4 reports carry a guest RAM snapshot** (`tools/baseline/issue_evidence.cpp`):
+  F4 also copies the 8 MB guest RDRAM once and writes it next to the report as
+  `<report>-rdram.bin` (recomp layout), plus a `game_state` row (map, player
+  position). The rest of the report still keeps no guest memory. Use it to
+  reproduce a reported spot exactly: the viewport is `*0x8012D500` (eye `+0`,
+  forward `+0xC`, pitch/yaw `+0x18`, frustum and view basis to `+0xE0`) and
+  Banjo's facing is player `+0x3F4`; `local/deck-perf/hfp/prof/drive.py`'s
+  `pin` copies a report's viewport over a local run.
+
 - **Heap: low-memory cleanup and a bigger pool.** Extended draw distance draws
   the props of many more cubes, and their models fill the game's heap in dense
   levels (Glitter Gulch Mine at 6x quit the player within seconds of entering).
@@ -793,7 +802,8 @@ breaks one of them is not done. In practice:
   options, draw distance and LOD, frustum padding, underwater sway width,
   minimap, levitate,
   autosave, heap, analog camera, mouse/gyro aim, the culling and camera
-  fixes, the startup dummy-workload fix, and anything added since).
+  fixes, the F4 RAM snapshot, the startup dummy-workload fix, and anything
+  added since).
 - When a conflict or a moved/failed raw hook touches one, carry it over (move
   the hook, re-anchor the code); never drop it to make the build pass.
 - Drop ours only where upstream now provides the same feature (as with rumble,
