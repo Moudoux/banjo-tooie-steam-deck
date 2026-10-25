@@ -1,12 +1,15 @@
 #include "level_minimap.hpp"
+#include "map_names.hpp"
 
 #include "imgui/imgui.h"
 
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <cfloat>
 #include <chrono>
 #include <cmath>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <unordered_set>
@@ -34,24 +37,97 @@ constexpr std::uint32_t k_current_map = 0x80132DC2U; // func_800EA05C.
 // looks along -(sin, cos) of it, the player faces +(sin, cos) of its yaw.
 constexpr std::uint32_t k_controlled = 0x801354DCU, k_players = 0x80135490U;
 constexpr std::uint32_t k_camera = 0x8012D500U;
+// Actors: a Vector (include/vector.h: element size, begin, end, capacity end)
+// whose pointer is at 0x80136EE0; func_80106668 pushes each 0x9C-byte actor.
+// Every actor of the loaded map is in it, not only those near the player, and
+// one leaves it when collected. func_80107C2C (the descriptors' spawner) puts
+// the position (f32 x3) at +0x04 and the descriptor's actor id (u16 +0x02, the
+// gemarkersDll table index) in bits 9..20 of +0x6C.
+constexpr std::uint32_t k_actors = 0x80136EE0U, k_actor_size = 0x9CU, k_actor_limit = 0x400U;
+// Game state, D_80127630 +0x02 (func_800A759C): 3 in play, 4 paused, with
+// gcnewpause's instance at 0x80128AF0 (func_800C08F8 / func_800C0920).
+constexpr std::uint32_t k_game_state = 0x80127632U, k_pause_menu = 0x80128AF0U;
 constexpr std::uint32_t k_rdram_first = 0x80000400U, k_rdram_end = 0x80800000U;
 
-constexpr float k_view_radius = 3000.0f; // World units from the centre to the edge.
-constexpr float k_above = 300.0f;        // Floors this far over the player are faded.
+// World units from the centre to the edge, per zoom level.
+constexpr float k_zoom_radius[tooie::level_minimap::zoom_levels] = {6000, 4500, 3000, 2000, 1500, 1000};
+constexpr const char* k_zoom_labels[tooie::level_minimap::zoom_levels] = {"0.5x", "0.67x", "1x", "1.5x", "2x", "3x"};
+constexpr float k_full_zoom_step = 1.5f;
+constexpr int k_full_zoom_max = 6;
+constexpr float k_above = 300.0f;  // Floors this far over the player are faded.
+constexpr float k_marker_level = 400.0f; // Markers this far above or below are dimmed.
 constexpr auto k_stale = std::chrono::milliseconds(300);
+
+// Marker kinds by actor id (gemarkersDll table: overlay that returns the descriptor).
+enum class Kind : std::uint8_t { MumboSkull, Wigwam, WarpPad, MumboPad, Jinjo, NoteNest, TrebleClef, CheatoPage, Jiggy, Count };
+struct KindInfo { std::uint16_t actor; const char* label; };
+constexpr KindInfo k_kinds[] = {
+    {0, "Mumbo's Skull"},     // Level geometry: k_doors.
+    {0, "Wumba's Wigwam"},    // Level geometry: k_doors.
+    {0x1E5, "Warp pad"},      // chwarppad
+    {0x2B0, "Mumbo pad"},     // chmumbopad
+    {0x1F4, "Jinjo"},         // chjinjo
+    {0x1D7, "Note nest"},     // chnests (16 in each world)
+    {0x1D8, "Treble Clef"},   // chnests (one in each world)
+    {0x136, "Cheato page"},   // chcheatopage
+    {0x21F, "Jiggy"},         // chjigsaw
+};
+static_assert(std::size(k_kinds) == std::size_t(Kind::Count));
+// Mumbo's Skull and Wumba's Wigwam are level geometry, not actors: where the player
+// stands after walking out of each one's map (measured with local/minimap/capture.py,
+// owner's save, 2026-10-25). The wigwam that grows in Terrydactyland uses the small one's door.
+struct Door { std::uint16_t map; Kind kind; float x, y, z; };
+constexpr Door k_doors[] = {
+    {0x0B8, Kind::MumboSkull, 2985, 2100, 4056},   // Mayahem Temple (from 0x0B7).
+    {0x0C4, Kind::Wigwam, 6348, -1060, 6435},      // Jade Snake Grove (0x0B6).
+    {0x0C7, Kind::MumboSkull, 9233, 1283, 3114},   // Glitter Gulch Mine (0x0D9).
+    {0x0C7, Kind::Wigwam, -3377, 734, 1833},       // (0x0E9).
+    {0x0E7, Kind::MumboSkull, 3347, 112, -3012},   // Witchyworld, The Inferno (0x176).
+    {0x0D6, Kind::Wigwam, 7325, 1150, -3348},      // Witchyworld (0x0D5).
+    {0x1A7, Kind::MumboSkull, -5912, 9700, -10225}, // Jolly Roger's Lagoon (0x0EF).
+    {0x1A8, Kind::Wigwam, -17334, -236, 8942},     // Atlantis (0x120).
+    {0x112, Kind::MumboSkull, 11818, 183, 3666},   // Terrydactyland (0x171).
+    {0x112, Kind::Wigwam, 107, 1786, 2185},        // (0x11E; 0x122's door is at 250, 2759).
+    {0x108, Kind::MumboSkull, -5173, 100, 4246},   // Grunty Industries floor 3 (0x172).
+    {0x106, Kind::Wigwam, 1173, -100, 3410},       // Grunty Industries floor 2 (0x11F).
+    {0x127, Kind::MumboSkull, -6421, 1500, -1678}, // Hailfire Peaks lava side (0x134).
+    {0x128, Kind::Wigwam, -5150, -98, -3256},      // Hailfire Peaks icy side (0x135).
+    {0x136, Kind::MumboSkull, -9, 3350, -7541},    // Cloud Cuckooland (0x13E).
+    {0x136, Kind::Wigwam, 14910, -1000, 6359},     // (0x140).
+    {0x155, Kind::MumboSkull, 3215, 1250, 4799},   // Isle o' Hags, Cliff Top (0x156).
+    {0x154, Kind::Wigwam, -3748, 0, -310},         // Isle o' Hags, Pine Grove (0x157).
+};
 
 struct Floor { float x[3], z[3], y, y_min; bool water; };
 struct Wall { float x0, z0, x1, z1, y_min, y_max; };
 struct Mesh { std::vector<Floor> floors; std::vector<Wall> walls; }; // Floors low to high.
+struct Marker {
+    Kind kind; float x, y, z;
+    bool operator==(const Marker&) const = default;
+};
 struct Source { std::uint32_t collision = 0, vertices = 0; float offset[3]{}; bool water = false; };
-struct Pose { float x = 0, y = 0, z = 0, yaw = 0, view_yaw = 0; std::chrono::steady_clock::time_point at{}; };
+struct Pose { float x = 0, y = 0, z = 0, yaw = 0, view_yaw = 0; std::uint16_t map = 0; std::chrono::steady_clock::time_point at{}; };
+// Full-screen map: zoom steps over the fitted view, the view centre (u, v) in map
+// coordinates (right, up from the player, world units), the fitted extent
+// (centre, half sizes) and the half width the last frame showed.
+struct Full {
+    bool open = false, fitted = false; int zoom = 0;
+    float u = 0, v = 0, fit_u = 0, fit_v = 0, half_u = 1, half_v = 1, view = 1;
+};
 
 std::atomic<bool> on{true};
+std::atomic<int> zoom_level{tooie::level_minimap::default_zoom};
+std::atomic<std::int64_t> updated_at{0}; // steady_clock ticks of the last pose.
+std::atomic<bool> game_paused{false};
+std::atomic<std::uint16_t> screen_map{0};
 std::mutex mutex;
-std::shared_ptr<const Mesh> published; // Guarded by mutex, with pose.
+std::shared_ptr<const Mesh> published; // Guarded by mutex, with pose, markers and full.
+std::shared_ptr<const std::vector<Marker>> markers;
 Pose pose;
+Full full;
 // Guest thread only.
 std::vector<std::uint32_t> signature;
+std::vector<Marker> sampled;
 
 bool guest_range(std::uint32_t address, std::uint32_t bytes) noexcept {
     return address >= k_rdram_first && bytes <= k_rdram_end - k_rdram_first &&
@@ -145,46 +221,123 @@ void add_source(std::uint8_t* rdram, const Source& source, Mesh& mesh) {
         } // Ceilings are left out.
     }
 }
+
+void sample_markers(std::uint8_t* rdram, std::uint16_t map, std::vector<Marker>& out) {
+    out.clear();
+    for (const auto& door : k_doors) if (door.map == map) out.push_back({door.kind, door.x, door.y, door.z});
+    const auto vector = word(rdram, k_actors);
+    if (!guest_range(vector, 0x10U) || word(rdram, vector) != k_actor_size) return;
+    const auto begin = word(rdram, vector + 4U), end = word(rdram, vector + 8U);
+    if (end < begin || (end - begin) % k_actor_size || (end - begin) / k_actor_size > k_actor_limit ||
+        !guest_range(begin, end - begin)) return;
+    for (auto actor = begin; actor < end; actor += k_actor_size) {
+        const auto id = (word(rdram, actor + 0x6CU) >> 9) & 0xFFFU;
+        const auto* kind = std::find_if(std::begin(k_kinds), std::end(k_kinds), [id](const KindInfo& k) { return k.actor && k.actor == id; });
+        if (kind == std::end(k_kinds)) continue;
+        const Marker marker{Kind(kind - std::begin(k_kinds)), real(rdram, actor + 4U), real(rdram, actor + 8U), real(rdram, actor + 12U)};
+        if (std::isfinite(marker.x) && std::isfinite(marker.y) && std::isfinite(marker.z)) out.push_back(marker);
+    }
 }
 
-namespace tooie::level_minimap {
-
-void set_enabled(bool enabled) noexcept { on.store(enabled, std::memory_order_release); }
-bool enabled() noexcept { return on.load(std::memory_order_acquire); }
-
-void render() {
-    if (!enabled()) return;
-    std::shared_ptr<const Mesh> mesh;
+// Map frame: (u, v) = (right, up) from the player, rotated so the camera looks up.
+struct View {
+    ImVec2 lo, hi, centre;
+    float k, u, v, sine, cosine; // Pixels per unit; the map point at the centre.
     Pose at;
-    { std::lock_guard lock(mutex); mesh = published; at = pose; }
-    if (!mesh || std::chrono::steady_clock::now() - at.at > k_stale) return;
-    const auto* viewport = ImGui::GetMainViewport();
-    const float size = std::clamp(viewport->WorkSize.y * 0.3f, 120.0f, 360.0f), margin = 16.0f;
-    const ImVec2 lo(viewport->WorkPos.x + margin, viewport->WorkPos.y + viewport->WorkSize.y - margin - size);
-    const ImVec2 hi(lo.x + size, lo.y + size), centre((lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f);
-    const float k = size * 0.5f / k_view_radius;
-    const float view = std::remainder(at.view_yaw, 360.0f) * 0.01745329252f;
-    const float sine = std::sin(view), cosine = std::cos(view);
-    // Camera forward is up; right is forward x up (Y up, right-handed).
-    const auto project = [&](float x, float z) {
+    ImVec2 project(float x, float z) const {
         const float dx = x - at.x, dz = z - at.z;
-        return ImVec2(centre.x + (dz * sine - dx * cosine) * k, centre.y - (dx * sine + dz * cosine) * k);
-    };
-    const auto outside = [&](const ImVec2& a, const ImVec2& b, const ImVec2& c) {
+        return ImVec2(centre.x + (dz * sine - dx * cosine - u) * k, centre.y - (dx * sine + dz * cosine - v) * k);
+    }
+    bool outside(const ImVec2& a, const ImVec2& b, const ImVec2& c) const {
         return std::max({a.x, b.x, c.x}) < lo.x || std::min({a.x, b.x, c.x}) > hi.x ||
             std::max({a.y, b.y, c.y}) < lo.y || std::min({a.y, b.y, c.y}) > hi.y;
-    };
-    auto* draw = ImGui::GetBackgroundDrawList();
-    draw->PushClipRect(lo, hi, true);
-    draw->AddRectFilled(lo, hi, IM_COL32(12, 20, 28, 200));
+    }
+};
+
+ImU32 alpha(ImU32 colour, float scale) {
+    const auto a = static_cast<ImU32>(((colour >> IM_COL32_A_SHIFT) & 0xFF) * scale);
+    return (colour & ~IM_COL32_A_MASK) | (a << IM_COL32_A_SHIFT);
+}
+
+// One icon, about 2r across, centred on p.
+void draw_icon(ImDrawList* draw, Kind kind, ImVec2 p, float r, float fade) {
+    const ImU32 edge = alpha(IM_COL32(20, 16, 10, 255), fade);
+    const float line = std::max(1.0f, r * 0.3f);
+    switch (kind) {
+    case Kind::WarpPad:
+        draw->AddCircleFilled(p, r, alpha(IM_COL32(20, 60, 90, 220), fade));
+        draw->AddCircle(p, r, alpha(IM_COL32(90, 210, 255, 255), fade), 0, line);
+        draw->AddCircleFilled(p, r * 0.35f, alpha(IM_COL32(90, 210, 255, 255), fade));
+        break;
+    case Kind::MumboSkull:
+        // A skull: bone-white head and jaw, dark eyes.
+        draw->AddRectFilled(ImVec2(p.x - r * 0.5f, p.y + r * 0.2f), ImVec2(p.x + r * 0.5f, p.y + r * 0.95f), alpha(IM_COL32(235, 228, 205, 255), fade), r * 0.2f);
+        draw->AddCircleFilled(ImVec2(p.x, p.y - r * 0.15f), r * 0.85f, alpha(IM_COL32(235, 228, 205, 255), fade));
+        draw->AddCircle(ImVec2(p.x, p.y - r * 0.15f), r * 0.85f, edge, 0, line * 0.6f);
+        draw->AddCircleFilled(ImVec2(p.x - r * 0.33f, p.y - r * 0.15f), r * 0.24f, edge);
+        draw->AddCircleFilled(ImVec2(p.x + r * 0.33f, p.y - r * 0.15f), r * 0.24f, edge);
+        break;
+    case Kind::MumboPad:
+        draw->AddCircleFilled(p, r, alpha(IM_COL32(60, 25, 80, 220), fade));
+        draw->AddCircle(p, r, alpha(IM_COL32(200, 120, 255, 255), fade), 0, line);
+        break;
+    case Kind::Wigwam: {
+        const ImVec2 top(p.x, p.y - r * 1.1f), left(p.x - r, p.y + r * 0.8f), right(p.x + r, p.y + r * 0.8f);
+        draw->AddTriangleFilled(top, left, right, alpha(IM_COL32(70, 205, 180, 255), fade));
+        draw->AddTriangle(top, left, right, edge, line * 0.6f);
+        break;
+    }
+    case Kind::Jinjo:
+        draw->AddCircleFilled(p, r * 0.8f, alpha(IM_COL32(255, 110, 200, 255), fade));
+        draw->AddCircle(p, r * 0.8f, edge, 0, line * 0.6f);
+        break;
+    case Kind::NoteNest: case Kind::TrebleClef: {
+        // A quaver: head, stem and flag; the Treble Clef is larger and outlined white.
+        const float s = kind == Kind::TrebleClef ? r * 1.4f : r;
+        const ImU32 fill = alpha(kind == Kind::TrebleClef ? IM_COL32(255, 225, 90, 255) : IM_COL32(255, 160, 40, 255), fade);
+        const ImVec2 head(p.x - s * 0.25f, p.y + s * 0.45f), stem_top(p.x + s * 0.2f, p.y - s * 0.9f);
+        if (kind == Kind::TrebleClef) {
+            draw->AddCircleFilled(head, s * 0.55f, alpha(IM_COL32(255, 255, 255, 255), fade));
+            draw->AddLine(ImVec2(stem_top.x, head.y), stem_top, alpha(IM_COL32(255, 255, 255, 255), fade), line * 2.2f);
+        }
+        draw->AddCircleFilled(head, s * 0.42f, fill);
+        draw->AddLine(ImVec2(stem_top.x, head.y), stem_top, fill, line);
+        draw->AddLine(stem_top, ImVec2(stem_top.x + s * 0.45f, stem_top.y + s * 0.4f), fill, line);
+        break;
+    }
+    case Kind::CheatoPage:
+        draw->AddRectFilled(ImVec2(p.x - r * 0.7f, p.y - r * 0.9f), ImVec2(p.x + r * 0.7f, p.y + r * 0.9f), alpha(IM_COL32(240, 235, 220, 255), fade));
+        draw->AddRect(ImVec2(p.x - r * 0.7f, p.y - r * 0.9f), ImVec2(p.x + r * 0.7f, p.y + r * 0.9f), alpha(IM_COL32(200, 40, 40, 255), fade), 0.0f, 0, line * 0.8f);
+        break;
+    case Kind::Jiggy: {
+        // A diamond, gold with a dark edge.
+        const ImVec2 a(p.x, p.y - r * 1.1f), b(p.x + r * 1.1f, p.y), c(p.x, p.y + r * 1.1f), d(p.x - r * 1.1f, p.y);
+        draw->AddQuadFilled(a, b, c, d, alpha(IM_COL32(255, 205, 40, 255), fade));
+        draw->AddQuad(a, b, c, d, edge, line * 0.8f);
+        break;
+    }
+    case Kind::Count: break;
+    }
+}
+
+void text(ImDrawList* draw, ImVec2 at, const char* label, float size, ImU32 colour = IM_COL32(240, 244, 248, 255)) {
+    auto* font = ImGui::GetFont();
+    draw->AddText(font, size, ImVec2(at.x + 1, at.y + 1), IM_COL32(0, 0, 0, 200), label);
+    draw->AddText(font, size, at, colour, label);
+}
+
+// Floors, walls, markers and the player arrow, clipped to the view.
+void draw_map(ImDrawList* draw, const View& view, const Mesh& mesh, const std::vector<Marker>& marks, float icon) {
+    const Pose& at = view.at;
+    draw->PushClipRect(view.lo, view.hi, true);
     // Adjacent triangles would show seams with anti-aliased fringes.
     const auto flags = draw->Flags;
     draw->Flags &= ~ImDrawListFlags_AntiAliasedFill;
-    for (int pass = 0; pass < 2; ++pass) for (const auto& floor : mesh->floors) {
+    for (int pass = 0; pass < 2; ++pass) for (const auto& floor : mesh.floors) {
         const bool above = floor.y_min > at.y + k_above;
         if (above != (pass == 0)) continue; // Floors over the player first, faded.
-        const ImVec2 a = project(floor.x[0], floor.z[0]), b = project(floor.x[1], floor.z[1]), c = project(floor.x[2], floor.z[2]);
-        if (outside(a, b, c)) continue;
+        const ImVec2 a = view.project(floor.x[0], floor.z[0]), b = view.project(floor.x[1], floor.z[1]), c = view.project(floor.x[2], floor.z[2]);
+        if (view.outside(a, b, c)) continue;
         ImU32 colour;
         if (above) colour = IM_COL32(150, 160, 170, 45);
         else if (floor.water) colour = IM_COL32(60, 120, 200, 200);
@@ -196,23 +349,176 @@ void render() {
         draw->AddTriangleFilled(a, b, c, colour);
     }
     draw->Flags = flags;
+    const float size = std::min(view.hi.x - view.lo.x, view.hi.y - view.lo.y);
     const float line = std::max(1.0f, size / 180.0f);
-    for (const auto& wall : mesh->walls) {
+    for (const auto& wall : mesh.walls) {
         if (wall.y_max < at.y - 150.0f || wall.y_min > at.y + 450.0f) continue;
-        const ImVec2 a = project(wall.x0, wall.z0), b = project(wall.x1, wall.z1);
-        if (outside(a, b, b)) continue;
-        draw->AddLine(a, b, IM_COL32(225, 230, 235, 170), line);
+        const ImVec2 a = view.project(wall.x0, wall.z0), b = view.project(wall.x1, wall.z1);
+        if (view.outside(a, b, b)) continue;
+        draw->AddLine(a, b, IM_COL32(225, 230, 235, 170), std::min(line, 2.0f));
+    }
+    // Collectibles over pads; those well above or below the player dimmed.
+    for (int kind = 0; kind < int(Kind::Count); ++kind) for (const auto& mark : marks) {
+        if (int(mark.kind) != kind) continue;
+        const ImVec2 p = view.project(mark.x, mark.z);
+        if (p.x < view.lo.x - icon || p.x > view.hi.x + icon || p.y < view.lo.y - icon || p.y > view.hi.y + icon) continue;
+        draw_icon(draw, mark.kind, p, icon, std::abs(mark.y - at.y) > k_marker_level ? 0.45f : 1.0f);
     }
     // Facing arrow: the player's yaw relative to the view.
-    const float turn = (std::remainder(at.yaw, 360.0f) * 0.01745329252f) - view;
-    const float r = size / 22.0f, fx = -std::sin(turn), fy = -std::cos(turn);
-    const ImVec2 tip(centre.x + fx * r * 1.4f, centre.y + fy * r * 1.4f);
-    const ImVec2 left(centre.x + (-fx * 0.8f - fy * 0.9f) * r, centre.y + (-fy * 0.8f + fx * 0.9f) * r);
-    const ImVec2 right(centre.x + (-fx * 0.8f + fy * 0.9f) * r, centre.y + (-fy * 0.8f - fx * 0.9f) * r);
+    const float turn = (std::remainder(at.yaw, 360.0f) * 0.01745329252f) - std::atan2(view.sine, view.cosine);
+    const ImVec2 me = view.project(at.x, at.z);
+    const float r = std::clamp(size / 22.0f, 6.0f, 16.0f), fx = -std::sin(turn), fy = -std::cos(turn);
+    const ImVec2 tip(me.x + fx * r * 1.4f, me.y + fy * r * 1.4f);
+    const ImVec2 left(me.x + (-fx * 0.8f - fy * 0.9f) * r, me.y + (-fy * 0.8f + fx * 0.9f) * r);
+    const ImVec2 right(me.x + (-fx * 0.8f + fy * 0.9f) * r, me.y + (-fy * 0.8f - fx * 0.9f) * r);
     draw->AddTriangleFilled(tip, left, right, IM_COL32(255, 214, 64, 255));
-    draw->AddTriangle(tip, left, right, IM_COL32(40, 30, 10, 255), std::max(1.0f, line));
+    draw->AddTriangle(tip, left, right, IM_COL32(40, 30, 10, 255), line);
     draw->PopClipRect();
-    draw->AddRect(lo, hi, IM_COL32(190, 207, 218, 160), 0.0f, 0, line);
+    draw->AddRect(view.lo, view.hi, IM_COL32(190, 207, 218, 160), 0.0f, 0, line);
+}
+
+View make_view(ImVec2 lo, ImVec2 hi, float k, float u, float v, const Pose& at) {
+    const float yaw = std::remainder(at.view_yaw, 360.0f) * 0.01745329252f;
+    return {lo, hi, ImVec2((lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f), k, u, v, std::sin(yaw), std::cos(yaw), at};
+}
+
+// The full map's extent: floors and markers in map coordinates.
+void fit(Full& out, const Mesh& mesh, const std::vector<Marker>& marks, const Pose& at) {
+    const View view = make_view({}, {}, 1.0f, 0.0f, 0.0f, at);
+    float u0 = -1000, u1 = 1000, v0 = -1000, v1 = 1000; // The player is always in view.
+    const auto add = [&](float x, float z) {
+        const ImVec2 p = view.project(x, z); // k = 1 at the origin: (u, -v).
+        u0 = std::min(u0, p.x); u1 = std::max(u1, p.x); v0 = std::min(v0, -p.y); v1 = std::max(v1, -p.y);
+    };
+    for (const auto& floor : mesh.floors) for (int i = 0; i < 3; ++i) add(floor.x[i], floor.z[i]);
+    for (const auto& mark : marks) add(mark.x, mark.z);
+    out.u = out.fit_u = (u0 + u1) * 0.5f; out.v = out.fit_v = (v0 + v1) * 0.5f;
+    out.half_u = (u1 - u0) * 0.5f; out.half_v = (v1 - v0) * 0.5f;
+    out.fitted = true;
+}
+
+void render_full(ImDrawList* draw, const Mesh& mesh, const std::vector<Marker>& marks, const Pose& at) {
+    Full view_state;
+    {
+        std::lock_guard lock(mutex);
+        if (!full.fitted) fit(full, mesh, marks, at);
+        view_state = full;
+    }
+    const auto* viewport = ImGui::GetMainViewport();
+    const float margin = std::max(12.0f, viewport->WorkSize.y * 0.03f), font = ImGui::GetFontSize();
+    const float title = font * 1.5f, footer = font * 3.2f;
+    const ImVec2 lo(viewport->WorkPos.x + margin, viewport->WorkPos.y + margin + title + font * 0.5f);
+    const ImVec2 hi(viewport->WorkPos.x + viewport->WorkSize.x - margin, viewport->WorkPos.y + viewport->WorkSize.y - margin - footer);
+    if (hi.x - lo.x < 64.0f || hi.y - lo.y < 64.0f) return;
+    draw->AddRectFilled(viewport->WorkPos, ImVec2(viewport->WorkPos.x + viewport->WorkSize.x, viewport->WorkPos.y + viewport->WorkSize.y),
+        IM_COL32(6, 10, 14, 235));
+    const float zoom = std::pow(k_full_zoom_step, float(view_state.zoom));
+    const float k = std::min((hi.x - lo.x) * 0.5f / view_state.half_u, (hi.y - lo.y) * 0.5f / view_state.half_v) * 0.95f * zoom;
+    { std::lock_guard lock(mutex); full.view = (hi.x - lo.x) * 0.5f / k; }
+    const View view = make_view(lo, hi, k, view_state.u, view_state.v, at);
+    draw->AddRectFilled(lo, hi, IM_COL32(12, 20, 28, 255));
+    const float icon = std::clamp((hi.y - lo.y) / 70.0f, 5.0f, 11.0f);
+    draw_map(draw, view, mesh, marks, icon);
+    const char* name = tooie::map_names::name(at.map);
+    text(draw, ImVec2(lo.x, viewport->WorkPos.y + margin), name ? name : "Map", title);
+    // Legend: the kinds this map has, then the controls.
+    bool present[std::size_t(Kind::Count)]{};
+    for (const auto& mark : marks) present[std::size_t(mark.kind)] = true;
+    ImVec2 at_legend(lo.x, hi.y + font * 0.5f);
+    for (int kind = int(Kind::Count) - 1; kind >= 0; --kind) {
+        if (!present[kind]) continue;
+        const char* label = k_kinds[kind].label;
+        const float width = icon * 2.0f + font * 0.4f + ImGui::CalcTextSize(label).x + font;
+        if (at_legend.x + width > hi.x) break;
+        draw_icon(draw, Kind(kind), ImVec2(at_legend.x + icon, at_legend.y + font * 0.5f), icon, 1.0f);
+        text(draw, ImVec2(at_legend.x + icon * 2.0f + font * 0.4f, at_legend.y), label, font);
+        at_legend.x += width;
+    }
+    text(draw, ImVec2(lo.x, hi.y + font * 1.8f), "A / B zoom    Stick move    Start or F5 back to the pause menu", font,
+        IM_COL32(190, 200, 210, 255));
+}
+}
+
+namespace tooie::level_minimap {
+
+void set_enabled(bool enabled) noexcept { on.store(enabled, std::memory_order_release); }
+bool enabled() noexcept { return on.load(std::memory_order_acquire); }
+const char* zoom_label(int level) noexcept { return k_zoom_labels[std::clamp(level, 0, zoom_levels - 1)]; }
+void set_zoom(int level) noexcept { zoom_level.store(std::clamp(level, 0, zoom_levels - 1), std::memory_order_release); }
+int zoom() noexcept { return zoom_level.load(std::memory_order_acquire); }
+
+bool visible() noexcept {
+    const auto at = std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(updated_at.load(std::memory_order_acquire)));
+    return enabled() && !game_paused.load(std::memory_order_acquire) && std::chrono::steady_clock::now() - at <= k_stale;
+}
+bool paused() noexcept {
+    if (!enabled() || !game_paused.load(std::memory_order_acquire)) return false;
+    std::lock_guard lock(mutex);
+    return published && pose.map == screen_map.load(std::memory_order_acquire);
+}
+
+void set_full_map(bool open) noexcept {
+    std::lock_guard lock(mutex);
+    if (open == full.open) return;
+    full = {};
+    full.open = open;
+}
+bool full_map() noexcept { std::lock_guard lock(mutex); return full.open; }
+void zoom_full_map(int steps) noexcept {
+    std::lock_guard lock(mutex);
+    full.zoom = std::clamp(full.zoom + steps, 0, k_full_zoom_max);
+}
+void pan_full_map(float right, float up, float seconds) noexcept {
+    std::lock_guard lock(mutex);
+    if (!full.open || !full.fitted) return;
+    full.u = std::clamp(full.u + right * seconds * full.view, full.fit_u - full.half_u, full.fit_u + full.half_u);
+    full.v = std::clamp(full.v + up * seconds * full.view, full.fit_v - full.half_v, full.fit_v + full.half_v);
+}
+
+void render() {
+    if (!enabled()) return;
+    std::shared_ptr<const Mesh> mesh;
+    std::shared_ptr<const std::vector<Marker>> marks;
+    Pose at;
+    bool open;
+    { std::lock_guard lock(mutex); mesh = published; marks = markers; at = pose; open = full.open; }
+    if (!mesh) return;
+    static const std::vector<Marker> none;
+    const auto& marked = marks ? *marks : none;
+    auto* draw = ImGui::GetBackgroundDrawList();
+    const auto* viewport = ImGui::GetMainViewport();
+    const float size = std::clamp(viewport->WorkSize.y * 0.3f, 120.0f, 360.0f), margin = 16.0f;
+    const ImVec2 lo(viewport->WorkPos.x + margin, viewport->WorkPos.y + viewport->WorkSize.y - margin - size);
+    if (paused()) {
+        if (open) render_full(draw, *mesh, marked, at);
+        else text(draw, ImVec2(lo.x, viewport->WorkPos.y + viewport->WorkSize.y - margin - ImGui::GetFontSize()), "F5: Map",
+            ImGui::GetFontSize());
+        return;
+    }
+    if (std::chrono::steady_clock::now() - at.at > k_stale) return;
+    const ImVec2 hi(lo.x + size, lo.y + size);
+    draw->AddRectFilled(lo, hi, IM_COL32(12, 20, 28, 200));
+    draw_map(draw, make_view(lo, hi, size * 0.5f / k_zoom_radius[zoom()], 0.0f, 0.0f, at), *mesh, marked,
+        std::clamp(size / 36.0f, 3.5f, 8.0f));
+    if (const char* name = tooie::map_names::name(at.map)) {
+        // Above the map, wrapped to its width.
+        const float font = ImGui::GetFontSize();
+        const ImVec2 extent = ImGui::GetFont()->CalcTextSizeA(font, FLT_MAX, size, name);
+        draw->PushClipRect(ImVec2(lo.x, lo.y - extent.y - 6.0f), ImVec2(hi.x, lo.y), true);
+        auto* font_data = ImGui::GetFont();
+        draw->AddText(font_data, font, ImVec2(lo.x + 1, lo.y - extent.y - 3.0f), IM_COL32(0, 0, 0, 200), name, nullptr, size);
+        draw->AddText(font_data, font, ImVec2(lo.x, lo.y - extent.y - 4.0f), IM_COL32(240, 244, 248, 255), name, nullptr, size);
+        draw->PopClipRect();
+    }
+}
+
+void observe_screen(const std::uint8_t* rdram) noexcept {
+    if (!rdram || !enabled()) return;
+    const auto at = [rdram](std::uint32_t address) { return rdram + (address - 0x80000000U); };
+    const auto state = *reinterpret_cast<const std::int16_t*>(at(k_game_state ^ 2U));
+    const auto menu = *reinterpret_cast<const std::uint32_t*>(at(k_pause_menu));
+    game_paused.store(state == 4 && menu != 0, std::memory_order_release);
+    screen_map.store(*reinterpret_cast<const std::uint16_t*>(at(k_current_map ^ 2U)), std::memory_order_release);
 }
 
 } // namespace tooie::level_minimap
@@ -233,12 +539,13 @@ extern "C" void tooie_level_minimap_observe(std::uint8_t* rdram, recomp_context*
     next.view_yaw = guest_range(camera, 0x20U) ? real(rdram, camera + 0x1CU) + 180.0f : next.yaw;
     if (!std::isfinite(next.x) || !std::isfinite(next.y) || !std::isfinite(next.z) ||
         !std::isfinite(next.yaw) || !std::isfinite(next.view_yaw)) return;
+    next.map = static_cast<std::uint16_t>(half(rdram, k_current_map));
     next.at = std::chrono::steady_clock::now();
 
     // Rebuild when the map or a collision source changes (a load, a section, or
     // the heap moving a model). Vertex lists can swap buffers every frame.
     const auto list = sources(rdram);
-    std::vector<std::uint32_t> current{static_cast<std::uint16_t>(half(rdram, k_current_map))};
+    std::vector<std::uint32_t> current{next.map};
     for (const auto& source : list) {
         current.push_back(source.collision);
         for (float axis : source.offset) current.push_back(std::bit_cast<std::uint32_t>(axis));
@@ -251,7 +558,10 @@ extern "C" void tooie_level_minimap_observe(std::uint8_t* rdram, recomp_context*
         std::sort(mesh->floors.begin(), mesh->floors.end(), [](const Floor& a, const Floor& b) { return a.y < b.y; });
         rebuilt = std::move(mesh);
     }
+    sample_markers(rdram, next.map, sampled);
     std::lock_guard lock(mutex);
     if (rebuilt) published = std::move(rebuilt);
+    if (!markers || *markers != sampled) markers = std::make_shared<const std::vector<Marker>>(sampled);
     pose = next;
+    updated_at.store(next.at.time_since_epoch().count(), std::memory_order_release);
 }

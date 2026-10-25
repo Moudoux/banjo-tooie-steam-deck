@@ -568,7 +568,7 @@ inline constexpr char version[] = "@TOOIE_PLAYER_VERSION@";
     # Menu-map actor matrix groups, reached by the func_8010A79C raw hooks.
     target_sources(TooieBaseline PRIVATE src/menu_interpolation.cpp)
     # Minimap, sampled by the bainput_update raw hook and drawn by the ImGui overlay.
-    target_sources(TooieBaseline PRIVATE src/level_minimap.cpp)
+    target_sources(TooieBaseline PRIVATE src/level_minimap.cpp src/map_names.cpp)
     # Hold L to levitate (Lighthouse), from the same bainput_update raw hook.
     target_sources(TooieBaseline PRIVATE src/levitate.cpp)
     # Timed autosave with a backup first, from the same hook; "Saving..." in the overlay.

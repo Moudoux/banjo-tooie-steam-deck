@@ -344,6 +344,43 @@ Steam Deck features:
   for 300 ms (menus, cutscenes, loads, pause). Verified locally in Spiral
   Mountain and confirmed working on the Deck by the owner (2026-10-24);
   sectioned maps are not specifically verified.
+  Additions (2026-10-25):
+  - Area name above the map, from `src/map_names.cpp` (ids and areas from the
+    decomp's `include/maps.h`; cutscenes, menus and minigame replays have none;
+    ASCII only, since the overlay font has no en dash).
+  - Zoom (Video menu "Minimap zoom", `baseline_minimap_zoom`, 0..5 = 6000, 4500,
+    3000, 2000, 1500, 1000 units to the edge, default 2). Hold F5 and press A / B
+    to zoom while the minimap is visible; those A / B presses (and the buttons until
+    released) are kept from the game (`minimap_controls` in
+    `tools/baseline/minimum_host.cpp`, on the mapped N64 buttons, so rebinding A / B
+    still works). F5 now acts on release, and only if it did not zoom.
+  - Markers from the actor list: a `Vector` (`include/vector.h`) whose pointer is at
+    `0x80136EE0`, 0x9C-byte actors pushed by `func_80106668`; `func_80107C2C` stores
+    the position (f32 x3) at `+0x04` and the descriptor's actor id (the
+    `gemarkersDll` table index) in bits 9..20 of `+0x6C`. Ids: Jiggy `0x21F`
+    (chjigsaw), note nest `0x1D7`, Treble Clef `0x1D8` (chnests), Jinjo `0x1F4`,
+    warp pad `0x1E5`, Mumbo pad `0x2B0`, Cheato page `0x136`. Mumbo's Skull and
+    Wumba's Wigwam are level geometry, so `k_doors` in `src/level_minimap.cpp` lists
+    each one's door (where the player stands after walking out of its map; measured
+    in every world and the Isle o' Hags). maps.h's `0x171` "GGM_MUMBO" is
+    Terrydactyland's skull. The vector holds the
+    whole map's actors, and a collected one leaves it (verified: collecting an egg
+    nest in Mayahem Temple took it out), so the markers show what is still to find.
+    Markers more than 400 units above or below the player are dimmed.
+  - Full-screen map while paused: the graphics thread samples the game state
+    (`D_80127630 +0x02` at `0x80127632`: 3 in play, 4 paused, with gcnewpause's
+    instance at `0x80128AF0`) each screen. Paused, the corner shows "F5: Map" and F5
+    opens the map fitted to the level (same orientation as the minimap); it takes
+    all input: A / B zoom, the stick pans, Start or F5 return to the pause menu.
+  - Research tools in `local/minimap/` (not tracked): `capture.py` launches the
+    player, dumps RDRAM by signature and can warp (writes the pending transition as
+    `func_800A791C` does) or send keys; `actors.py` lists a dump's actors with their
+    overlay names. Actor census per world with the owner's save: `local/minimap/tour/`.
+  - Verified locally (2026-10-25): area name, note-nest and Jinjo markers in
+    Mayahem Temple, the pause hint. Confirmed on the Deck by the owner (2026-10-25):
+    names, zoom chord, markers and the pause map; the en dash showed as "?", now
+    a hyphen. The hyphenated names and the skull and wigwam markers were then
+    confirmed on the Deck too (2026-10-25).
 
 - **Hold L to levitate** (Controls menu, `baseline_levitate`, default off;
   `src/levitate.cpp`, from the same hook as the minimap), Lighthouse's `Cheats.Levitate` (`Cheats.cpp`). For the controlled

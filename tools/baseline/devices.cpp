@@ -11,6 +11,7 @@
 #include "frontend_input_preference.hpp"
 #include "sound_trace.hpp"
 #include "issue_evidence.hpp"
+#include "level_minimap.hpp"
 #endif
 #include "input.hpp"
 #ifdef BASELINE_TERMINAL_FENCE
@@ -565,6 +566,7 @@ public:
             std::fprintf(stderr, "baseline map=0x%03X menu_rate_original=%d\n", map, int(force_original));
             observed_map = map; menu_rate_forced = force_original;
         }
+        tooie::level_minimap::observe_screen(guest_rdram); // Pause state for the full map.
         auto config = ultramodern::renderer::get_graphics_config(); // Graphics owner only after startup.
         host::render::preference_rate(config, force_original ? 1 : requested.option, requested.manual_hz);
         if (config != ultramodern::renderer::get_graphics_config()) ultramodern::renderer::set_graphics_config(config);

@@ -375,6 +375,12 @@ void video(const Snapshot& snapshot) {
     if(color!=snapshot.latched_color_format)ImGui::TextDisabled("Color precision changes on the next launch.");
     bool minimap=prefs.minimap!=0;
     if(ImGui::Checkbox("Minimap (bottom left, F5)",&minimap))preference(Preference::Minimap,int(minimap));
+    if(minimap) {
+        int zoom=prefs.minimap_zoom;
+        if(ImGui::SliderInt("Minimap zoom",&zoom,0,tooie::level_minimap::zoom_levels-1,tooie::level_minimap::zoom_label(zoom)))
+            preference(Preference::MinimapZoom,zoom);
+        note("Hold F5 and press A or B to zoom in or out. While the game is paused, F5 opens a full-screen map.");
+    }
 #endif
     int rate=prefs.output_rate;
     if(ImGui::Combo("Output rate",&rate,"Default (Original)\0Original\0Display\0Manual\0"))preference(Preference::OutputRate,rate);

@@ -73,6 +73,11 @@ bool marker_conflict_reported = false;
 std::string marker_toast;
 std::chrono::steady_clock::time_point marker_until{};
 std::string loaded_profiles; // RAM copy of the string passed to the mapper, before migration.
+// Minimap keys (F5, the Steam Deck back button in the owner's layout): a tap toggles the
+// minimap, or the full-screen map while paused; held, A / B zoom and stay from the game.
+bool map_key_held = false, map_key_chorded = false;
+uint16_t map_buttons_seen = 0, map_buttons_withheld = 0;
+std::chrono::steady_clock::time_point map_tick{};
 constexpr uint64_t fingerprint_basis = 1469598103934665603ULL;
 uint64_t fingerprint_step(uint64_t hash, uint64_t value) { return (hash ^ value) * 1099511628211ULL; }
 
@@ -419,6 +424,10 @@ void update_preference(Preference key, int value) {
         if (value < 0 || value > 1) return;
         selected.minimap = value; settings::set_bool("baseline_minimap", value != 0);
         tooie::level_minimap::set_enabled(value != 0); break;
+    case Preference::MinimapZoom:
+        if (value < 0 || value >= tooie::level_minimap::zoom_levels) return;
+        selected.minimap_zoom = value; settings::set_int("baseline_minimap_zoom", value);
+        tooie::level_minimap::set_zoom(value); break;
     case Preference::Levitate:
         if (value < 0 || value > 1) return;
         selected.levitate = value; settings::set_bool("baseline_levitate", value != 0);
@@ -727,6 +736,9 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     publish_picture();
     selected.minimap = settings::get_bool("baseline_minimap", true) ? 1 : 0;
     tooie::level_minimap::set_enabled(selected.minimap != 0);
+    selected.minimap_zoom = bounded(settings::get_int("baseline_minimap_zoom", tooie::level_minimap::default_zoom),
+        0, tooie::level_minimap::zoom_levels - 1, tooie::level_minimap::default_zoom);
+    tooie::level_minimap::set_zoom(selected.minimap_zoom);
     selected.levitate = settings::get_bool("baseline_levitate", false) ? 1 : 0;
     tooie::levitate::set_enabled(selected.levitate != 0);
     selected.autosave_minutes = bounded(settings::get_int("baseline_autosave_minutes", fresh.autosave_minutes), 0, 30, fresh.autosave_minutes);
@@ -764,6 +776,9 @@ void shutdown() noexcept {
         }
         tooie::input::shutdown();
     }
+#if BASELINE_PLAYER
+    map_key_held = map_key_chorded = false; map_buttons_seen = map_buttons_withheld = 0; map_tick = {};
+#endif
     initialized = false; window = nullptr; window_id = 0;
     ready = menu = started = sticky_close = sticky_quit = overflow = false;
     previously_ready = quarantine = reported_unready = false; vsync = -1;
@@ -790,12 +805,55 @@ void shutdown() noexcept {
     { std::lock_guard lock(request_mutex); requests.clear(); }
     { std::lock_guard lock(render_mutex); render_input = {}; }
 }
+#if BASELINE_PLAYER
+namespace {
+// SDL owner, each tick: A / B with the minimap key held zoom the visible minimap;
+// the full map takes all input (A / B zoom, stick pans, Start closes). Buttons
+// taken stay from the game until released.
+void minimap_controls(input::State& state, bool withheld) {
+    constexpr uint16_t a = 0x8000, b = 0x4000, start = 0x1000;
+    const auto now = std::chrono::steady_clock::now();
+    const float seconds = map_tick == std::chrono::steady_clock::time_point{} ? 0.0f :
+        std::min(0.1f, std::chrono::duration<float>(now - map_tick).count());
+    map_tick = now;
+    const uint16_t pressed = state.buttons & ~map_buttons_seen;
+    map_buttons_seen = state.buttons;
+    if (tooie::level_minimap::full_map() && (withheld || !tooie::level_minimap::paused()))
+        tooie::level_minimap::set_full_map(false);
+    if (tooie::level_minimap::full_map()) {
+        if (pressed & a) tooie::level_minimap::zoom_full_map(1);
+        if (pressed & b) tooie::level_minimap::zoom_full_map(-1);
+        if (pressed & start) tooie::level_minimap::set_full_map(false);
+        tooie::level_minimap::pan_full_map(state.x, state.y, seconds);
+        if (map_key_held && (pressed & (a | b))) map_key_chorded = true;
+        map_buttons_withheld = state.buttons;
+        state = {};
+        return;
+    }
+    if (map_key_held && tooie::level_minimap::visible()) {
+        int zoom = selected.minimap_zoom;
+        if (pressed & a) ++zoom;
+        if (pressed & b) --zoom;
+        if (pressed & (a | b)) {
+            map_key_chorded = true;
+            update_preference(Preference::MinimapZoom, std::clamp(zoom, 0, tooie::level_minimap::zoom_levels - 1));
+        }
+        map_buttons_withheld |= state.buttons & (a | b);
+    }
+    map_buttons_withheld &= state.buttons;
+    state.buttons &= ~map_buttons_withheld;
+}
+}
+#endif
 void handle_event(const SDL_Event& event) {
     if (!initialized || !belongs(event)) return;
     if (event.type == SDL_QUIT) request_quit();
     if (event.type == SDL_WINDOWEVENT) {
         if (event.window.event == SDL_WINDOWEVENT_CLOSE) request_quit();
         if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) focused = false;
+#if BASELINE_PLAYER
+        if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) map_key_held = false;
+#endif
         if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) focused = true;
     }
     if (!focused) switch (event.type) {
@@ -808,11 +866,20 @@ void handle_event(const SDL_Event& event) {
     if (event.type == SDL_KEYDOWN && !event.key.repeat && event.key.keysym.scancode == SDL_SCANCODE_F4 &&
         !(event.key.keysym.mod & (KMOD_SHIFT | KMOD_ALT | KMOD_CTRL | KMOD_GUI)) && focused &&
         !tooie::input::input_suppressed()) mark_issue();
-    // F5 toggles the minimap, unless a game action is bound to it.
+    // F5, unless a game action is bound to it: on release, toggles the minimap, or the
+    // full map while paused, if A / B did not zoom while it was held.
     if (event.type == SDL_KEYDOWN && !event.key.repeat && event.key.keysym.scancode == SDL_SCANCODE_F5 &&
         !(event.key.keysym.mod & (KMOD_SHIFT | KMOD_ALT | KMOD_CTRL | KMOD_GUI)) && focused &&
-        !tooie::input::input_suppressed() && !key_owner(SDL_SCANCODE_F5))
-        update_preference(Preference::Minimap, selected.minimap ? 0 : 1);
+        !tooie::input::input_suppressed() && !key_owner(SDL_SCANCODE_F5)) {
+        map_key_held = true; map_key_chorded = false;
+    }
+    if (event.type == SDL_KEYUP && event.key.keysym.scancode == SDL_SCANCODE_F5 && map_key_held) {
+        map_key_held = false;
+        if (map_key_chorded || menu_open()) {}
+        else if (tooie::level_minimap::paused())
+            tooie::level_minimap::set_full_map(!tooie::level_minimap::full_map());
+        else update_preference(Preference::Minimap, selected.minimap ? 0 : 1);
+    }
 #endif
     tooie::input::handle_event(event);
 #if BASELINE_PLAYER
@@ -866,6 +933,7 @@ InputPublication tick(bool gameplay) {
     const bool withheld = quarantine || menu_open() || quit;
     if (withheld) physical = {};
 #if BASELINE_PLAYER
+    minimap_controls(physical, withheld);
     const bool aim_admitted = selected.first_person_aim && mapped.game_enabled &&
         tooie::input::physical_controller() && !withheld;
 #else
