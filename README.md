@@ -20,16 +20,17 @@ Report Linux problems here, not upstream.
 
 - Native Linux player (Vulkan through RT64, SDL2).
 - Steam Deck build: Zen 2 code generation, and defaults for new profiles of
-  3x resolution, output following the display rate, 16:10 widescreen and
-  fullscreen.
-- A 16:10 gameplay aspect and an "Auto (fit window)" resolution setting.
+  3x resolution, output following the display rate, widescreen fitted to the
+  16:10 screen, right-stick first-person aiming and fullscreen.
+- "Fit window" gameplay aspect down to 16:10 (upstream stops at 16:9), and an
+  "Auto (fit window)" resolution setting.
 - Xbox 360 (XBLA) button layout as the controller default.
 - The ROM is picked up automatically when it sits beside the game.
 - `recompcontrollerdb.txt` fills in controllers that SDL and Steam don't
   already know.
 
-The 16:10 option changes the game-code patches, so this build's guest image
-differs from upstream's verified one.
+The game-code guest image is upstream's verified one; this fork's additions
+hook the recompiled code without changing it.
 
 ## Build
 

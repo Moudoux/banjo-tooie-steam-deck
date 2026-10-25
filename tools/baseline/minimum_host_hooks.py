@@ -85,20 +85,6 @@ EGG_AIM_PITCH_TEXT=('{ extern void tooie_egg_aim_pitch(uint8_t*, recomp_context*
     'tooie_egg_aim_pitch(rdram, ctx); }')
 EGG_AIM_YAW_TEXT=('{ extern void tooie_egg_aim_yaw(uint8_t*, recomp_context*); '
     'tooie_egg_aim_yaw(rdram, ctx); }')
-# Breegull Blaster (bsfirstp) right stick, driven like the orbit camera rather
-# than through the Blaster's own smoothed stick inputs (func_80804848 ->
-# func_808045FC, with a ramp and, in control type 1, a position-based look).
-# Turn: func_80809AF8 adds its yaw delta (sp+0x28) to the facing after the call
-# at 0x80809BB0. Look: func_8080682C steps +0x20C, then clamps it from
-# 0x80806890. Type 1's look target (f2) is stored at 0x80806998 in func_80806928.
-BLASTER_TURN_TEXT=('{ extern void tooie_blaster_turn(uint8_t*, recomp_context*); '
-    'tooie_blaster_turn(rdram, ctx); }')
-BLASTER_LOOK_TEXT=('{ extern void tooie_blaster_look(uint8_t*, recomp_context*); '
-    'tooie_blaster_look(rdram, ctx); }')
-# Type 0 eases to its level angle (f0, stored at 0x808069D8 in func_808069BC)
-# while +0x254 is set. With the analog camera on, func_80804848's left stick X
-# strafes (added to a1, the C strafe axis, before 0x80804938 / L_8080499C) and
-# its turn input (a1 before 0x80804960 / 0x808049C4) is zeroed.
 def _native_call(name):
     return '{ extern void %s(uint8_t*, recomp_context*); %s(rdram, ctx); }' % (name, name)
 # Actor matrix groups (src/object_interpolation.cpp, src/menu_interpolation.cpp):
@@ -110,12 +96,15 @@ ACTOR_DRAW_HOOKS=(('func_8010A79C',0x8010A7E8,_native_call('tooie_actor_draw_beg
                   ('func_8010A79C',0x8010A7F0,_native_call('tooie_actor_draw_end')),
                   ('func_800DE498',0x800DE498,_native_call('tooie_model_draw_begin')),
                   ('func_800DE498',0x800DF310,_native_call('tooie_model_draw_end')))
-# bainput_update entry, once per character update with the PlayerState in a0:
-# the minimap (src/level_minimap.cpp) samples the player, camera and level
-# collision, levitation (src/levitate.cpp) lifts the player while L is held,
-# and autosave (src/autosave.cpp) saves the game every few minutes of play.
-PLAYER_UPDATE_HOOKS=(('bainput_update',0x8009819C,
-    _native_call('tooie_level_minimap_observe')+' '+_native_call('tooie_levitate_update')+' '+
+# Once per character update, just before func_800991B0 calls bainput_update
+# (0x80099228; its delay slot passes the PlayerState from s0, so the hook loads
+# a0 from s0 itself). Upstream's Talon Trot toggle replaces bainput_update with a
+# guest patch, so the hook sits at the call. The minimap (src/level_minimap.cpp)
+# samples the player, camera and level collision, levitation (src/levitate.cpp)
+# lifts the player while L is held, and autosave (src/autosave.cpp) saves the
+# game every few minutes of play.
+PLAYER_UPDATE_HOOKS=(('func_800991B0',0x80099228,
+    'ctx->r4 = ctx->r16; '+_native_call('tooie_level_minimap_observe')+' '+_native_call('tooie_levitate_update')+' '+
     _native_call('tooie_autosave_update')),)
 # Heap size: the original pool is the 0x2C8800 bytes below 0x80400000 (4 MB, no
 # Expansion Pak), and extended draw distance fills it in dense levels until
@@ -123,18 +112,7 @@ PLAYER_UPDATE_HOOKS=(('bainput_update',0x8009819C,
 # 0x8001A8D8; every heap end derives from that word, so growing it before the
 # store extends the pool up to 0x80800000 without moving its start.
 HEAP_HOOKS=(('heap_setup',0x8001A8CC,_native_call('tooie_heap_extend')),)
-def _blaster_call(name, control_type):
-    return ('{ extern void %s(uint8_t*, recomp_context*, int); %s(rdram, ctx, %d); }'
-            % (name, name, control_type))
 GRAPHICS_HOOKS=(('func_808002A4_bafpctrl',0x80800368,MOUSE_AIM_TEXT),
-                ('func_80809AF8_bsfirstp',0x80809BB8,BLASTER_TURN_TEXT),
-                ('func_8080682C_bsfirstp',0x80806890,BLASTER_LOOK_TEXT),
-                ('func_80806928_bsfirstp',0x80806998,_blaster_call('tooie_blaster_look_target',1)),
-                ('func_808069BC_bsfirstp',0x808069D8,_blaster_call('tooie_blaster_look_target',0)),
-                ('func_80804848_bsfirstp',0x80804938,_blaster_call('tooie_blaster_strafe',0)),
-                ('func_80804848_bsfirstp',0x8080499C,_blaster_call('tooie_blaster_strafe',1)),
-                ('func_80804848_bsfirstp',0x80804960,_blaster_call('tooie_blaster_left_turn',0)),
-                ('func_80804848_bsfirstp',0x808049C4,_blaster_call('tooie_blaster_left_turn',1)),
                 ('func_80800264_baeggaim',0x808002E8,EGG_AIM_PITCH_TEXT),
                 ('func_80800264_baeggaim',0x80800300,EGG_AIM_YAW_TEXT),
                 ('func_800DE498',0x800DE628,LOD_SKIP_TEXT),
@@ -160,6 +138,7 @@ def strip_and_verify(bodies,selected):
         assert result[func].count(call)==int(selected),(func,hex(pc))
         if selected:
             assert call+'    // 0x%08X:'%pc in result[func],(func,hex(pc))
-            assert func!=TICKER_UPDATE_FUNCTION or result[func].count(call+TICKER_ACTOR_ANCHOR)==1,(func,hex(pc))
+            # Only the ticker update hook has the actor anchor; the intro skips share its function.
+            assert (func,pc)!=(TICKER_UPDATE_FUNCTION,0x80800614) or result[func].count(call+TICKER_ACTOR_ANCHOR)==1,(func,hex(pc))
             result[func]=result[func].replace(call,'')
     return result

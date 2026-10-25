@@ -77,6 +77,10 @@ LEGACY_STANDALONE_IMAGE_SHA256='f4a5f108e0f342ed4512fab7e014d5f10b03ec1a2c26882e
 LEGACY_STANDALONE_IMAGE_BYTES=54156
 LEGACY_STANDALONE_STATE_BYTES=18844
 LEGACY_STANDALONE_LAYOUT=3
+# Linux fork: a clean tree regenerates prior/boot.bin from Alpha 4.4 source instead of keeping the
+# legacy image; it carries the current state initializer. The selected image still equals IMAGE_SHA256.
+CLEAN_STANDALONE_IMAGE_SHA256='6c84d1135e5fc348626c62147366eb74ca5126d802c4f60ae45f9d3ed3e46ee7'
+CLEAN_STANDALONE_IMAGE_BYTES=65908
 def bridge_initializer(size,layout):
     """Canonical bridge state: magic 42524731, layout word, allocator word32=1, every other byte zero."""
     state=bytearray(size);state[:4]=bytes.fromhex('42524731');state[4:8]=layout.to_bytes(4,'big');state[32:36]=(1).to_bytes(4,'big')
@@ -915,8 +919,12 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
      # initializer are an explicit premise, never refreshed from a fresh hash. The current linked bridge
      # state must independently be the complete canonical initializer of the current ABI; Honey line 93
      # keeps whole-state equality with the refreshed standalone object.
-     legacy_image=(prior/'boot.bin').read_bytes();assert sha(prior/'boot.bin')==LEGACY_STANDALONE_IMAGE_SHA256
-     assert len(legacy_image)==LEGACY_STANDALONE_IMAGE_BYTES and legacy_image[-LEGACY_STANDALONE_STATE_BYTES:]==bridge_initializer(LEGACY_STANDALONE_STATE_BYTES,LEGACY_STANDALONE_LAYOUT)
+     legacy_image=(prior/'boot.bin').read_bytes()
+     if sha(prior/'boot.bin')==CLEAN_STANDALONE_IMAGE_SHA256:
+      assert len(legacy_image)==CLEAN_STANDALONE_IMAGE_BYTES and legacy_image[-BRIDGE_STATE_BYTES:]==bridge_initializer(BRIDGE_STATE_BYTES,BRIDGE_LAYOUT)
+     else:
+      assert sha(prior/'boot.bin')==LEGACY_STANDALONE_IMAGE_SHA256
+      assert len(legacy_image)==LEGACY_STANDALONE_IMAGE_BYTES and legacy_image[-LEGACY_STANDALONE_STATE_BYTES:]==bridge_initializer(LEGACY_STANDALONE_STATE_BYTES,LEGACY_STANDALONE_LAYOUT)
      assert oldstate['sh_type']=='SHT_PROGBITS' and oldstate['sh_size']==BRIDGE_STATE_BYTES and oldstate.data()==bridge_initializer(BRIDGE_STATE_BYTES,BRIDGE_LAYOUT)
      addresses={n:symbols[n]['st_value'] for n in ['tooie_camera_state','tooie_camera_main','tooie_camera_redirected','tooie_render_bridge_state']}
      assert addresses['tooie_camera_main']%16==0 and addresses['tooie_camera_redirected']%16==0
@@ -927,7 +935,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
       assert not any(s['name']==name or s['vram']==address for s in existing);data['section'][0]['symbols'].append(dict(name=name,vram=address))
      music_data=minimum_host and 'D_80079FA0' in objects['music_gain']['imports']
      if music_data:host_owner.music_data_identity(root)
-     for name in ['D_8007BCD0', 'D_8007BCD4', 'D_8007BCD8', 'D_8007BCDC', 'D_8007BCE0', 'D_8007BCE4', 'D_8007BEDA', 'D_801282E0', 'D_8011A760', 'D_8011A7C0','D_8012D500','D_8012D504','D_8012D554','D_8012D558','D_8012D508','D_80127674','D_80132DCC','D_80127EF4','D_80127658','D_80128390','D_8012839C']+(['D_80132E9C','D_80135490','D_801354B0','D_8012C9B0'] if shadow_fix else [])+(['D_8012C850'] if shadow_coefficients else [])+(['D_80128780'] if pre_background else [])+(['D_80079FA0'] if music_data else [])+(['D_8012D470'] if minimum_host else [])+(['D_8012C964','D_8012C978'] if bk_pipeline else []):
+     for name in ['D_8007BCD0', 'D_8007BCD4', 'D_8007BCD8', 'D_8007BCDC', 'D_8007BCE0', 'D_8007BCE4', 'D_8007BEDA', 'D_801282E0', 'D_8011A760', 'D_8011A7C0','D_8012D500','D_8012D504','D_8012D554','D_8012D558','D_8012D508','D_80127674','D_80132DCC','D_80127EF4','D_80127658','D_80128390','D_8012839C']+(['D_80132E9C','D_80135490','D_801354B0','D_801354DC','D_8012C9B0'] if shadow_fix else [])+(['D_8012C850'] if shadow_coefficients else [])+(['D_80128780'] if pre_background else [])+(['D_80079FA0'] if music_data else [])+(['D_8012D470'] if minimum_host else [])+(['D_8012C964','D_8012C978'] if bk_pipeline else []):
       address=int(name[2:],16);owners=[x for sec in data['section'] for x in sec.get('symbols',[]) if x['name']==name or x['vram']==address]
       if owners:assert owners==[dict(name=name,vram=address)],owners
       else:data['section'][0]['symbols'].append(dict(name=name,vram=address))

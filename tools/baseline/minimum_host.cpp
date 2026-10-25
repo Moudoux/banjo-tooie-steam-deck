@@ -627,10 +627,11 @@ void queue_event(const SDL_Event& event) {
 }
 #ifdef TOOIE_DECK_DEFAULTS
 // Steam Deck defaults for settings a profile has not saved yet: 3x of 240 lines
-// suits the 800-line panel, output follows the display rate, and widescreen
-// fitted to the window fills the 16:10 screen.
+// suits the 800-line panel, output follows the display rate, widescreen
+// fitted to the window fills the 16:10 screen, and the right stick turns the
+// camera and aims in first person.
 constexpr Preferences fresh{.resolution = 3, .output_rate = 2, .wide = 1, .native_aspect = fit_aspect, .fullscreen = 1,
-    .analog_camera = 1, .camera_invert_x = 1};
+    .first_person_aim = 1, .analog_camera = 1, .camera_invert_x = 1};
 #else
 constexpr Preferences fresh{};
 #endif
@@ -660,7 +661,8 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     selected.music_volume = std::clamp(settings::get_int("tooie_music_volume_percent", 100), 0, 100);
     selected.quiet_talon_trot = bounded(settings::get_int("tooie_quiet_talon_trot", 0), 0, 1, 0);
     selected.talon_trot_toggle = bounded(settings::get_int("tooie_talon_trot_toggle", 0), 0, 1, 0);
-    selected.first_person_aim = bounded(settings::get_int("tooie_first_person_aim", 0), 0, 1, 0);
+    selected.first_person_aim = bounded(settings::get_int("tooie_first_person_aim", fresh.first_person_aim), 0, 1,
+        fresh.first_person_aim);
     selected.first_person_aim_sensitivity = bounded(
         settings::get_int("tooie_first_person_aim_sensitivity", TOOIE_FP_AIM_SENSITIVITY_DEFAULT),
         TOOIE_FP_AIM_SENSITIVITY_MIN, TOOIE_FP_AIM_SENSITIVITY_MAX, TOOIE_FP_AIM_SENSITIVITY_DEFAULT);

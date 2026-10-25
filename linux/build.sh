@@ -4,10 +4,11 @@
 #   docker build -t tooie-toolchain:latest .
 #   docker run --rm -it -v "$(pwd)":/workspace tooie-toolchain:latest linux/build.sh
 #
-# Follows docs/WINDOWS.md steps 1-4 and 6. Guest preparation runs the pinned
+# Follows docs/WINDOWS.md steps 1-6. Guest preparation runs the pinned
 # Windows LLVM under Wine (see linux/shims), so the guest image is checked
-# against the same pins as the Windows build. The Windows-only raw archive
-# qualification (step 5) and packaging are skipped.
+# against the same pins as the Windows build. Step 5 (raw archive
+# qualification) runs once per build tree with GNU tools (linux/qualify_raw.py).
+# Packaging is skipped.
 #
 # Stages are skipped when their outputs already exist. Set CLEAN=1 to move
 # earlier build folders aside and start over (needed after guest patch edits).
@@ -26,7 +27,7 @@ BUILD=${BUILD:-build/linux-player}
 TARGET=${TARGET:-deck}
 # No FMA contraction: fused multiply-adds would round guest float math
 # differently from the N64 and the Windows build.
-if [[ ${SYMBOLS:-0} == 1 ]]; then BUILD_TYPE=RelWithDebInfo STRIP=""; else BUILD_TYPE=Release STRIP=" -s"; fi
+if [[ ${SYMBOLS:-0} == 1 ]]; then BUILD_TYPE=RelWithDebInfo STRIP=0; else BUILD_TYPE=Release STRIP=1; fi
 case $TARGET in
     deck) ARCH_FLAGS="-march=znver2 -mtune=znver2 -ffp-contract=off"; DEFAULTS="-DTOOIE_DECK_DEFAULTS=1" ;;
     generic) ARCH_FLAGS="-ffp-contract=off"; DEFAULTS="" ;;
@@ -87,17 +88,27 @@ for key, value in variables('windows-player').items():
         print(f'-D{key}={value.replace("${sourceDir}", root)}')
 EOF
 )
+# Upstream's ELF gates read GNU objdump from /usr/bin, as its linux-player preset sets.
 # libc++ like MSVC's STL aliases high_resolution_clock to steady_clock, which the
 # pinned timer patch requires. It is linked statically so the binary runs
 # without libc++ installed on the host.
 # Release (-O3, stripped) replaces the preset's RelWithDebInfo unless SYMBOLS=1.
 cmake -S . -B "$BUILD" -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
     -DCMAKE_C_FLAGS="$ARCH_FLAGS" -DCMAKE_CXX_FLAGS="-stdlib=libc++ $ARCH_FLAGS $DEFAULTS" \
-    -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++ -static-libstdc++$STRIP" \
-    -DPython3_EXECUTABLE="$ROOT/.venv-codegen/bin/python" "${CACHE_ARGS[@]}" -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+    -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++ -static-libstdc++" \
+    -DPython3_EXECUTABLE="$ROOT/.venv-codegen/bin/python" -DTOOIE_BASELINE_BINUTILS_DIR=/usr/bin \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON "${CACHE_ARGS[@]}" -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+
+echo "== 5. Raw archive qualification"
+# Upstream gates the player link on it on Linux too (docs/WINDOWS.md step 5).
+if [[ ! -e $BUILD/baseline/raw-qualification/qualified.json ]]; then
+    "$ROOT/.venv-codegen/bin/python" linux/qualify_raw.py "$BUILD"
+fi
 
 echo "== 6. Build the player"
 cmake --build "$BUILD" --target TooieBaseline -j "$JOBS" ${BUILD_ARGS:-}
+# Stripped only after upstream's post-link gate, which reads the symbol table.
+if [[ $STRIP == 1 ]]; then strip "$BUILD/baseline/player-bin/BanjoTooieSteamDeckPort"; fi
 # Fallback controller mappings, read from beside the executable.
 cp recompcontrollerdb.txt "$BUILD/baseline/player-bin/"
 echo "Built $BUILD/baseline/player-bin/BanjoTooieSteamDeckPort (TARGET=$TARGET)"

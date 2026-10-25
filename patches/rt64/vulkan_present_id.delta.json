@@ -4,7 +4,7 @@
   "delta_revision": 1,
   "upstream": {
     "dependency": "rt64",
-    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "commit": "d9817c68ffd7328cd0af383af124971489366e18",
     "path": "src/contrib/plume/plume_vulkan.cpp",
     "sha256": "70ecc88658c7231497836d15ea9f98d80861a6e991cc6128d40c7ac980193038",
     "lines": 4641

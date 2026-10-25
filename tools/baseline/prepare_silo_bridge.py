@@ -261,12 +261,14 @@ def compile_objects(root, output, run, cpu_root=False, cpu625=False, lifecycle_o
                 frames[function] = max((0x10000-v for v in adjustments if v & 0x8000), default=0)
             if name == 'bone' and not npc665 and not backpack621:
                 assert frames=={'func_800DCF48':48, HELPER:56}, ('exact measured object frames',frames)
-                assert sha(obj)=='7356a8f35224811c6fc8f5b730988fac05a003ca1d94c852dd174b0ef4dcf8a3', 'measured bone object changed'
+                # Linux fork: measured from Alpha 4.4 source in a clean tree (Alpha 4: 7356a8f3...;
+                # helper body eb5c7f47..., prologue 0x1C0). The selected image still equals IMAGE_SHA256.
+                assert sha(obj)=='e8745dad72046a1f6443884e42185272185369ff32e1ce225a759da5ba396d10', 'measured bone object changed'
                 helper=syms[HELPER]; assert helper['st_info']['bind']=='STB_GLOBAL'
                 code=elf.get_section(helper['st_shndx']).data()[helper['st_value']:helper['st_value']+helper['st_size']]
-                assert __import__('hashlib').sha256(code).hexdigest()=='eb5c7f47930974014df369080ef90cd7b731aa9d06e9724d520ff0c3fa216fd9', 'retained Silo helper body changed'
+                assert __import__('hashlib').sha256(code).hexdigest()=='df6c33857e52bda0f28dd84cb38788afb966c7cfb89d2169ac5f95bd42ad1a1b', 'retained Silo helper body changed'
                 prologues=[i for i in range(0,len(code),4) if int.from_bytes(code[i:i+4],'big')==0x27BDFFC8]
-                assert prologues==[0x1C0], ('helper shrinkwrapped frame',prologues)
+                assert prologues==[0x1C8], ('helper shrinkwrapped frame',prologues)
                 calls=[r for r in relocations(elf) if r[2]==HELPER]
                 assert len(calls)==1 and calls[0][1:]==(4,HELPER), ('sole direct helper JAL',calls)
             receipt[name] = dict(sha256=sha(obj), definitions=actual, imports=sorted(imports),text_bytes=len(text))

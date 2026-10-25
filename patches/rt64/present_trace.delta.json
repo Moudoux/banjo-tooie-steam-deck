@@ -4,15 +4,15 @@
   "delta_revision": 2,
   "upstream": {
     "dependency": "rt64",
-    "commit": "6f1c2d99a4ea571c139f449c326fd176ba8f3496",
+    "commit": "d9817c68ffd7328cd0af383af124971489366e18",
     "path": "src/hle/rt64_present_queue.cpp",
-    "sha256": "023dc3f4bc74bf6863e37ad1781fb32eaa543a7713bd8b9a3757b2262a1a1e52",
-    "lines": 549
+    "sha256": "afb36ce204b6a3aef22b1c362e98973a7ef1117a4889668097be40d030316995",
+    "lines": 547
   },
   "output": {
     "filename": "rt64_present_queue.cpp",
-    "sha256": "69b1a452650b419e63772ed848edd6f86463562cf49dcc685a23d909f6e545a1",
-    "lines": 593
+    "sha256": "2a8bce4f5c2450117b7af91528a6001a79b754d7785e306e349f3e5d32ebcc83",
+    "lines": 591
   },
   "operations": [
     {
@@ -24,8 +24,8 @@
       ]
     },
     {
-      "original_start": 269,
-      "original_end": 269,
+      "original_start": 270,
+      "original_end": 270,
       "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "replacement_lines": [
         "            const bool traceStages = tooie_rt64_present_trace_enabled();\n",
@@ -35,16 +35,16 @@
       ]
     },
     {
-      "original_start": 272,
-      "original_end": 272,
+      "original_start": 273,
+      "original_end": 273,
       "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "replacement_lines": [
         "                if (traceStages) traceStageStart = tooie_rt64_present_trace_clock_ns();\n"
       ]
     },
     {
-      "original_start": 277,
-      "original_end": 277,
+      "original_start": 278,
+      "original_end": 278,
       "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "replacement_lines": [
         "                if (traceStages) {\n",
@@ -54,16 +54,16 @@
       ]
     },
     {
-      "original_start": 302,
-      "original_end": 302,
+      "original_start": 303,
+      "original_end": 303,
       "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "replacement_lines": [
         "                if (traceStages) traceStageStart = tooie_rt64_present_trace_clock_ns();\n"
       ]
     },
     {
-      "original_start": 303,
-      "original_end": 303,
+      "original_start": 304,
+      "original_end": 304,
       "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "replacement_lines": [
         "                if (traceStages) {\n",
@@ -73,16 +73,16 @@
       ]
     },
     {
-      "original_start": 367,
-      "original_end": 367,
+      "original_start": 368,
+      "original_end": 368,
       "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "replacement_lines": [
         "                    if (traceStages) traceStageStart = tooie_rt64_present_trace_clock_ns();\n"
       ]
     },
     {
-      "original_start": 368,
-      "original_end": 368,
+      "original_start": 369,
+      "original_end": 369,
       "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "replacement_lines": [
         "                    if (traceStages) {\n",
@@ -92,16 +92,16 @@
       ]
     },
     {
-      "original_start": 393,
-      "original_end": 393,
+      "original_start": 394,
+      "original_end": 394,
       "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "replacement_lines": [
         "                    if (traceStages) traceStageStart = tooie_rt64_present_trace_clock_ns();\n"
       ]
     },
     {
-      "original_start": 394,
-      "original_end": 394,
+      "original_start": 395,
+      "original_end": 395,
       "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "replacement_lines": [
         "                    if (traceStages) {\n",
@@ -111,16 +111,16 @@
       ]
     },
     {
-      "original_start": 397,
-      "original_end": 397,
+      "original_start": 398,
+      "original_end": 398,
       "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "replacement_lines": [
         "                    if (traceStages) traceStageStart = tooie_rt64_present_trace_clock_ns();\n"
       ]
     },
     {
-      "original_start": 398,
-      "original_end": 398,
+      "original_start": 399,
+      "original_end": 399,
       "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "replacement_lines": [
         "                    if (traceStages) {\n",
@@ -130,16 +130,16 @@
       ]
     },
     {
-      "original_start": 402,
-      "original_end": 402,
+      "original_start": 403,
+      "original_end": 403,
       "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "replacement_lines": [
         "                if (traceStages) traceStageStart = tooie_rt64_present_trace_clock_ns();\n"
       ]
     },
     {
-      "original_start": 403,
-      "original_end": 403,
+      "original_start": 404,
+      "original_end": 404,
       "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "replacement_lines": [
         "                if (traceStages) {\n",

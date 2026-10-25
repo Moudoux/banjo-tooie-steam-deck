@@ -18,5 +18,5 @@ void render();
 
 } // namespace tooie::level_minimap
 
-// bainput_update entry raw hook; a0 is the PlayerState being updated.
+// Raw hook just before func_800991B0 calls bainput_update; a0 is the PlayerState being updated.
 extern "C" void tooie_level_minimap_observe(std::uint8_t* rdram, recomp_context* ctx);

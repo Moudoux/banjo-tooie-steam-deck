@@ -132,7 +132,9 @@ class Elf:
         rows=self.symbols.get(name,[])
         need(len(rows)==1,'ELF symbol must be unique: '+name)
         row=rows[0]
-        need(row['bind']==STB_GLOBAL and row['type']==kind,'ELF symbol must be global, nonweak and correctly typed: '+name)
+        # Linux fork: clang's RECOMP_FUNC is weak by design (N64Recomp recomp.h). Uniqueness here and the
+        # single GNU map definition and cref definer (GnuMap.owner_of) still bind the one linked copy.
+        need(row['bind'] in (STB_GLOBAL,'STB_WEAK') and row['type']==kind,'ELF symbol must be global or weak and correctly typed: '+name)
         need(isinstance(row['shndx'],int) and 0<row['shndx']<min(SHN_LORESERVE,len(self.sections)) and row['size']>0,
              'ELF symbol must be sized and section-defined: '+name)
         return row
@@ -165,7 +167,9 @@ def object_bijection(rows):
     return out
 
 
-SECTION_OUT = re.compile(r'(\.\S+)\s+0x([0-9a-f]+)\s+0x([0-9a-f]+)(?: load address 0x[0-9a-f]+)?')
+# Linux fork: libc++ (linked statically) adds the dotless output section __lcxx_override.
+SECTION_NAME = r'(?:\.\S+|__lcxx_override)'
+SECTION_OUT = re.compile(r'(' + SECTION_NAME + r')\s+0x([0-9a-f]+)\s+0x([0-9a-f]+)(?: load address 0x[0-9a-f]+)?')
 OUT_WRAPPED = re.compile(r'\s+0x([0-9a-f]+)\s+0x([0-9a-f]+)(?: load address 0x[0-9a-f]+)?')
 SECTION_IN = re.compile(r' ([^\s*]\S*)\s+0x([0-9a-f]+)\s+0x([0-9a-f]+)\s+(\S.*)')
 IN_WRAPPED = re.compile(r'\s+0x([0-9a-f]+)\s+0x([0-9a-f]+)\s+(\S.*)')
@@ -201,9 +205,9 @@ class GnuMap:
                     self.out_sections.append((name, int(match[1], 16), int(match[2], 16)))
                     continue
                 # A name without an address is an output statement ld removed; process this line normally.
-            if re.fullmatch(r'\.\S+', line):
+            if re.fullmatch(SECTION_NAME, line):
                 pending_out = line
-            elif re.fullmatch(r' \.\S+', line):
+            elif re.fullmatch(' ' + SECTION_NAME, line):
                 pending_in = line[1:]
             elif (match := SECTION_OUT.fullmatch(line)):
                 self.out_sections.append((match[1], int(match[2], 16), int(match[3], 16)))

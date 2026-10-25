@@ -1,8 +1,10 @@
 # Linux / Steam Deck port: handoff notes
 
 State of Banjo-Tooie: Steam Deck Port, the Linux fork of Banjo-Tooie: Scurvy
-Dog Port, for whoever picks it up next. Upstream builds only for Windows; this fork builds a native Linux
-player, tuned for the Steam Deck OLED.
+Dog Port, for whoever picks it up next. Upstream ships a Windows player and, since
+Alpha 4.4, has its own Linux code paths (POSIX profile startup, a `linux-player`
+preset); this fork builds and ships a Linux player tuned for the Steam Deck OLED.
+Rebased onto upstream Alpha 4.4 (`05359b6`) on 2026-10-25.
 
 ## Repository layout
 
@@ -15,7 +17,8 @@ player, tuned for the Steam Deck OLED.
 - `tools/check_repository.py` must keep passing. It rejects undeclared `docs/`
   files, so these notes live here. Upstream's version also rejected tracked
   `AGENTS.md`/`CLAUDE.md`; this fork allows them and keeps agent instructions in
-  `AGENTS.md` (`CLAUDE.md` imports it).
+  `AGENTS.md` (`CLAUDE.md` imports it). It also lists upstream's
+  `docs/RENDERING.md`, which upstream's own list omits.
 
 ## Build
 
@@ -31,6 +34,8 @@ docker run --rm -it -v "$(pwd)":/workspace tooie-toolchain:latest linux/build.sh
   bootstrap's own verifier, `generate_local.py`, `prepare_player_guest.py`, then
   CMake + Ninja into `build/linux-player`. CMake cache variables are read from
   the `windows-player` preset at build time, so preset changes carry over.
+  Upstream's own `linux-player` preset (gcc, no matrix/present trace or
+  acquire pacing) is not used: the player keeps the Windows feature set.
 - Env: `TARGET=deck` (default: `-march=znver2`, `-DTOOIE_DECK_DEFAULTS=1`) or
   `generic`; `SYMBOLS=1` keeps debug info for crash backtraces (use with
   `BUILD=build/linux-player-debug` to keep the normal build); `CLEAN=1` moves old build dirs aside (needed after guest patch
@@ -48,15 +53,26 @@ docker run --rm -it -v "$(pwd)":/workspace tooie-toolchain:latest linux/build.sh
   `linux/shims/bin/wslpath` maps paths to Wine's `Z:` drive and
   `linux/shims/python/sitecustomize.py` (via `PYTHONPATH`) prefixes `.exe`
   subprocesses with `wine`. No repo script is modified for this, and output
-  matched the Windows guest image byte for byte before the 16:10 change.
+  matches the Windows guest image byte for byte.
 - **libc++, linked statically.** A hash-pinned runtime timer patch
   static_asserts `high_resolution_clock == steady_clock` (true for MSVC and
   libc++, false for libstdc++). Static linking means the host needs no libc++.
 - **`-ffp-contract=off`.** Zen 2 has FMA; contraction would change guest float
   rounding versus the N64/Windows build.
-- **Release (-O3, stripped)** replaces the preset's RelWithDebInfo.
-- **Skipped on Linux:** raw-archive qualification (step 5) and packaging; both
-  parse PE/MSVC maps. Gated by `if(... AND WIN32)` in `cmake/Baseline.cmake`.
+- **Release (-O3)** replaces the preset's RelWithDebInfo; the binary is
+  stripped after the build, because upstream's post-link gate reads its
+  symbol table.
+- **Upstream's Linux gates run.** Since Alpha 4.4 `cmake/Baseline.cmake` gates
+  the Linux link like the Windows one: raw archive qualification (step 5),
+  the archive content gate and a post-link check that the native hooks and
+  embedded guest image are the qualified ones. `build.sh` runs step 5 once per
+  build tree with GNU tools (`linux/qualify_raw.py`, which follows
+  `docs/WINDOWS.md`) and passes `TOOIE_BASELINE_BINUTILS_DIR=/usr/bin`, as
+  upstream's `linux-player` preset does. Upstream's gate assumes gcc and
+  libstdc++; for clang and static libc++ `tools/baseline/elf_binding.py`
+  accepts the weak recompiled functions (clang's `RECOMP_FUNC` is weak by
+  design; uniqueness and the single map definition are still checked) and
+  libc++'s dotless `__lcxx_override` section. Packaging is skipped.
 
 ## RT64 pin
 
@@ -66,7 +82,10 @@ off for NVIDIA on Linux, where it capped output at about 2/3 of the target;
 on for AMD, so the Deck is unchanged), `gEXSetScissorAspect`, fill-rect
 coverage and draw-area fixes, and ImGui 1.93 WIP.
 - Every `patches/rt64/*.delta.json` recipe was moved to the new pin by
-  relocating its exact original spans; none of their replacement text
+  relocating its exact original spans (Alpha 4.4's new `present_trace` and
+  `vulkan_present_id` too: insertions only; one `present_trace` anchor sits
+  next to RT64's renamed `ext.swapChainPresentWaitEnabled` check, and plume is
+  the same submodule commit at both pins); none of their replacement text
   changed except the minimum host's SDL backend
   (`minimum_host_imgui_impl_sdl2_custom_cpp`, revision 2), rewritten for the
   new backend with the same external-mouse/display behaviour.
@@ -84,25 +103,14 @@ coverage and draw-area fixes, and ImGui 1.93 WIP.
 
 ## Source changes (all keep the Windows build unchanged)
 
-Linux enablement:
-- `cmake/Baseline.cmake`: allow Linux; system SDL2 + `RT64_SDL_WINDOW_VULKAN`
-  (ultramodern's Linux `WindowHandle` is `SDL_Window*`); Windows-only libs,
-  link flags, DLL copies and the qualification gate behind `if(WIN32)`;
-  selects `player_startup_posix.cpp` + `nfd` on Linux.
-- `tools/baseline/player_startup_posix.cpp` (new): POSIX twin of
-  `player_startup.cpp`. Profile in `$XDG_DATA_HOME/BanjoTooieSteamDeckPort`
-  (default `~/.local/share`), `flock` on the profile marker,
-  `renameat2(RENAME_NOREPLACE)`, SDL message boxes, RT64's nativefiledialog
-  for the ROM picker. Duplicates ~100 lines of platform-neutral logic
-  (argument parsing, save import); keep in sync with upstream fixes there.
-  Also: first launch uses `baserom.us.z64` (or the only N64 ROM) beside the
-  executable before opening the picker.
-- `tools/baseline/main.cpp`: `windows.h` guarded; `flock` ProfileLock for the
-  engineering build. `devices.cpp`: no `objbase.h`, X11 macro `#undef`s after
-  `SDL_syswm.h`, SDL window handle, `app->setup(0)`, and the window is created
-  with `SDL_WINDOW_VULKAN` (without it real SDL2 refuses
-  `SDL_Vulkan_CreateSurface`, and RADV segfaults in `VulkanSwapChain::resize`). `minimum_host.cpp`:
-  `localtime_r`/`gmtime_r`.
+Linux enablement is upstream's since Alpha 4.4 (this fork's own versions were
+dropped in the rebase): Linux branches in `cmake/Baseline.cmake`,
+`tools/baseline/player_startup_posix.cpp` (profile folder held open and
+`flock`ed for the process lifetime, reached through `/proc/self/fd`),
+`SDL_WINDOW_VULKAN` in `devices.cpp`, `localtime_r` in `minimum_host.cpp`.
+What this fork adds on top:
+- `player_startup_posix.cpp`: first launch uses `baserom.us.z64` (or the only
+  N64 ROM) beside the executable before opening the picker.
 
 Steam Deck features:
 - **Name: Banjo-Tooie: Steam Deck Port.** The Linux player's window title,
@@ -111,29 +119,25 @@ Steam Deck features:
   `rename_profile` (`player_startup_posix.cpp`, called from `main.cpp`
   before the Alpha 4 `migrate_profile`) moves a marked, unlocked
   `BanjoTooieScurvyDogPort` folder whole with `renameat2(RENAME_NOREPLACE)`,
-  holding its marker lock; an existing new folder wins and the old one is
-  left alone. Upstream's Windows side (`player_startup.cpp`, the `.exe` name
+  holding an exclusive `flock` on the old folder as upstream's profile lock
+  does; an existing new folder wins and the old one is left alone. (Builds
+  before the Alpha 4.4 rebase locked the marker file instead, so an old and a
+  new build running at once do not exclude each other.) Upstream's Windows side (`player_startup.cpp`, the `.exe` name
   in `release/player-windows-files.json`, `docs/`, `release/`) keeps the
   Scurvy Dog name, to keep upstream merges simple.
 
 - **Deck defaults** (`TOOIE_DECK_DEFAULTS`, `minimum_host.cpp`): only for
   settings a profile has not saved: 3x resolution, output rate Display,
-  widescreen On at 16:10, fullscreen.
+  widescreen On with gameplay aspect Fit window, fullscreen.
 - **Auto resolution:** resolution value 0 uses RT64 `WindowIntegerScale`
   (`minimum_presentation.cpp`, `minimum_menu.cpp`, `minimum_host.cpp`).
-- **16:10 gameplay aspect** (native aspect index 4, field widened 2 → 3 bits):
-  host in `src/widescreen.*`, `minimum_presentation.cpp`, `minimum_menu.cpp`;
-  guest in `patches/game/native_aspect_projection.c` (scale
-  `0x1.ccccccccccccep-1` = (16/10)/(16/9)) and `widescreen_settings_abi.h`.
-  Literal checks updated in `tools/render_wrapper_validator.py` (4 literals;
-  linked section is value-sorted, objects keep emission order),
-  `tools/baseline/prepare_minimum_host.py`, `patches/game/heap.ld`,
-  `tools/baseline/guest/camera-candidate/render_bridge.ld` (24 → 32 bytes).
-- **Re-pinned guest image** `9ccd8db3…99a3a`, 297768 bytes, layout
-  `c876981b…09549` in `prepare_player_guest.py`, `prepare_backpack621.py`,
-  `cmake/Baseline.cmake`, `release/player-windows-files.json`. Reviewed: of 92
-  recompiled guest functions only `func_80015D14` (projection) differs once
-  addresses are masked. This build is no longer upstream's verified image.
+- **16:10 via Fit window.** Alpha 4.4 added gameplay aspect 4, "Fit window",
+  which follows the drawable's aspect live as an f32 scale relative to 16:9
+  (`fit_aspect_bits`, `src/widescreen.cpp`). Upstream clamps it to 16:9..32:9;
+  outside Windows the lower clamp is 16:10 (scale 0.9), so the Deck panel
+  fills. That replaced this fork's own 16:10 entry, which also used index 4
+  (so saved profiles carry over) but needed a wider guest settings field and a
+  re-pinned guest image. The guest image is upstream's pinned image again.
 - **Controller DB:** `minimum_host.cpp` loads `recompcontrollerdb.txt` from
   beside the executable but only adds mappings for GUIDs SDL/Steam have not
   already mapped (Steam's `SDL_GAMECONTROLLERCONFIG` wins). Upstream's player
@@ -169,16 +173,9 @@ Steam Deck features:
   actors such as Jamjars or world doors) have no skip in the game and are
   unchanged.
 
-- **Rumble** (Controls menu, `rumble_strength` 0-100, default 100). The
-  player's `osPfsInit` adapter (`tools/baseline/adapters.cpp`) still leaves
-  memory paks absent, but returns `PFS_ERR_DEVICE` for channel 0, which is
-  what `func_800184E8` takes as a Rumble Pak: it then calls `osMotorInit` and
-  marks the motor present (`0x8007B2D0` + channel x `0x84`). Start/stop
-  (`func_80017FC0` / `func_80018028`) reach librecomp's `__osMotorAccess`
-  and ultramodern's `set_rumble`, which the host's input callbacks
-  (`devices.cpp`) now route to the shared mapper's `set_rumble`. The mapper
-  applies it to the selected controller with `SDL_GameControllerRumble`
-  (refreshed every 500 ms) at the configured strength.
+- **Rumble** is upstream's since Alpha 4.4, the same design this fork had
+  (virtual Rumble Pak on port 0 from the `osPfsInit` adapter, `rumble_strength`
+  slider); the fork's copy was dropped in the rebase.
 
 - **Anti-aliasing** (Video menu, `baseline_msaa` / `baseline_supersampling`):
   MSAA 2x/4x/8x and supersampling 2x/4x, applied live by the graphics owner
@@ -204,8 +201,7 @@ Steam Deck features:
     of device memory (the Deck qualifies). The MSAA levels offered are
     re-derived for the chosen format.
   - 2D upscaling (`baseline_upscale_2d`: Original, scaled only, all; default
-    scaled only), N64 three-point filtering (`baseline_three_point_filtering`,
-    default on) and texture LOD scaling (`baseline_texture_lod`, default on,
+    scaled only) and texture LOD scaling (`baseline_texture_lod`, default on,
     which the player already forced on) apply live: RT64's state reads them
     from the application copies on the graphics thread as it builds each
     workload, so `update_picture` (`minimum_presentation.cpp`) writes them
@@ -276,8 +272,10 @@ Steam Deck features:
     old failure point with zero cleanups and quit normally.
 
 - **Minimap** (Video menu "Minimap (bottom left, F5)", or F5 in game unless a
-  game action is bound to F5; `baseline_minimap`, default on; `src/level_minimap.cpp`, raw hook `MINIMAP_HOOKS` at `bainput_update`
-  entry `0x8009819C`). A top-down map of the level's collision floors,
+  game action is bound to F5; `baseline_minimap`, default on; `src/level_minimap.cpp`, raw hook `PLAYER_UPDATE_HOOKS` just
+  before `func_800991B0` calls `bainput_update` at `0x80099228`, with a0
+  loaded from s0; it was at `bainput_update`'s entry until Alpha 4.4 replaced
+  that function with a guest patch for its Talon Trot toggle). A top-down map of the level's collision floors,
   3000 units around the player, rotated so the camera looks up the map, with
   an arrow for the player's facing. Upstream's `src/minimap.cpp` is a
   breadcrumb radar for the retired frontend and is not used. The hook runs on
@@ -301,8 +299,7 @@ Steam Deck features:
   sectioned maps are not specifically verified.
 
 - **Hold L to levitate** (Controls menu, `baseline_levitate`, default off;
-  `src/levitate.cpp`, from the same `bainput_update` entry hook as the
-  minimap), Lighthouse's `Cheats.Levitate` (`Cheats.cpp`). For the controlled
+  `src/levitate.cpp`, from the same hook as the minimap), Lighthouse's `Cheats.Levitate` (`Cheats.cpp`). For the controlled
   character, while `bakey_held(player, BUTTON_L)` (so the game's per-button
   suppression applies): gravity 0 and vertical velocity 500 (the physics
   struct at PlayerState `+0xC8`, fields `+0x34` and `+0x14`, as
@@ -323,8 +320,8 @@ Steam Deck features:
   `src/draw_distance.cpp`.
 
 - **Autosave** (Controls menu "Autosave every", `baseline_autosave_minutes`,
-  0..30, default 5, 0 = off; `src/autosave.cpp`, from the same `bainput_update`
-  entry hook, so the timer only fires while the player is being updated).
+  0..30, default 5, 0 = off; `src/autosave.cpp`, from the same hook as the minimap,
+  so the timer only fires while the player is being updated).
   The game already saves by itself: every map change
   (`func_800A72A4` → `gcsectionDll_entrypoint_1(1)`) and the pause menu's
   Save & Exit call `func_800D389C`, which saves through
@@ -371,32 +368,16 @@ Steam Deck features:
   SDL gyro path (Steam Input off) was tried first and did not work on the
   owner's Deck.
 
-- **Twin-stick Breegull Blaster** (analog camera on). The right stick turns
-  and looks like the orbit: the same shaped stick, the game's frame delta,
-  Invert camera X/Y (up looks up, the opposite of the orbit, where up raises
-  the camera; the owner tried up-looks-down and preferred this),
-  turn 200 deg/s and look 160 deg/s (the owner's tuning).
-  The left stick's X strafes instead of turning. The Blaster (`bsfirstp`)
-  uses neither `bafpctrl` nor `baeggaim`: `func_80804848_bsfirstp` feeds its
-  inputs through `func_808045FC` (+0x164 turn from stick X, +0x180 look,
-  +0x148 forward, +0x12C strafe from the C-left/C-right axis at +0x11C, -1
-  left), and turning ramps up (`func_80809AF8`), so adding the right stick
-  there (the first attempt) felt non-linear. The look angle (+0x20C of the
-  state at player +0x188, clamped to +0x1EC..+0x1E8) eases back to a target:
-  in control type 1 (+0xC) one set by the left stick's position
-  (`func_80806928`, 1/12 per frame), in type 0 the level angle +0x25C while
-  +0x254 is set (`func_808069BC`, 1/6 per frame). Raw hooks:
-  - `func_80809AF8` before `0x80809BB8`: right-stick turn added to the
-    frame's yaw delta (sp+0x28).
-  - `func_8080682C` before `0x80806890`: right-stick look added to +0x20C
-    before the clamp, and accumulated (clamped, reset after 0.5 s away).
-  - `func_80806928` before `0x80806998` (f2) and `func_808069BC` before
-    `0x808069D8` (f0): that accumulated look is added to the target, so the
-    view stays where the right stick left it.
-  - `func_80804848` before `0x80804938` / `L_8080499C`: `bastick_getX` added
-    to the strafe input (a1); before `0x80804960` / `0x808049C4`: the turn
-    input (a1) zeroed.
-  Hook edits need a `CLEAN=1` build.
+- **Twin-stick Breegull Blaster** is upstream's since Alpha 4.4: Controls
+  "First-person aiming with right stick" (`tooie_first_person_aim`; guest
+  patch `tools/baseline/guest/minimum-host/modern_fps.c`, which replaces
+  `func_80804848`, `func_80808E78`, `func_808099B4`, `func_808069FC` and
+  `func_80806928` in `bsfirstp`). Deck builds turn it on for profiles that
+  have not saved it. This fork's own version (raw hooks in those functions,
+  right stick turn 200 deg/s and look 160 deg/s through the analog camera
+  settings, left stick X strafing) could not hook the replaced functions and
+  was removed in the rebase; upstream's sensitivity and invert settings are
+  separate from the camera's. Not yet compared on the Deck.
 
 - **No on-screen keyboard at launch** (`tools/baseline/devices.cpp`, before
   `SDL_Init`): sdl2-compat before `30ee26c` (2026-06-07) starts text input
@@ -553,6 +534,15 @@ Steam Deck features:
   letterbox opening) look right at Display rate, and nothing looked worse.
 - Not verified: real gamepad input with the XBLA layout, battery and
   90 Hz pacing, extended gameplay.
+- Alpha 4.4 rebase (2026-10-25), dev machine only: the clean build passes all
+  of upstream's gates, and the embedded guest image is upstream's pinned
+  `263e1d27…`. A scripted run boots, reaches game select and a new game in
+  Spiral Mountain with the minimap drawn (the moved player-update hook), and
+  shuts down cleanly with the save persisted. Not yet verified, and needed
+  from the Deck: Fit window at 16:10 in gameplay, upstream's right-stick
+  first-person aim in place of the old twin-stick Blaster, levitate and
+  autosave from the moved hook, Interpolate all objects next to upstream's new
+  per-object identities, and the profile rename with upstream's folder lock.
 
 ## Testing gotcha: SDL on the dev machine
 
@@ -572,11 +562,34 @@ runs (never commit it). QA `--input-script` files can only press N64 inputs.
 
 ## When pulling upstream
 
-- Conflicts are most likely in the pin files above and `cmake/Baseline.cmake`.
-  If upstream changes guest code, its new image hash replaces ours: re-apply
-  the 16:10 edit, build with `CLEAN=1`, review the guest diff (mask addresses
-  in `boot.c`, compare per function) and re-pin. Never re-pin without review.
+- `git fetch upstream`, back up the branch, then `git rebase upstream/main`
+  with `git config rerere.enabled true`: most commits touch
+  `tools/baseline/minimum_host.{cpp,hpp}` (the `Preferences` struct, the
+  `Preference` enum, the settings atomics) and `minimum_menu.cpp`, and each one
+  conflicts the same way. Keep both sides; drop ours where upstream now does
+  the same thing (Alpha 4.4: Linux enablement, rumble, the Vulkan window flag,
+  `localtime_r`, three-point filtering, 16:10).
+- The guest image is upstream's pinned image: this fork has no guest patch
+  edits, only raw hooks. Keep it that way so upstream's pins stay valid.
+  Upstream can replace a raw function with a guest patch at any time; a raw
+  hook in it then fails with a `KeyError` on the function name in
+  `minimum_host_hooks.strip_and_verify`. Move the hook to a caller or drop it.
+- Upstream's guest preparation is not always reproducible from a clean tree:
+  some checks pin intermediate outputs of its own older build tree. Alpha 4.4
+  needed four fixes (`prepare_silo_bridge.py`: the plain bone object, its
+  helper body and prologue offset, measured from Alpha 4.4 source;
+  `prepare_camera_bridge.py`: the clean `prior/boot.bin` accepted next to the
+  legacy one, and `D_801354DC` added to the reference symbols, which the
+  legacy silo symbol table supplied; `prepare_player_guest.py`: the carrier
+  CPU625 object without ckpack copy storage, as the BK-pipeline image builds
+  it). None of them may change the output: the gate is the final guest image,
+  which must still equal upstream's `IMAGE_SHA256` and `LAYOUT_SHA256`.
+- RT64 recipes: any recipe upstream adds or changes is written against its
+  RT64 pin, not this fork's. Materialize every recipe against `deps/rt64`
+  (`tools/prepare_rt64_matching.py`'s `materialize`), relocate the ones that
+  fail by their exact spans, and record it under "RT64 pin" above.
 - `tools/check_repository.py` differs from upstream (it allows `AGENTS.md` and
-  `CLAUDE.md`); keep that when upstream changes the file.
+  `CLAUDE.md`, and lists `docs/RENDERING.md`); keep that when upstream changes
+  the file.
 - If upstream changes `windows-player` preset options, `build.sh` follows
   automatically; new Windows-only CMake code may need another `if(WIN32)`.

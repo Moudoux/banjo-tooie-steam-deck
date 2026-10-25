@@ -38,6 +38,12 @@ authored-span and output hashes:
   Windows package explicitly selects it. This is a platform-specific pacing
   adaptation, not a game simulation-rate change.
 
+In the Linux fork both recipes are relocated, insertions unchanged, to RT64
+`d9817c68ffd7328cd0af383af124971489366e18`: `plume_vulkan.cpp` is the same
+plume submodule commit at both pins, and in `rt64_present_queue.cpp` the
+present-wait stage now sits inside RT64's renamed
+`ext.swapChainPresentWaitEnabled` check, around the same `wait()` call.
+
 The Alpha 4.4 package allowlist records both selected options. Local player
 feedback supports smooth output; this is not a guarantee for every GPU,
 driver or display configuration.
