@@ -8,7 +8,8 @@ Windows-only original, `origin` is the fork.
 
 - `linux/PORT_NOTES.md`: handoff notes. Build, every Linux/Deck change and why,
   the RT64 pin, what is verified, how to merge upstream. Update it when you add or
-  change a feature.
+  change a feature. When merging or rebasing upstream, every Steam Deck feature
+  listed there must survive and keep working ("When pulling upstream").
 - `linux/INTERPOLATION.md`: anything that looks wrong only at Display/Manual output
   rate (and fine at Original). Lists the cases already solved and the trace.
 - `docs/ARCHITECTURE.md`: upstream's architecture.

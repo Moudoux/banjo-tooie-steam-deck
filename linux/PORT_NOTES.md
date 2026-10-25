@@ -625,6 +625,23 @@ runs (never commit it). QA `--input-script` files can only press N64 inputs.
 
 ## When pulling upstream
 
+**The most important rule: every Steam Deck feature in "Source changes" above
+must survive the rebase and keep working.** A merge that builds but loses or
+breaks one of them is not done. In practice:
+
+- Before the rebase, list the features from "Source changes" (Deck defaults,
+  16:10, XBLA layout, intro and cutscene skips, picture and anti-aliasing
+  options, draw distance and LOD, frustum padding, minimap, levitate,
+  autosave, heap, analog camera, mouse/gyro aim, the culling and camera
+  fixes, and anything added since).
+- When a conflict or a moved/failed raw hook touches one, carry it over (move
+  the hook, re-anchor the code); never drop it to make the build pass.
+- Drop ours only where upstream now provides the same feature (as with rumble,
+  Linux enablement and the twin-stick Blaster in Alpha 4.4), say so here, and
+  have the owner confirm upstream's version on the Deck.
+- Afterwards, check each feature on the dev machine where possible and list
+  the rest for the owner's Deck test; record what was confirmed.
+
 - `git fetch upstream`, back up the branch, then `git rebase upstream/main`
   with `git config rerere.enabled true`: most commits touch
   `tools/baseline/minimum_host.{cpp,hpp}` (the `Preferences` struct, the
