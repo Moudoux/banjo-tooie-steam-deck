@@ -476,7 +476,11 @@ Steam Deck features:
   sp+0x30, range from sp+0x28/sp+0x24: -85..85 underwater, -35..30 on the
   surface). They act
   only while the PlayerState's bafpctrl state (+0x90) is in first person
-  (+0x10 is 2 or 3) in body mode; the held pitch is dropped after 150 ms
+  (+0x10 is 3) in body mode; 2 is third person with C-up first person
+  available (`bafpctrl_entrypoint_15` enters 3 on C-up), and swimming and
+  flight keep calling the steering there, so accepting 2 made the gyro
+  steer Banjo outside first person (fixed 2026-10-25, Deck-confirmed for
+  swimming and flight); the held pitch is dropped after 150 ms
   without the hook. The view follows the ideal yaw but the current pitch
   (PlayerState +0xDC: current +0, ideal +4), which eases to the ideal at a
   capped rate, so up/down felt slower than left/right on the Deck; the hook
@@ -500,6 +504,15 @@ Steam Deck features:
   amount, so the game's easing does not trail it. On that map the egg-aim
   view hooks take no mouse motion. Still to confirm on the Deck: flight,
   and the Saucer of Peril crosshair's scale.
+  The **Code Chamber** (map 0xBC, cheat codes) podium is egg aim with the
+  camera locked: only `func_808000B4_baeggaim` runs, `func_80800264` does
+  not (traced on the Deck). The same crosshair hook moves the cursor there
+  whenever the egg-aim view hooks have not run in the last 100 ms (own
+  setting `tooie_mouse_aim_code_chamber`, default on; Deck-confirmed
+  2026-10-25). Away from the podium C-up there is plain first-person look.
+  Reported but not reproduced: the camera in Jiggywiggy's puzzle moved with
+  the gyro. Not traced (the scratch save cannot reach it); the owner will
+  report if it still happens after the state fix above.
 
 - **Twin-stick Breegull Blaster** is upstream's since Alpha 4.4: Controls
   "First-person aiming with right stick" (`tooie_first_person_aim`; guest

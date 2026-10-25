@@ -364,6 +364,10 @@ void update_preference(Preference key, int value) {
         if (value < 0 || value > 1) return;
         selected.mouse_aim_saucer = value; settings::set_bool("tooie_mouse_aim_saucer", value != 0);
         tooie::camera::set_mouse_aim_saucer(value != 0); break;
+    case Preference::MouseAimCodeChamber:
+        if (value < 0 || value > 1) return;
+        selected.mouse_aim_code_chamber = value; settings::set_bool("tooie_mouse_aim_code_chamber", value != 0);
+        tooie::camera::set_mouse_aim_code_chamber(value != 0); break;
     case Preference::MouseAimSubmarine:
         if (value < 0 || value > 1) return;
         selected.mouse_aim_submarine = value; settings::set_bool("tooie_mouse_aim_submarine", value != 0);
@@ -727,6 +731,8 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     selected.mouse_aim_submarine = settings::get_bool("tooie_mouse_aim_submarine", true) ? 1 : 0;
     tooie::camera::set_mouse_aim_saucer(selected.mouse_aim_saucer != 0);
     tooie::camera::set_mouse_aim_submarine(selected.mouse_aim_submarine != 0);
+    selected.mouse_aim_code_chamber = settings::get_bool("tooie_mouse_aim_code_chamber", true) ? 1 : 0;
+    tooie::camera::set_mouse_aim_code_chamber(selected.mouse_aim_code_chamber != 0);
     selected.start_skips_cutscenes = settings::get_bool("tooie_start_skips_cutscenes", true) ? 1 : 0;
     start_skips_cutscenes.store(selected.start_skips_cutscenes != 0, std::memory_order_release);
     selected.color_format = bounded(settings::get_int("baseline_color_format", 0), 0, 2, 0);

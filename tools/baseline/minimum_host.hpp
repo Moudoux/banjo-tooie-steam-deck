@@ -37,6 +37,7 @@ struct Preferences {
     int draw_distance = 1, disable_lod = 0; // Model draw-distance multiplier 1..12.
     int mouse_aim = 1, mouse_sensitivity = 6, mouse_invert_y = 1; // Hundredths of a degree per count.
     int mouse_aim_flying = 1, mouse_aim_swimming = 1, mouse_aim_saucer = 1, mouse_aim_submarine = 1; // Also in flight, underwater, the Saucer of Peril, the submarine.
+    int mouse_aim_code_chamber = 1; // The Code Chamber's crosshair.
     int start_skips_cutscenes = 1;
     // RT64 picture options. Color format (0 Standard, 1 High, 2 Automatic) applies at
     // the next launch; the others apply live. Defaults keep the earlier output.
@@ -49,7 +50,7 @@ struct Preferences {
     int levitate = 0; // Hold N64 L to rise (Lighthouse cheat).
     int autosave_minutes = 5; // Minutes of play between autosaves; 0 turns autosave off.
 };
-enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume, AnalogCamera, CameraInvertX, CameraInvertY, Msaa, Supersampling, DrawDistance, DisableLod, MouseAim, MouseSensitivity, MouseInvertY, CameraDistance, StartSkipsCutscenes, ColorFormat, Upscale2D, TextureLod, DitherNoise, Minimap, Levitate, AutosaveMinutes, MouseAimFlying, MouseAimSwimming, MouseAimSaucer, MouseAimSubmarine, MinimapZoom };
+enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume, AnalogCamera, CameraInvertX, CameraInvertY, Msaa, Supersampling, DrawDistance, DisableLod, MouseAim, MouseSensitivity, MouseInvertY, CameraDistance, StartSkipsCutscenes, ColorFormat, Upscale2D, TextureLod, DitherNoise, Minimap, Levitate, AutosaveMinutes, MouseAimFlying, MouseAimSwimming, MouseAimSaucer, MouseAimSubmarine, MinimapZoom, MouseAimCodeChamber };
 struct OutputRate { int option = 0, manual_hz = 60; };
 inline uint32_t pack_output_rate(OutputRate rate) noexcept {
     return (uint32_t(rate.option) << 16) | uint32_t(rate.manual_hz);

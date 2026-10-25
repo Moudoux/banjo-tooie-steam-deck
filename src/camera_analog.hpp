@@ -18,6 +18,7 @@ void set_mouse_aim_inverted(bool inverted) noexcept;
 void set_mouse_aim_flying(bool enabled) noexcept;
 void set_mouse_aim_swimming(bool enabled) noexcept;
 void set_mouse_aim_saucer(bool enabled) noexcept;
+void set_mouse_aim_code_chamber(bool enabled) noexcept;
 void set_mouse_aim_submarine(bool enabled) noexcept;
 // Right-stick orbit distance as a share of the game's own (far) camera distance.
 void set_orbit_distance_scale(float scale) noexcept;

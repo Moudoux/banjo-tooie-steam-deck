@@ -64,6 +64,7 @@ std::atomic_bool configured_mouse_inverted{true};
 std::atomic_bool configured_mouse_flying{true};
 std::atomic_bool configured_mouse_swimming{true};
 std::atomic_bool configured_mouse_saucer{true};
+std::atomic_bool configured_mouse_code_chamber{true};
 std::atomic_bool configured_mouse_submarine{true};
 std::atomic<float> configured_distance_scale{1.0f};
 
@@ -184,6 +185,10 @@ void tooie::camera::set_mouse_aim_saucer(bool enabled) noexcept {
     configured_mouse_saucer.store(enabled, std::memory_order_release);
 }
 
+void tooie::camera::set_mouse_aim_code_chamber(bool enabled) noexcept {
+    configured_mouse_code_chamber.store(enabled, std::memory_order_release);
+}
+
 void tooie::camera::set_mouse_aim_submarine(bool enabled) noexcept {
     configured_mouse_submarine.store(enabled, std::memory_order_release);
 }
@@ -236,10 +241,16 @@ struct ViewShare {
 
 constexpr std::uint32_t k_current_map = 0x80132DC2u; // func_800EA05C.
 constexpr std::uint16_t k_saucer_of_peril_map = 0x124;
-bool on_saucer_of_peril(std::uint8_t* rdram) {
-    return static_cast<std::uint16_t>(MEM_HU(0, static_cast<gpr>(static_cast<std::int32_t>(k_current_map)))) ==
-        k_saucer_of_peril_map;
+constexpr std::uint16_t k_code_chamber_map = 0xBC;
+std::uint16_t current_map(std::uint8_t* rdram) {
+    return static_cast<std::uint16_t>(MEM_HU(0, static_cast<gpr>(static_cast<std::int32_t>(k_current_map))));
 }
+bool on_saucer_of_peril(std::uint8_t* rdram) {
+    return current_map(rdram) == k_saucer_of_peril_map;
+}
+// Egg aim turns the view (func_80800264_baeggaim) unless the camera is locked
+// (flag 0x2E, or body mode); the yaw hook there runs on every such frame.
+std::chrono::steady_clock::time_point egg_view_at{};
 
 // Mouse turn held for a hook family; dropped after 150 ms without its hook, so
 // each entry starts from the stick's own aim.
@@ -258,7 +269,8 @@ struct HeldAim {
 };
 
 // First-person flight and swimming: the PlayerState's bafpctrl state (+0x90)
-// is in first person (+0x10 is 2 while entering, 3 in it; 1 is off) with the
+// is in first person (+0x10 is 3; 2 is third person with C-up first person
+// available, bafpctrl_entrypoint_15, and 1 is off) with the
 // view following the player (+0x11). The yaw is handed to the next yaw hook;
 // the pitch is held, since the steering sets the pitch from the stick each frame.
 HeldAim body_aim;
@@ -267,7 +279,7 @@ bool body_first_person(std::uint8_t* rdram, gpr player) {
     const gpr control = static_cast<gpr>(MEM_W(player, 0x90));
     if (!rdram_pointer(control)) return false;
     const auto mode = static_cast<std::uint8_t>(MEM_BU(control, 0x10));
-    return (mode == 2 || mode == 3) && MEM_BU(control, 0x11) != 0;
+    return mode == 3 && MEM_BU(control, 0x11) != 0;
 }
 bool take_body_turn(std::uint8_t* rdram, int context, gpr player) {
     const auto& enabled = context == 2 ? configured_mouse_submarine
@@ -328,6 +340,7 @@ extern "C" void tooie_egg_aim_yaw(std::uint8_t* rdram, recomp_context* ctx) {
     (void)rdram;
     (void)ctx;
 #else
+    egg_view_at = std::chrono::steady_clock::now();
     float yaw = egg_yaw;
     bool taken = egg_yaw_pending;
     egg_yaw_pending = false;
@@ -423,7 +436,14 @@ extern "C" void tooie_saucer_aim(std::uint8_t* rdram, recomp_context* ctx) {
     (void)rdram;
     (void)ctx;
 #else
-    if (!configured_mouse_saucer.load(std::memory_order_acquire) || !on_saucer_of_peril(rdram)) return;
+    // The Saucer of Peril, and the Code Chamber's podium when its egg aim holds the
+    // camera still (the view hooks have not run since the last frame).
+    const std::uint16_t map = current_map(rdram);
+    const bool saucer = map == k_saucer_of_peril_map && configured_mouse_saucer.load(std::memory_order_acquire);
+    const bool code_chamber = map == k_code_chamber_map &&
+        configured_mouse_code_chamber.load(std::memory_order_acquire) &&
+        std::chrono::steady_clock::now() - egg_view_at >= std::chrono::milliseconds(100);
+    if (!saucer && !code_chamber) return;
     const gpr cursor = ctx->r16;
     if (!rdram_pointer(cursor)) return;
     saucer_aim.continue_or_reset();

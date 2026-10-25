@@ -433,6 +433,8 @@ void video(const Snapshot& snapshot) {
         if(ImGui::Checkbox("Aim in the submarine (first person)",&submarine))preference(Preference::MouseAimSubmarine,int(submarine));
         bool saucer=prefs.mouse_aim_saucer!=0;
         if(ImGui::Checkbox("Aim in Saucer of Peril",&saucer))preference(Preference::MouseAimSaucer,int(saucer));
+        bool code_chamber=prefs.mouse_aim_code_chamber!=0;
+        if(ImGui::Checkbox("Aim in the Code Chamber",&code_chamber))preference(Preference::MouseAimCodeChamber,int(code_chamber));
         ImGui::TextWrapped("Steam Deck gyro: in the Steam controller layout, set the gyro to output as mouse.");
     }
 #endif
