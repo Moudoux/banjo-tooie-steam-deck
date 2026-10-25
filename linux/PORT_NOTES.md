@@ -465,6 +465,23 @@ Steam Deck features:
   the existing `add_hooks`/`strip_and_verify` proof, so the guest image and
   its pins are unchanged. Found via Lighthouse (HarbourMasters' Banjo-Kazooie
   port), which pads its frustum the same way.
+- **Underwater sway at the right width** (`src/underwater_aspect.cpp`,
+  `UNDERWATER_ASPECT_HOOKS`). At host width upstream's guest
+  `cam_unwiden_raster` (`camera_emitters.c`) narrows the world camera's raster
+  projection to 4:3 so RT64's AUTO aspect does not widen it twice, but only
+  when the camera aspect (`+0xE8`) is the view's own aspect. Underwater,
+  `chcamerawibble` feeds `func_800C54F0` fov/aspect offsets every frame
+  (`func_800C4B90`, `D_8012A9A0+0x78/+0x7C`), so the view stayed widened twice
+  (about 17% too narrow at 16:10), and every few seconds, when both offsets
+  were exactly zero, one game frame was drawn correctly: a visible snap.
+  Seen in an F4 report as `player_projection` raw ratio exactly 1.3333 for one
+  workload against about 1.6 otherwise. The aspect offset is scaled by the
+  widened aspect, so the guest's widening factor is exact for swayed aspects
+  too: one hook records what `func_800C54F0` writes when an offset is
+  nonzero, and one at the end of `func_800CB124` (called only by the guest's
+  `func_800E44FC`) narrows the raster copy under the same conditions as
+  `cam_unwiden_raster`, leaving frames the guest narrows itself alone.
+  Confirmed by the owner on the Deck (2026-10-25): no more snap underwater.
 
 - **Interpolation at Display/Manual output** (`linux/INTERPOLATION.md` has the
   details, every case found so far and the debugging workflow). Game select's
@@ -659,7 +676,8 @@ breaks one of them is not done. In practice:
 
 - Before the rebase, list the features from "Source changes" (Deck defaults,
   16:10, XBLA layout, intro and cutscene skips, picture and anti-aliasing
-  options, draw distance and LOD, frustum padding, minimap, levitate,
+  options, draw distance and LOD, frustum padding, underwater sway width,
+  minimap, levitate,
   autosave, heap, analog camera, mouse/gyro aim, the culling and camera
   fixes, the startup dummy-workload fix, and anything added since).
 - When a conflict or a moved/failed raw hook touches one, carry it over (move

@@ -108,6 +108,12 @@ PLAYER_UPDATE_HOOKS=(('func_800991B0',0x80099228,
 # 0x8001A8D8; every heap end derives from that word, so growing it before the
 # store extends the pool up to 0x80800000 without moving its start.
 HEAP_HOOKS=(('heap_setup',0x8001A8CC,_native_call('tooie_heap_extend')),)
+# Underwater sway at host width (src/underwater_aspect.cpp): func_800C54F0 is
+# recorded just before it stores the swayed aspect (jal func_800CA510), and the
+# raster projection is narrowed after func_800CB124's last matrix store, where
+# the guest's cam_unwiden_raster refuses swayed aspects.
+UNDERWATER_ASPECT_HOOKS=(('func_800C54F0',0x800C5630,_native_call('tooie_underwater_aspect_record')),
+                         ('func_800CB124',0x800CB310,_native_call('tooie_underwater_aspect_unwiden')))
 GRAPHICS_HOOKS=(('func_808002A4_bafpctrl',0x80800368,MOUSE_AIM_TEXT),
                 ('func_80800264_baeggaim',0x808002E8,EGG_AIM_PITCH_TEXT),
                 ('func_80800264_baeggaim',0x80800300,EGG_AIM_YAW_TEXT),
@@ -115,7 +121,7 @@ GRAPHICS_HOOKS=(('func_808002A4_bafpctrl',0x80800368,MOUSE_AIM_TEXT),
                 ('func_800E42C0',0x800E42D4,DRAW_DISTANCE_TEXT),
                 ('func_800DD214',0x800DD298,LOD_GEO_TEXT),
                 ('func_800DD2E8',0x800DD32C,LOD_GEO_TEXT),
-                ('func_800DD37C',0x800DD3C0,LOD_GEO_TEXT))+MENU_GROUP_HOOKS+PLAYER_UPDATE_HOOKS+HEAP_HOOKS
+                ('func_800DD37C',0x800DD3C0,LOD_GEO_TEXT))+MENU_GROUP_HOOKS+PLAYER_UPDATE_HOOKS+HEAP_HOOKS+UNDERWATER_ASPECT_HOOKS
 
 def add_hooks(hooks,selected):
     assert type(selected) is bool

@@ -100,6 +100,12 @@ Each was confirmed fine at Original output and diagnosed with the trace below.
    `0x10033`) for three presentations, in pairs of workloads three apart. Fix:
    `owner_index_guard_scene_ids.delta.json` prefers pairs with equal explicit ids
    (`linux/PORT_NOTES.md`).
+9. **The underwater view snapped wider for one game frame every few seconds.**
+   Not interpolation (it shows at Original too): the game's own projection
+   (`raw`) was 4:3 for that one workload and doubly widened otherwise, because
+   the guest refused to narrow the swaying camera's aspect. Fix: "Underwater
+   sway at the right width" in `linux/PORT_NOTES.md`. Check `raw` across
+   workloads before blaming RT64 for a projection jump.
 
 ## Debugging a new case
 
