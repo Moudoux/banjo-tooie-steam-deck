@@ -379,7 +379,9 @@ void video(const Snapshot& snapshot) {
         int zoom=prefs.minimap_zoom;
         if(ImGui::SliderInt("Minimap zoom",&zoom,0,tooie::level_minimap::zoom_levels-1,tooie::level_minimap::zoom_label(zoom)))
             preference(Preference::MinimapZoom,zoom);
-        note("Hold F5 and press A or B to zoom in or out. While the game is paused, F5 opens a full-screen map.");
+        bool explored=prefs.minimap_explored!=0;
+        if(ImGui::Checkbox("Minimap: shade explored ground",&explored))preference(Preference::MinimapExplored,int(explored));
+        note("Hold F5 and press A or B to zoom in or out, X to shade explored ground, Y to clear it. While the game is paused, F5 opens a full-screen map.");
     }
 #endif
     int rate=prefs.output_rate;

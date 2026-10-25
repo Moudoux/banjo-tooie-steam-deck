@@ -381,6 +381,21 @@ Steam Deck features:
     names, zoom chord, markers and the pause map; the en dash showed as "?", now
     a hyphen. The hyphenated names and the skull and wigwam markers were then
     confirmed on the Deck too (2026-10-25).
+  - Explored ground (2026-10-25, for minigame mazes such as Glitter Gulch Mine's
+    dynamite and Mayahem Temple's): Video menu "Minimap: shade explored ground"
+    (`baseline_minimap_explored`, default off), or hold F5 and press X to toggle it
+    and Y to clear it, on the minimap or the paused full map. X / Y are read from the
+    selected controller's physical buttons (`minimap_controls`), since the Deck
+    layout maps X to N64 B as well (B zooms out); the N64 buttons pressed in that
+    tick are kept from the game. While on, the player-update hook marks 50-unit
+    cells whose centre is within 150 units of the player, per map, with the height
+    of the first visit; turning it off keeps them, Y (or a restart) forgets every
+    map's. The SDL owner never touches the cells: clearing is a flag the guest
+    thread applies. Rows of cells are merged into runs (republished at most every
+    100 ms) and drawn orange over the floors and under the walls, dimmed more than
+    400 units above or below the player; the full map's legend shows "Explored".
+    Verified locally (shading in Spiral Mountain from the setting); confirmed on the
+    Deck by the owner (2026-10-25), chord included.
 
 - **Hold L to levitate** (Controls menu, `baseline_levitate`, default off;
   `src/levitate.cpp`, from the same hook as the minimap), Lighthouse's `Cheats.Levitate` (`Cheats.cpp`). For the controlled

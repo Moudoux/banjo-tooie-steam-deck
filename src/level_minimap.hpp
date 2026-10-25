@@ -26,6 +26,12 @@ bool paused() noexcept;
 // Full-screen map over the pause menu, driven by the SDL owner.
 void set_full_map(bool open) noexcept;
 bool full_map() noexcept;
+// Explored areas: while on, the ground within a short reach of the player is
+// remembered per map and tinted on both maps; turning it off keeps the record.
+void set_explored(bool on) noexcept;
+bool explored() noexcept;
+// Any thread: forgets every map's explored ground (applied on the next player update).
+void clear_explored() noexcept;
 void zoom_full_map(int steps) noexcept;
 // Stick values (-1..1, up positive) held for `seconds`; full tilt pans half a view per second.
 void pan_full_map(float right, float up, float seconds) noexcept;

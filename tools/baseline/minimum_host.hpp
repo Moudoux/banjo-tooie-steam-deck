@@ -47,10 +47,11 @@ struct Preferences {
     int dither_noise = 100; // Percent of RT64's high-resolution dither noise.
     int minimap = 1; // Level map in the bottom-left corner.
     int minimap_zoom = 2; // tooie::level_minimap zoom level, 2 = 3000 units to the edge.
+    int minimap_explored = 0; // Tint the ground the player has been on (F5 + X).
     int levitate = 0; // Hold N64 L to rise (Lighthouse cheat).
     int autosave_minutes = 5; // Minutes of play between autosaves; 0 turns autosave off.
 };
-enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume, AnalogCamera, CameraInvertX, CameraInvertY, Msaa, Supersampling, DrawDistance, DisableLod, MouseAim, MouseSensitivity, MouseInvertY, CameraDistance, StartSkipsCutscenes, ColorFormat, Upscale2D, TextureLod, DitherNoise, Minimap, Levitate, AutosaveMinutes, MouseAimFlying, MouseAimSwimming, MouseAimSaucer, MouseAimSubmarine, MinimapZoom, MouseAimCodeChamber };
+enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume, AnalogCamera, CameraInvertX, CameraInvertY, Msaa, Supersampling, DrawDistance, DisableLod, MouseAim, MouseSensitivity, MouseInvertY, CameraDistance, StartSkipsCutscenes, ColorFormat, Upscale2D, TextureLod, DitherNoise, Minimap, Levitate, AutosaveMinutes, MouseAimFlying, MouseAimSwimming, MouseAimSaucer, MouseAimSubmarine, MinimapZoom, MouseAimCodeChamber, MinimapExplored };
 struct OutputRate { int option = 0, manual_hz = 60; };
 inline uint32_t pack_output_rate(OutputRate rate) noexcept {
     return (uint32_t(rate.option) << 16) | uint32_t(rate.manual_hz);

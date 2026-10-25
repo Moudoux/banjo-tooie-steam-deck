@@ -12,6 +12,7 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -57,6 +58,10 @@ constexpr int k_full_zoom_max = 6;
 constexpr float k_above = 300.0f;  // Floors this far over the player are faded.
 constexpr float k_marker_level = 400.0f; // Markers this far above or below are dimmed.
 constexpr auto k_stale = std::chrono::milliseconds(300);
+// Explored ground: square cells, those whose centre is within reach of the player
+// marked; one row's neighbours merge into a run unless their heights differ.
+constexpr float k_cell = 50.0f, k_reach = 150.0f, k_run_step = 200.0f;
+constexpr auto k_explored_publish = std::chrono::milliseconds(100);
 
 // Marker kinds by actor id (gemarkersDll table: overlay that returns the descriptor).
 enum class Kind : std::uint8_t { MumboSkull, Wigwam, WarpPad, MumboPad, Jinjo, NoteNest, TrebleClef, CheatoPage, Jiggy, Count };
@@ -105,6 +110,7 @@ struct Marker {
     Kind kind; float x, y, z;
     bool operator==(const Marker&) const = default;
 };
+struct Run { int row, first, last; float y; }; // Explored cells first..last of a row.
 struct Source { std::uint32_t collision = 0, vertices = 0; float offset[3]{}; bool water = false; };
 struct Pose { float x = 0, y = 0, z = 0, yaw = 0, view_yaw = 0; std::uint16_t map = 0; std::chrono::steady_clock::time_point at{}; };
 // Full-screen map: zoom steps over the fitted view, the view centre (u, v) in map
@@ -119,15 +125,22 @@ std::atomic<bool> on{true};
 std::atomic<int> zoom_level{tooie::level_minimap::default_zoom};
 std::atomic<std::int64_t> updated_at{0}; // steady_clock ticks of the last pose.
 std::atomic<bool> game_paused{false};
+std::atomic<bool> explored_on{false}, explored_clear{false};
 std::atomic<std::uint16_t> screen_map{0};
 std::mutex mutex;
 std::shared_ptr<const Mesh> published; // Guarded by mutex, with pose, markers and full.
 std::shared_ptr<const std::vector<Marker>> markers;
+std::shared_ptr<const std::vector<Run>> explored_runs; // The current map's.
 Pose pose;
 Full full;
 // Guest thread only.
 std::vector<std::uint32_t> signature;
 std::vector<Marker> sampled;
+// Per map: cell (row << 32 | column) -> the player's height when first there.
+std::unordered_map<std::uint16_t, std::unordered_map<std::uint64_t, float>> visited;
+bool visited_changed = false;
+std::uint16_t runs_map = 0xFFFF;
+std::chrono::steady_clock::time_point runs_at{};
 
 bool guest_range(std::uint32_t address, std::uint32_t bytes) noexcept {
     return address >= k_rdram_first && bytes <= k_rdram_end - k_rdram_first &&
@@ -239,6 +252,38 @@ void sample_markers(std::uint8_t* rdram, std::uint16_t map, std::vector<Marker>&
     }
 }
 
+std::uint64_t cell_key(int row, int column) noexcept {
+    return (std::uint64_t(std::uint32_t(row)) << 32) | std::uint32_t(column);
+}
+void mark_explored(const Pose& at) {
+    auto& cells = visited[at.map];
+    const int r0 = int(std::floor((at.z - k_reach) / k_cell)), r1 = int(std::floor((at.z + k_reach) / k_cell));
+    const int c0 = int(std::floor((at.x - k_reach) / k_cell)), c1 = int(std::floor((at.x + k_reach) / k_cell));
+    for (int row = r0; row <= r1; ++row) for (int column = c0; column <= c1; ++column) {
+        const float dx = (column + 0.5f) * k_cell - at.x, dz = (row + 0.5f) * k_cell - at.z;
+        if (dx * dx + dz * dz <= k_reach * k_reach && cells.try_emplace(cell_key(row, column), at.y).second)
+            visited_changed = true;
+    }
+}
+std::shared_ptr<const std::vector<Run>> explored_rows(std::uint16_t map) {
+    auto runs = std::make_shared<std::vector<Run>>();
+    const auto found = visited.find(map);
+    if (found == visited.end()) return runs;
+    std::vector<std::pair<std::uint64_t, float>> cells(found->second.begin(), found->second.end());
+    // Signed rows and columns sort as their biased values.
+    const auto order = [](std::uint64_t key) { return key ^ 0x8000000080000000ULL; };
+    std::sort(cells.begin(), cells.end(), [&](const auto& a, const auto& b) { return order(a.first) < order(b.first); });
+    for (const auto& [key, y] : cells) {
+        const int row = int(std::int32_t(key >> 32)), column = int(std::int32_t(key));
+        if (!runs->empty()) {
+            auto& run = runs->back();
+            if (run.row == row && run.last + 1 == column && std::abs(run.y - y) < k_run_step) { run.last = column; continue; }
+        }
+        runs->push_back({row, column, column, y});
+    }
+    return runs;
+}
+
 // Map frame: (u, v) = (right, up) from the player, rotated so the camera looks up.
 struct View {
     ImVec2 lo, hi, centre;
@@ -327,7 +372,8 @@ void text(ImDrawList* draw, ImVec2 at, const char* label, float size, ImU32 colo
 }
 
 // Floors, walls, markers and the player arrow, clipped to the view.
-void draw_map(ImDrawList* draw, const View& view, const Mesh& mesh, const std::vector<Marker>& marks, float icon) {
+void draw_map(ImDrawList* draw, const View& view, const Mesh& mesh, const std::vector<Marker>& marks,
+    const std::vector<Run>* explored, float icon) {
     const Pose& at = view.at;
     draw->PushClipRect(view.lo, view.hi, true);
     // Adjacent triangles would show seams with anti-aliased fringes.
@@ -347,6 +393,13 @@ void draw_map(ImDrawList* draw, const View& view, const Mesh& mesh, const std::v
             colour = IM_COL32(int(40 + 110 * t), int(70 + 130 * t), int(50 + 90 * t), 235);
         }
         draw->AddTriangleFilled(a, b, c, colour);
+    }
+    // Explored ground over the floors, under the walls; dimmed well above or below the player.
+    if (explored) for (const auto& run : *explored) {
+        const float x0 = run.first * k_cell, x1 = (run.last + 1) * k_cell, z0 = run.row * k_cell, z1 = z0 + k_cell;
+        const ImVec2 a = view.project(x0, z0), b = view.project(x1, z0), c = view.project(x1, z1), d = view.project(x0, z1);
+        if (view.outside(a, b, c) && view.outside(a, c, d)) continue;
+        draw->AddQuadFilled(a, b, c, d, std::abs(run.y - at.y) > k_marker_level ? IM_COL32(255, 140, 50, 45) : IM_COL32(255, 140, 50, 115));
     }
     draw->Flags = flags;
     const float size = std::min(view.hi.x - view.lo.x, view.hi.y - view.lo.y);
@@ -397,7 +450,7 @@ void fit(Full& out, const Mesh& mesh, const std::vector<Marker>& marks, const Po
     out.fitted = true;
 }
 
-void render_full(ImDrawList* draw, const Mesh& mesh, const std::vector<Marker>& marks, const Pose& at) {
+void render_full(ImDrawList* draw, const Mesh& mesh, const std::vector<Marker>& marks, const std::vector<Run>* explored, const Pose& at) {
     Full view_state;
     {
         std::lock_guard lock(mutex);
@@ -418,13 +471,20 @@ void render_full(ImDrawList* draw, const Mesh& mesh, const std::vector<Marker>& 
     const View view = make_view(lo, hi, k, view_state.u, view_state.v, at);
     draw->AddRectFilled(lo, hi, IM_COL32(12, 20, 28, 255));
     const float icon = std::clamp((hi.y - lo.y) / 70.0f, 5.0f, 11.0f);
-    draw_map(draw, view, mesh, marks, icon);
+    draw_map(draw, view, mesh, marks, explored, icon);
     const char* name = tooie::map_names::name(at.map);
     text(draw, ImVec2(lo.x, viewport->WorkPos.y + margin), name ? name : "Map", title);
     // Legend: the kinds this map has, then the controls.
     bool present[std::size_t(Kind::Count)]{};
     for (const auto& mark : marks) present[std::size_t(mark.kind)] = true;
     ImVec2 at_legend(lo.x, hi.y + font * 0.5f);
+    if (explored && !explored->empty()) {
+        const char* label = "Explored";
+        draw->AddRectFilled(ImVec2(at_legend.x, at_legend.y + font * 0.5f - icon * 0.8f),
+            ImVec2(at_legend.x + icon * 2.0f, at_legend.y + font * 0.5f + icon * 0.8f), IM_COL32(255, 140, 50, 170));
+        text(draw, ImVec2(at_legend.x + icon * 2.0f + font * 0.4f, at_legend.y), label, font);
+        at_legend.x += icon * 2.0f + font * 0.4f + ImGui::CalcTextSize(label).x + font;
+    }
     for (int kind = int(Kind::Count) - 1; kind >= 0; --kind) {
         if (!present[kind]) continue;
         const char* label = k_kinds[kind].label;
@@ -434,7 +494,7 @@ void render_full(ImDrawList* draw, const Mesh& mesh, const std::vector<Marker>& 
         text(draw, ImVec2(at_legend.x + icon * 2.0f + font * 0.4f, at_legend.y), label, font);
         at_legend.x += width;
     }
-    text(draw, ImVec2(lo.x, hi.y + font * 1.8f), "A / B zoom    Stick move    Start or F5 back to the pause menu", font,
+    text(draw, ImVec2(lo.x, hi.y + font * 1.8f), "A / B zoom    Stick move    Start or F5 back to the pause menu    F5 + X explored    F5 + Y clear", font,
         IM_COL32(190, 200, 210, 255));
 }
 }
@@ -464,6 +524,9 @@ void set_full_map(bool open) noexcept {
     full.open = open;
 }
 bool full_map() noexcept { std::lock_guard lock(mutex); return full.open; }
+void set_explored(bool enabled) noexcept { explored_on.store(enabled, std::memory_order_release); }
+bool explored() noexcept { return explored_on.load(std::memory_order_acquire); }
+void clear_explored() noexcept { explored_clear.store(true, std::memory_order_release); }
 void zoom_full_map(int steps) noexcept {
     std::lock_guard lock(mutex);
     full.zoom = std::clamp(full.zoom + steps, 0, k_full_zoom_max);
@@ -479,10 +542,12 @@ void render() {
     if (!enabled()) return;
     std::shared_ptr<const Mesh> mesh;
     std::shared_ptr<const std::vector<Marker>> marks;
+    std::shared_ptr<const std::vector<Run>> runs;
     Pose at;
     bool open;
-    { std::lock_guard lock(mutex); mesh = published; marks = markers; at = pose; open = full.open; }
+    { std::lock_guard lock(mutex); mesh = published; marks = markers; runs = explored_runs; at = pose; open = full.open; }
     if (!mesh) return;
+    const auto* explored_ground = explored() && runs && !runs->empty() ? runs.get() : nullptr;
     static const std::vector<Marker> none;
     const auto& marked = marks ? *marks : none;
     auto* draw = ImGui::GetBackgroundDrawList();
@@ -490,7 +555,7 @@ void render() {
     const float size = std::clamp(viewport->WorkSize.y * 0.3f, 120.0f, 360.0f), margin = 16.0f;
     const ImVec2 lo(viewport->WorkPos.x + margin, viewport->WorkPos.y + viewport->WorkSize.y - margin - size);
     if (paused()) {
-        if (open) render_full(draw, *mesh, marked, at);
+        if (open) render_full(draw, *mesh, marked, explored_ground, at);
         else text(draw, ImVec2(lo.x, viewport->WorkPos.y + viewport->WorkSize.y - margin - ImGui::GetFontSize()), "F5: Map",
             ImGui::GetFontSize());
         return;
@@ -499,7 +564,7 @@ void render() {
     const ImVec2 hi(lo.x + size, lo.y + size);
     draw->AddRectFilled(lo, hi, IM_COL32(12, 20, 28, 200));
     draw_map(draw, make_view(lo, hi, size * 0.5f / k_zoom_radius[zoom()], 0.0f, 0.0f, at), *mesh, marked,
-        std::clamp(size / 36.0f, 3.5f, 8.0f));
+        explored_ground, std::clamp(size / 36.0f, 3.5f, 8.0f));
     if (const char* name = tooie::map_names::name(at.map)) {
         // Above the map, wrapped to its width.
         const float font = ImGui::GetFontSize();
@@ -559,8 +624,16 @@ extern "C" void tooie_level_minimap_observe(std::uint8_t* rdram, recomp_context*
         rebuilt = std::move(mesh);
     }
     sample_markers(rdram, next.map, sampled);
+    if (explored_clear.exchange(false, std::memory_order_acq_rel)) { visited.clear(); visited_changed = true; }
+    if (tooie::level_minimap::explored()) mark_explored(next);
+    std::shared_ptr<const std::vector<Run>> runs;
+    if (next.map != runs_map || (visited_changed && next.at - runs_at >= k_explored_publish)) {
+        runs = explored_rows(next.map);
+        runs_map = next.map; runs_at = next.at; visited_changed = false;
+    }
     std::lock_guard lock(mutex);
     if (rebuilt) published = std::move(rebuilt);
+    if (runs) explored_runs = std::move(runs);
     if (!markers || *markers != sampled) markers = std::make_shared<const std::vector<Marker>>(sampled);
     pose = next;
     updated_at.store(next.at.time_since_epoch().count(), std::memory_order_release);

@@ -74,9 +74,11 @@ std::string marker_toast;
 std::chrono::steady_clock::time_point marker_until{};
 std::string loaded_profiles; // RAM copy of the string passed to the mapper, before migration.
 // Minimap keys (F5, the Steam Deck back button in the owner's layout): a tap toggles the
-// minimap, or the full-screen map while paused; held, A / B zoom and stay from the game.
+// minimap, or the full-screen map while paused; held, A / B zoom and stay from the game,
+// and the controller's own X / Y buttons toggle and clear the explored ground.
 bool map_key_held = false, map_key_chorded = false;
 uint16_t map_buttons_seen = 0, map_buttons_withheld = 0;
+bool map_x_seen = false, map_y_seen = false;
 std::chrono::steady_clock::time_point map_tick{};
 constexpr uint64_t fingerprint_basis = 1469598103934665603ULL;
 uint64_t fingerprint_step(uint64_t hash, uint64_t value) { return (hash ^ value) * 1099511628211ULL; }
@@ -432,6 +434,10 @@ void update_preference(Preference key, int value) {
         if (value < 0 || value >= tooie::level_minimap::zoom_levels) return;
         selected.minimap_zoom = value; settings::set_int("baseline_minimap_zoom", value);
         tooie::level_minimap::set_zoom(value); break;
+    case Preference::MinimapExplored:
+        if (value < 0 || value > 1) return;
+        selected.minimap_explored = value; settings::set_bool("baseline_minimap_explored", value != 0);
+        tooie::level_minimap::set_explored(value != 0); break;
     case Preference::Levitate:
         if (value < 0 || value > 1) return;
         selected.levitate = value; settings::set_bool("baseline_levitate", value != 0);
@@ -745,6 +751,8 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     selected.minimap_zoom = bounded(settings::get_int("baseline_minimap_zoom", tooie::level_minimap::default_zoom),
         0, tooie::level_minimap::zoom_levels - 1, tooie::level_minimap::default_zoom);
     tooie::level_minimap::set_zoom(selected.minimap_zoom);
+    selected.minimap_explored = settings::get_bool("baseline_minimap_explored", false) ? 1 : 0;
+    tooie::level_minimap::set_explored(selected.minimap_explored != 0);
     selected.levitate = settings::get_bool("baseline_levitate", false) ? 1 : 0;
     tooie::levitate::set_enabled(selected.levitate != 0);
     selected.autosave_minutes = bounded(settings::get_int("baseline_autosave_minutes", fresh.autosave_minutes), 0, 30, fresh.autosave_minutes);
@@ -815,15 +823,30 @@ void shutdown() noexcept {
 namespace {
 // SDL owner, each tick: A / B with the minimap key held zoom the visible minimap;
 // the full map takes all input (A / B zoom, stick pans, Start closes). Buttons
-// taken stay from the game until released.
+// taken stay from the game until released. With the key held, the controller's
+// X / Y (physical, since the Deck layout maps X to N64 B as well) toggle and clear
+// the explored ground; the N64 buttons they press that tick do nothing else.
 void minimap_controls(input::State& state, bool withheld) {
     constexpr uint16_t a = 0x8000, b = 0x4000, start = 0x1000;
     const auto now = std::chrono::steady_clock::now();
     const float seconds = map_tick == std::chrono::steady_clock::time_point{} ? 0.0f :
         std::min(0.1f, std::chrono::duration<float>(now - map_tick).count());
     map_tick = now;
-    const uint16_t pressed = state.buttons & ~map_buttons_seen;
+    uint16_t pressed = state.buttons & ~map_buttons_seen;
     map_buttons_seen = state.buttons;
+    auto* controller = SDL_GameControllerFromInstanceID(tooie::input::selected_controller_instance());
+    const bool x = controller && SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_X);
+    const bool y = controller && SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_Y);
+    const bool x_pressed = x && !map_x_seen, y_pressed = y && !map_y_seen;
+    map_x_seen = x; map_y_seen = y;
+    if (map_key_held && !withheld && (x_pressed || y_pressed) &&
+        (tooie::level_minimap::visible() || tooie::level_minimap::full_map())) {
+        map_key_chorded = true;
+        if (x_pressed) update_preference(Preference::MinimapExplored, selected.minimap_explored ? 0 : 1);
+        if (y_pressed) tooie::level_minimap::clear_explored();
+        map_buttons_withheld |= pressed;
+        pressed = 0;
+    }
     if (tooie::level_minimap::full_map() && (withheld || !tooie::level_minimap::paused()))
         tooie::level_minimap::set_full_map(false);
     if (tooie::level_minimap::full_map()) {
