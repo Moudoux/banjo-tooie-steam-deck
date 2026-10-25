@@ -101,7 +101,8 @@ before the rename, point the shortcut at the new executable name.
 | View | | Settings menu |
 
 The settings menu has **Analog camera**, **Invert camera X**, **Invert
-camera Y**, **Camera distance** (orbit distance, 50-150% of the game's) and **Mouse / gyro aiming** (first person; for the Deck's gyro, set
+camera Y**, **Camera distance** (orbit distance, 50-150% of the game's) and **Mouse / gyro aiming** (first person, with separate switches for
+flying, underwater and the Saucer of Peril crosshair; for the Deck's gyro, set
 it to output as mouse in the Steam controller layout). With the analog camera off, the right stick acts as C-left /
 C-right in steps and up / down toggles camera views.
 Everything can be rebound in the settings menu. Profiles made before this

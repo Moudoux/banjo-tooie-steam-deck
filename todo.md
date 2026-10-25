@@ -48,6 +48,9 @@ Trot toggle, MSAA as an option.
 
 - [x] **Gyro aiming in first person (egg aiming).** Done as first-person mouse
   aiming, used with Steam Input's gyro-as-mouse; native SDL gyro did not work.
+- [x] **Gyro in first-person flight, underwater, the submarine and the Saucer
+  of Peril.** A setting each. Underwater, submarine and on-foot egg aim
+  confirmed on the Deck; flight and the saucer crosshair not yet checked.
 - [ ] **Talon Trot toggle.** Press once instead of holding. Lighthouse:
   `Controls.TalonTrotToggle` in `src/port/Controller/ControlSchemes.cpp`.
   Small.

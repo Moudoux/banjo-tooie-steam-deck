@@ -85,6 +85,50 @@ EGG_AIM_PITCH_TEXT=('{ extern void tooie_egg_aim_pitch(uint8_t*, recomp_context*
     'tooie_egg_aim_pitch(rdram, ctx); }')
 EGG_AIM_YAW_TEXT=('{ extern void tooie_egg_aim_yaw(uint8_t*, recomp_context*); '
     'tooie_egg_aim_yaw(rdram, ctx); }')
+# First-person flight and swimming (src/camera_analog.cpp): bafpctrl's body mode
+# has the view follow the player, so the mouse steers. Yaw: bafly_entrypoint_9 /
+# baswim_entrypoint_11 add stick x x rate x dt to the ideal yaw and pass it (a1)
+# to yaw_setIdeal; the player is in s0. Pitch: bafly_entrypoint_10 (player at
+# sp+0x20, its arguments at sp+0x24/0x28) and baswim_entrypoint_12 (player in
+# s0) map stick y to an ideal pitch in [arg1, 360) or [0, arg2] (swim: 275, 85)
+# and pass it (a1) to func_8009BF5C, once on each branch of the stick's sign.
+# The submarine (bssub) steers the same way: func_80800634_bssub before
+# yaw_setIdeal (player in s0), and func_80800768_bssub before func_8009BF5C
+# (player at sp+0x30, range [sp+0x28, 360) or [0, sp+0x24]: 275/85 underwater,
+# 325/30 on the surface). The first argument picks the setting: 0 flight,
+# 1 swimming, 2 submarine.
+def _body_yaw(context):
+    return ('{ extern void tooie_body_aim_yaw(uint8_t*, recomp_context*, int, gpr); '
+            'tooie_body_aim_yaw(rdram, ctx, %d, ctx->r16); }' % context)
+FLY_PITCH_TEXT=('{ extern void tooie_body_aim_pitch(uint8_t*, recomp_context*, int, gpr, float, float); '
+    'union { uint32_t u; float f; } tooie_low = { (uint32_t)MEM_W(0x24, ctx->r29) }, '
+    'tooie_high = { (uint32_t)MEM_W(0x28, ctx->r29) }; '
+    'tooie_body_aim_pitch(rdram, ctx, 0, MEM_W(0x20, ctx->r29), tooie_low.f - 360.0f, tooie_high.f); }')
+SUB_PITCH_TEXT=('{ extern void tooie_body_aim_pitch(uint8_t*, recomp_context*, int, gpr, float, float); '
+    'union { uint32_t u; float f; } tooie_low = { (uint32_t)MEM_W(0x28, ctx->r29) }, '
+    'tooie_high = { (uint32_t)MEM_W(0x24, ctx->r29) }; '
+    'tooie_body_aim_pitch(rdram, ctx, 2, MEM_W(0x30, ctx->r29), tooie_low.f - 360.0f, tooie_high.f); }')
+SWIM_PITCH_TEXT=('{ extern void tooie_body_aim_pitch(uint8_t*, recomp_context*, int, gpr, float, float); '
+    'tooie_body_aim_pitch(rdram, ctx, 1, ctx->r16, -85.0f, 85.0f); }')
+# Each text appears once per function, so the two branches are told apart.
+BODY_AIM_HOOKS=(('bafly_entrypoint_9',0x8080055C,_body_yaw(0)),
+                ('bafly_entrypoint_10',0x808005D4,FLY_PITCH_TEXT+' /* stick down */'),
+                ('bafly_entrypoint_10',0x808005F4,FLY_PITCH_TEXT+' /* stick up */'),
+                ('baswim_entrypoint_11',0x8080039C,_body_yaw(1)),
+                ('baswim_entrypoint_12',0x808004D0,SWIM_PITCH_TEXT+' /* stick down */'),
+                ('baswim_entrypoint_12',0x808004F4,SWIM_PITCH_TEXT+' /* stick up */'),
+                ('func_80800634_bssub',0x8080074C,_body_yaw(2)),
+                ('func_80800768_bssub',0x808007FC,SUB_PITCH_TEXT+' /* stick down */'),
+                ('func_80800768_bssub',0x8080081C,SUB_PITCH_TEXT+' /* stick up */'),
+                # The first-person camera's rate-capped easing (func_80111410), camera data in s0;
+                # it takes the mouse share of every mouse-aim hook.
+                ('func_808003DC_ncba1p',0x8080042C,('{ extern void tooie_body_aim_view(uint8_t*, recomp_context*); '
+                                                      'tooie_body_aim_view(rdram, ctx); }')))
+# Saucer of Peril crosshair: func_808000B4_baeggaim, before the first cursor
+# easing call (0x8080012C), with the stick's target x in f14, y at sp+0x20 and
+# the cursor in s0.
+SAUCER_AIM_TEXT=('{ extern void tooie_saucer_aim(uint8_t*, recomp_context*); '
+    'tooie_saucer_aim(rdram, ctx); }')
 def _native_call(name):
     return '{ extern void %s(uint8_t*, recomp_context*); %s(rdram, ctx); }' % (name, name)
 # Menu-map matrix groups (src/menu_interpolation.cpp): func_8010A79C, the actor draw
@@ -117,11 +161,12 @@ UNDERWATER_ASPECT_HOOKS=(('func_800C54F0',0x800C5630,_native_call('tooie_underwa
 GRAPHICS_HOOKS=(('func_808002A4_bafpctrl',0x80800368,MOUSE_AIM_TEXT),
                 ('func_80800264_baeggaim',0x808002E8,EGG_AIM_PITCH_TEXT),
                 ('func_80800264_baeggaim',0x80800300,EGG_AIM_YAW_TEXT),
+                ('func_808000B4_baeggaim',0x8080012C,SAUCER_AIM_TEXT),
                 ('func_800DE498',0x800DE628,LOD_SKIP_TEXT),
                 ('func_800E42C0',0x800E42D4,DRAW_DISTANCE_TEXT),
                 ('func_800DD214',0x800DD298,LOD_GEO_TEXT),
                 ('func_800DD2E8',0x800DD32C,LOD_GEO_TEXT),
-                ('func_800DD37C',0x800DD3C0,LOD_GEO_TEXT))+MENU_GROUP_HOOKS+PLAYER_UPDATE_HOOKS+HEAP_HOOKS+UNDERWATER_ASPECT_HOOKS
+                ('func_800DD37C',0x800DD3C0,LOD_GEO_TEXT))+BODY_AIM_HOOKS+MENU_GROUP_HOOKS+PLAYER_UPDATE_HOOKS+HEAP_HOOKS+UNDERWATER_ASPECT_HOOKS
 
 def add_hooks(hooks,selected):
     assert type(selected) is bool

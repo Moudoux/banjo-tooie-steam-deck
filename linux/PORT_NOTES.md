@@ -414,6 +414,55 @@ Steam Deck features:
   Steam Input on and set the gyro to output as mouse in the layout. A native
   SDL gyro path (Steam Input off) was tried first and did not work on the
   owner's Deck.
+  Three more places, each with its own Camera setting under the mouse aim
+  (default on): **first-person flight** (`tooie_mouse_aim_flying`),
+  **first-person swimming** (`tooie_mouse_aim_swimming`), the **submarine's
+  first person** in Jolly Roger's Lagoon (`tooie_mouse_aim_submarine`) and
+  the **Saucer of Peril** crosshair (`tooie_mouse_aim_saucer`). Deck (2026-10-25):
+  the owner confirmed underwater, the submarine and on-foot egg aim feel
+  the same on both axes after the camera-rate change below; flight and the
+  Saucer of Peril crosshair not yet reported. Flight and swimming put
+  bafpctrl in its body mode (state +0x11, set by `bafly_entrypoint_19` and
+  `baswim_entrypoint_7`): `func_8080022C_bafpctrl` points the view along the
+  player's own yaw and negated pitch, and egg aim skips `func_80800264`, so
+  the hooks above never run there. The mouse steers instead: raw hooks before
+  `yaw_setIdeal` in `bafly_entrypoint_9` (`0x8080055C`) and
+  `baswim_entrypoint_11` (`0x8080039C`) add the mouse yaw to the ideal yaw,
+  and hooks before `func_8009BF5C` on both stick-sign branches of
+  `bafly_entrypoint_10` (`0x808005D4`, `0x808005F4`) and
+  `baswim_entrypoint_12` (`0x808004D0`, `0x808004F4`) add a held mouse pitch
+  to the stick's ideal pitch, kept inside the steering's range (flight
+  `[arg1 - 360, arg2]`, -60..80 for Banjo, Kazooie and the bee; swimming -85..85).
+  The submarine (`bssub`, also body mode through `bafpctrl_entrypoint_18`)
+  steers the same way: yaw before `0x8080074C` in `func_80800634_bssub`,
+  pitch before `0x808007FC`/`0x8080081C` in `func_80800768_bssub` (player at
+  sp+0x30, range from sp+0x28/sp+0x24: -85..85 underwater, -35..30 on the
+  surface). They act
+  only while the PlayerState's bafpctrl state (+0x90) is in first person
+  (+0x10 is 2 or 3) in body mode; the held pitch is dropped after 150 ms
+  without the hook. The view follows the ideal yaw but the current pitch
+  (PlayerState +0xDC: current +0, ideal +4), which eases to the ideal at a
+  capped rate, so up/down felt slower than left/right on the Deck; the hook
+  now moves the current pitch by the mouse's share too (the stick's share
+  still eases). That was not enough: up/down still kept moving after the
+  Deck stopped. In body mode the first-person camera eases its shown
+  rotation (+0xC) to the target (+0x24) at capped rates, set by
+  `ncba1p_entrypoint_1` through `func_80111590` (pitch 120, yaw 300 degrees
+  per second, `func_80111410` in `func_808003DC_ncba1p`; on foot `bsfirstp`
+  turns the easing off with `ncba1p_entrypoint_4`). A hook before that call
+  (`0x8080042C`) first moves the shown pitch and yaw by the mouse's share of
+  this frame's turn, never past the target, so only the stick's share is
+  capped. On-foot egg aim keeps those default caps too (only the Breegull
+  Blaster, `bsfirstp`, sets 360/360), and the owner noticed the same slower
+  up/down there, so the egg-aim and first-person-look hooks hand their share
+  to the same hook; a share older than 100 ms is dropped. The Saucer of Peril ride (`bsride`, map 0x124) holds
+  Banjo in egg aim with the camera on rails, so the mouse moves the
+  crosshair: a hook before `0x8080012C` in `func_808000B4_baeggaim` adds a
+  held offset (5 cursor units per degree) to the stick's target (f14,
+  sp+0x20; x 38..266, y 28.5..199.5) and moves the cursor (s0) by the same
+  amount, so the game's easing does not trail it. On that map the egg-aim
+  view hooks take no mouse motion. Still to confirm on the Deck: flight,
+  and the Saucer of Peril crosshair's scale.
 
 - **Twin-stick Breegull Blaster** is upstream's since Alpha 4.4: Controls
   "First-person aiming with right stick" (`tooie_first_person_aim`; guest

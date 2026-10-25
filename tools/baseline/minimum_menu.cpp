@@ -419,6 +419,14 @@ void video(const Snapshot& snapshot) {
             preference(Preference::MouseSensitivity,int(mouse_speed*100.0f+0.5f));
         bool mouse_invert=prefs.mouse_invert_y!=0;
         if(ImGui::Checkbox("Invert aim Y",&mouse_invert))preference(Preference::MouseInvertY,int(mouse_invert));
+        bool flying=prefs.mouse_aim_flying!=0;
+        if(ImGui::Checkbox("Aim when flying (first person)",&flying))preference(Preference::MouseAimFlying,int(flying));
+        bool swimming=prefs.mouse_aim_swimming!=0;
+        if(ImGui::Checkbox("Aim underwater (first person)",&swimming))preference(Preference::MouseAimSwimming,int(swimming));
+        bool submarine=prefs.mouse_aim_submarine!=0;
+        if(ImGui::Checkbox("Aim in the submarine (first person)",&submarine))preference(Preference::MouseAimSubmarine,int(submarine));
+        bool saucer=prefs.mouse_aim_saucer!=0;
+        if(ImGui::Checkbox("Aim in Saucer of Peril",&saucer))preference(Preference::MouseAimSaucer,int(saucer));
         ImGui::TextWrapped("Steam Deck gyro: in the Steam controller layout, set the gyro to output as mouse.");
     }
 #endif

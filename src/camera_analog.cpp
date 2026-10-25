@@ -61,6 +61,10 @@ std::atomic_bool configured_horizontal_inverted{false};
 std::atomic_bool configured_vertical_inverted{false};
 std::atomic<float> configured_mouse_sensitivity{0.06f};
 std::atomic_bool configured_mouse_inverted{true};
+std::atomic_bool configured_mouse_flying{true};
+std::atomic_bool configured_mouse_swimming{true};
+std::atomic_bool configured_mouse_saucer{true};
+std::atomic_bool configured_mouse_submarine{true};
 std::atomic<float> configured_distance_scale{1.0f};
 
 struct Orbit {
@@ -168,6 +172,22 @@ void tooie::camera::set_mouse_aim_inverted(bool inverted) noexcept {
     configured_mouse_inverted.store(inverted, std::memory_order_release);
 }
 
+void tooie::camera::set_mouse_aim_flying(bool enabled) noexcept {
+    configured_mouse_flying.store(enabled, std::memory_order_release);
+}
+
+void tooie::camera::set_mouse_aim_swimming(bool enabled) noexcept {
+    configured_mouse_swimming.store(enabled, std::memory_order_release);
+}
+
+void tooie::camera::set_mouse_aim_saucer(bool enabled) noexcept {
+    configured_mouse_saucer.store(enabled, std::memory_order_release);
+}
+
+void tooie::camera::set_mouse_aim_submarine(bool enabled) noexcept {
+    configured_mouse_submarine.store(enabled, std::memory_order_release);
+}
+
 void tooie::camera::set_orbit_distance_scale(float scale) noexcept {
     configured_distance_scale.store(std::clamp(scale, 0.5f, 1.5f), std::memory_order_release);
 }
@@ -198,6 +218,77 @@ bool take_mouse_turn(float& pitch, float& yaw) {
 // (reached on every egg-aim frame) then uses the yaw taken there.
 bool egg_yaw_pending = false;
 float egg_yaw = 0.0f;
+
+// The view's share of the mouse turn (camera pitch, yaw) not yet given to the
+// first-person camera, which eases its shown rotation at capped turn rates
+// (tooie_body_aim_view). Shares older than 100 ms are dropped, in case the
+// camera's capped path does not run.
+struct ViewShare {
+    float pitch = 0.0f, yaw = 0.0f;
+    std::chrono::steady_clock::time_point at{};
+    void add(float more_pitch, float more_yaw) {
+        constexpr float limit = 30.0f;
+        pitch = std::clamp(pitch + more_pitch, -limit, limit);
+        yaw = std::clamp(yaw + more_yaw, -limit, limit);
+        at = std::chrono::steady_clock::now();
+    }
+} view_share;
+
+constexpr std::uint32_t k_current_map = 0x80132DC2u; // func_800EA05C.
+constexpr std::uint16_t k_saucer_of_peril_map = 0x124;
+bool on_saucer_of_peril(std::uint8_t* rdram) {
+    return static_cast<std::uint16_t>(MEM_HU(0, static_cast<gpr>(static_cast<std::int32_t>(k_current_map)))) ==
+        k_saucer_of_peril_map;
+}
+
+// Mouse turn held for a hook family; dropped after 150 ms without its hook, so
+// each entry starts from the stick's own aim.
+struct HeldAim {
+    std::chrono::steady_clock::time_point last{};
+    float yaw = 0.0f, pitch = 0.0f;
+    float applied_pitch = 0.0f; // Body aim: the held pitch already given to the current pitch.
+    // Returns true when the held turn was dropped.
+    bool continue_or_reset() {
+        const auto now = std::chrono::steady_clock::now();
+        const bool reset = last == std::chrono::steady_clock::time_point{} || now - last >= std::chrono::milliseconds(150);
+        if (reset) yaw = pitch = applied_pitch = 0.0f;
+        last = now;
+        return reset;
+    }
+};
+
+// First-person flight and swimming: the PlayerState's bafpctrl state (+0x90)
+// is in first person (+0x10 is 2 while entering, 3 in it; 1 is off) with the
+// view following the player (+0x11). The yaw is handed to the next yaw hook;
+// the pitch is held, since the steering sets the pitch from the stick each frame.
+HeldAim body_aim;
+bool body_first_person(std::uint8_t* rdram, gpr player) {
+    if (!rdram_pointer(player)) return false;
+    const gpr control = static_cast<gpr>(MEM_W(player, 0x90));
+    if (!rdram_pointer(control)) return false;
+    const auto mode = static_cast<std::uint8_t>(MEM_BU(control, 0x10));
+    return (mode == 2 || mode == 3) && MEM_BU(control, 0x11) != 0;
+}
+bool take_body_turn(std::uint8_t* rdram, int context, gpr player) {
+    const auto& enabled = context == 2 ? configured_mouse_submarine
+        : context == 1 ? configured_mouse_swimming : configured_mouse_flying;
+    if (!enabled.load(std::memory_order_acquire) || !body_first_person(rdram, player)) return false;
+    body_aim.continue_or_reset();
+    float pitch = 0.0f, yaw = 0.0f;
+    if (take_mouse_turn(pitch, yaw)) {
+        body_aim.yaw += yaw;
+        body_aim.pitch -= pitch; // The view's pitch is the player's, negated (func_8080022C_bafpctrl).
+    }
+    return true;
+}
+
+// Saucer of Peril crosshair, in the cursor's screen units: the stick's target
+// spans x 38..266 and y 28.5..199.5 (func_808000B4_baeggaim), and the cursor's
+// y falls as the aim rises (func_80800170_baeggaim turns the view up there).
+constexpr float k_saucer_units_per_degree = 5.0f;
+constexpr float k_saucer_min_x = 38.0f, k_saucer_max_x = 266.0f;
+constexpr float k_saucer_min_y = 28.5f, k_saucer_max_y = 199.5f;
+HeldAim saucer_aim; // yaw = x offset, pitch = y offset.
 }
 #endif
 
@@ -211,6 +302,7 @@ extern "C" void tooie_first_person_aim(std::uint8_t* rdram, recomp_context* ctx)
     if (!take_mouse_turn(pitch, yaw)) return;
     ctx->f12.fl += pitch;
     ctx->f6.fl += yaw;
+    view_share.add(pitch, yaw);
 #endif
 }
 
@@ -220,10 +312,14 @@ extern "C" void tooie_egg_aim_pitch(std::uint8_t* rdram, recomp_context* ctx) {
     (void)ctx;
 #else
     float pitch = 0.0f, yaw = 0.0f;
-    const bool taken = take_mouse_turn(pitch, yaw);
+    // On the Saucer of Peril the mouse moves the crosshair instead (or nothing).
+    const bool taken = !on_saucer_of_peril(rdram) && take_mouse_turn(pitch, yaw);
     egg_yaw_pending = true;
     egg_yaw = taken ? yaw : 0.0f;
-    if (taken) store_float(rdram, ctx->r29 + 0x24, load_float(rdram, ctx->r29 + 0x24) + pitch);
+    if (taken) {
+        store_float(rdram, ctx->r29 + 0x24, load_float(rdram, ctx->r29 + 0x24) + pitch);
+        view_share.add(pitch, 0.0f);
+    }
 #endif
 }
 
@@ -235,11 +331,115 @@ extern "C" void tooie_egg_aim_yaw(std::uint8_t* rdram, recomp_context* ctx) {
     float yaw = egg_yaw;
     bool taken = egg_yaw_pending;
     egg_yaw_pending = false;
-    if (!taken) {
+    if (!taken && !on_saucer_of_peril(rdram)) {
         float pitch = 0.0f; // Pitch is locked on this frame.
         taken = take_mouse_turn(pitch, yaw);
     }
-    if (taken && yaw != 0.0f) store_float(rdram, ctx->r29 + 0x28, load_float(rdram, ctx->r29 + 0x28) + yaw);
+    if (taken && yaw != 0.0f) {
+        store_float(rdram, ctx->r29 + 0x28, load_float(rdram, ctx->r29 + 0x28) + yaw);
+        view_share.add(0.0f, yaw);
+    }
+#endif
+}
+
+extern "C" void tooie_body_aim_yaw(std::uint8_t* rdram, recomp_context* ctx, int context, gpr player) {
+#ifndef TOOIE_NATIVE_HOST
+    (void)rdram;
+    (void)ctx;
+    (void)context;
+    (void)player;
+#else
+    if (!take_body_turn(rdram, context, player) || body_aim.yaw == 0.0f) return;
+    ctx->r5 = static_cast<gpr>(std::bit_cast<std::int32_t>(
+        std::bit_cast<float>(static_cast<std::uint32_t>(ctx->r5)) + body_aim.yaw));
+    view_share.add(0.0f, body_aim.yaw);
+    body_aim.yaw = 0.0f;
+#endif
+}
+
+extern "C" void tooie_body_aim_pitch(std::uint8_t* rdram, recomp_context* ctx, int context, gpr player,
+    float low, float high) {
+#ifndef TOOIE_NATIVE_HOST
+    (void)rdram;
+    (void)ctx;
+    (void)context;
+    (void)player;
+    (void)low;
+    (void)high;
+#else
+    if (!take_body_turn(rdram, context, player)) return;
+    float pitch = std::bit_cast<float>(static_cast<std::uint32_t>(ctx->r5));
+    if (!std::isfinite(pitch) || !std::isfinite(low) || !std::isfinite(high) || low > high) return;
+    if (pitch > 180.0f) pitch -= 360.0f;
+    // Held motion past the steering's range is dropped, like the clamp in egg aim.
+    body_aim.pitch = std::clamp(body_aim.pitch, low - pitch, high - pitch);
+    ctx->r5 = static_cast<gpr>(std::bit_cast<std::int32_t>(wrap_degrees(pitch + body_aim.pitch)));
+    // The view follows the current pitch (PlayerState +0xDC: current +0, ideal
+    // +4), which eases to the ideal at a capped rate, while it follows the ideal
+    // yaw directly. Moving the current pitch by the mouse's share as well keeps
+    // up/down as direct as left/right; the stick's share still eases.
+    const gpr pitch_state = static_cast<gpr>(MEM_W(player, 0xDC));
+    const float moved = body_aim.pitch - body_aim.applied_pitch;
+    body_aim.applied_pitch = body_aim.pitch;
+    if (moved != 0.0f) view_share.add(-moved, 0.0f); // The view's pitch is the player's, negated.
+    if (moved == 0.0f || !rdram_pointer(pitch_state)) return;
+    float current = load_float(rdram, pitch_state);
+    if (!std::isfinite(current)) return;
+    if (current > 180.0f) current -= 360.0f;
+    store_float(rdram, pitch_state, wrap_degrees(std::clamp(current + moved, low, high)));
+#endif
+}
+
+extern "C" void tooie_body_aim_view(std::uint8_t* rdram, recomp_context* ctx) {
+#ifndef TOOIE_NATIVE_HOST
+    (void)rdram;
+    (void)ctx;
+#else
+    const float pitch = view_share.pitch, yaw = view_share.yaw;
+    const bool fresh = std::chrono::steady_clock::now() - view_share.at < std::chrono::milliseconds(100);
+    view_share.pitch = view_share.yaw = 0.0f;
+    const gpr camera = ctx->r16;
+    if (!fresh) return;
+    if ((pitch == 0.0f && yaw == 0.0f) || !rdram_pointer(camera)) return;
+    // Move the shown rotation (+0xC) towards the target (+0x24) by the mouse's
+    // share, never past it; the rate cap then only applies to the rest.
+    const float share[2] = {pitch, yaw};
+    for (int i = 0; i < 2; ++i) {
+        const gpr shown_address = camera + 0xC + 4 * i;
+        const float shown = load_float(rdram, shown_address), target = load_float(rdram, camera + 0x24 + 4 * i);
+        if (!std::isfinite(shown) || !std::isfinite(target)) continue;
+        float remaining = std::fmod(target - shown, 360.0f);
+        if (remaining > 180.0f) remaining -= 360.0f;
+        if (remaining < -180.0f) remaining += 360.0f;
+        if (share[i] == 0.0f || (share[i] > 0.0f) != (remaining > 0.0f)) continue;
+        const float step = share[i] > 0.0f ? std::min(share[i], remaining) : std::max(share[i], remaining);
+        store_float(rdram, shown_address, wrap_degrees(shown + step));
+    }
+#endif
+}
+
+extern "C" void tooie_saucer_aim(std::uint8_t* rdram, recomp_context* ctx) {
+#ifndef TOOIE_NATIVE_HOST
+    (void)rdram;
+    (void)ctx;
+#else
+    if (!configured_mouse_saucer.load(std::memory_order_acquire) || !on_saucer_of_peril(rdram)) return;
+    const gpr cursor = ctx->r16;
+    if (!rdram_pointer(cursor)) return;
+    saucer_aim.continue_or_reset();
+    float pitch = 0.0f, yaw = 0.0f;
+    if (!take_mouse_turn(pitch, yaw)) pitch = yaw = 0.0f;
+    const float dx = -yaw * k_saucer_units_per_degree, dy = -pitch * k_saucer_units_per_degree;
+    const float target_x = ctx->f14.fl, target_y = load_float(rdram, ctx->r29 + 0x20);
+    if (!std::isfinite(target_x) || !std::isfinite(target_y)) return;
+    saucer_aim.yaw = std::clamp(saucer_aim.yaw + dx, k_saucer_min_x - target_x, k_saucer_max_x - target_x);
+    saucer_aim.pitch = std::clamp(saucer_aim.pitch + dy, k_saucer_min_y - target_y, k_saucer_max_y - target_y);
+    ctx->f14.fl = target_x + saucer_aim.yaw;
+    store_float(rdram, ctx->r29 + 0x20, target_y + saucer_aim.pitch);
+    // The cursor moves with the mouse at once; the game's easing would trail it.
+    const float x = load_float(rdram, cursor), y = load_float(rdram, cursor + 4);
+    if (std::isfinite(x)) store_float(rdram, cursor, std::clamp(x + dx, k_saucer_min_x, k_saucer_max_x));
+    if (std::isfinite(y)) store_float(rdram, cursor + 4, std::clamp(y + dy, k_saucer_min_y, k_saucer_max_y));
 #endif
 }
 

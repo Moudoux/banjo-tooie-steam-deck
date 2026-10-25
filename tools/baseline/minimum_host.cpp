@@ -347,6 +347,22 @@ void update_preference(Preference key, int value) {
         if (value < 0 || value > 1) return;
         selected.mouse_invert_y = value; settings::set_bool("tooie_mouse_invert_y", value != 0);
         tooie::camera::set_mouse_aim_inverted(value != 0); break;
+    case Preference::MouseAimFlying:
+        if (value < 0 || value > 1) return;
+        selected.mouse_aim_flying = value; settings::set_bool("tooie_mouse_aim_flying", value != 0);
+        tooie::camera::set_mouse_aim_flying(value != 0); break;
+    case Preference::MouseAimSwimming:
+        if (value < 0 || value > 1) return;
+        selected.mouse_aim_swimming = value; settings::set_bool("tooie_mouse_aim_swimming", value != 0);
+        tooie::camera::set_mouse_aim_swimming(value != 0); break;
+    case Preference::MouseAimSaucer:
+        if (value < 0 || value > 1) return;
+        selected.mouse_aim_saucer = value; settings::set_bool("tooie_mouse_aim_saucer", value != 0);
+        tooie::camera::set_mouse_aim_saucer(value != 0); break;
+    case Preference::MouseAimSubmarine:
+        if (value < 0 || value > 1) return;
+        selected.mouse_aim_submarine = value; settings::set_bool("tooie_mouse_aim_submarine", value != 0);
+        tooie::camera::set_mouse_aim_submarine(value != 0); break;
     case Preference::StartSkipsCutscenes:
         if (value < 0 || value > 1) return;
         selected.start_skips_cutscenes = value; settings::set_bool("tooie_start_skips_cutscenes", value != 0);
@@ -694,6 +710,14 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     tooie::input::set_mouse_aim_enabled(selected.mouse_aim != 0);
     tooie::camera::set_mouse_aim_sensitivity(selected.mouse_sensitivity / 100.0f);
     tooie::camera::set_mouse_aim_inverted(selected.mouse_invert_y != 0);
+    selected.mouse_aim_flying = settings::get_bool("tooie_mouse_aim_flying", true) ? 1 : 0;
+    selected.mouse_aim_swimming = settings::get_bool("tooie_mouse_aim_swimming", true) ? 1 : 0;
+    selected.mouse_aim_saucer = settings::get_bool("tooie_mouse_aim_saucer", true) ? 1 : 0;
+    tooie::camera::set_mouse_aim_flying(selected.mouse_aim_flying != 0);
+    tooie::camera::set_mouse_aim_swimming(selected.mouse_aim_swimming != 0);
+    selected.mouse_aim_submarine = settings::get_bool("tooie_mouse_aim_submarine", true) ? 1 : 0;
+    tooie::camera::set_mouse_aim_saucer(selected.mouse_aim_saucer != 0);
+    tooie::camera::set_mouse_aim_submarine(selected.mouse_aim_submarine != 0);
     selected.start_skips_cutscenes = settings::get_bool("tooie_start_skips_cutscenes", true) ? 1 : 0;
     start_skips_cutscenes.store(selected.start_skips_cutscenes != 0, std::memory_order_release);
     selected.color_format = bounded(settings::get_int("baseline_color_format", 0), 0, 2, 0);
