@@ -4,6 +4,7 @@
 #include "imgui/imgui.h"
 #if BASELINE_PLAYER
 #include "level_minimap.hpp"
+#include "autosave.hpp"
 #endif
 #include <algorithm>
 #include <string>
@@ -168,6 +169,9 @@ void controls(const Snapshot& snapshot) {
     bool levitate = snapshot.preferences.levitate != 0;
     if (ImGui::Checkbox("Hold L to levitate", &levitate))
         preference(Preference::Levitate, int(levitate));
+    int autosave = snapshot.preferences.autosave_minutes;
+    if (ImGui::SliderInt("Autosave every", &autosave, 0, 30, autosave ? "%d min" : "Off"))
+        preference(Preference::AutosaveMinutes, autosave);
 #endif
     static int device = 0;
     ImGui::Combo("Binding type", &device, "Keyboard\0Controller\0");
@@ -451,6 +455,7 @@ void audio(const Snapshot& snapshot) {
 void draw_menu(const Snapshot& snapshot) {
 #if BASELINE_PLAYER
     tooie::level_minimap::render();
+    tooie::autosave::render();
 #endif
     if(!snapshot.toast.empty()) {
         const auto* viewport=ImGui::GetMainViewport();

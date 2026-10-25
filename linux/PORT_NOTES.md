@@ -322,6 +322,27 @@ Steam Deck features:
   `baseline_input_host_test` (not built by default) would also need
   `src/draw_distance.cpp`.
 
+- **Autosave** (Controls menu "Autosave every", `baseline_autosave_minutes`,
+  0..30, default 5, 0 = off; `src/autosave.cpp`, from the same `bainput_update`
+  entry hook, so the timer only fires while the player is being updated).
+  The game already saves by itself: every map change
+  (`func_800A72A4` → `gcsectionDll_entrypoint_1(1)`) and the pause menu's
+  Save & Exit call `func_800D389C`, which saves through
+  `glsavegame_entrypoint_7` → `glgamestore` → `gleeprom` →
+  `osEepromLongWrite`. Autosave calls that same wrapper on a timer, only when
+  `func_800D3770` (the game's own "may save here": a file slot loaded and
+  allowed worlds in `D_8012762C`) agrees and the file state `D_8012B3F0+9`
+  is 0. A game save (the save generation in `src/save_persistence.hpp`
+  changes) restarts the timer, and no autosave starts while a save is still
+  being written. Before each autosave the save file is copied to
+  `saves/bt.n64.us.1.0.bin.autosave.bak` (temp file, fsync, rename); if that
+  fails the autosave is skipped. At startup a save of the wrong size (the
+  runtime's `finalize_output_file_with_backup` copies over the save in place,
+  so a crash there can truncate it, and the runtime only falls back to its
+  own `.bak` when the save cannot be opened) is replaced by the autosave
+  backup. "Saving..." shows in the bottom-right corner for at least 1.5 s and
+  until the save is on disk. Log lines start with `player autosave`.
+
 - **First-person mouse aiming, for Steam Input gyro-as-mouse** (Camera
   settings, `tooie_mouse_aim` default on, `tooie_mouse_sensitivity` in
   hundredths of a degree per count, default 0.06, `tooie_mouse_invert_y`

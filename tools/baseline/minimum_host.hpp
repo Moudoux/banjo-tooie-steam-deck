@@ -46,8 +46,9 @@ struct Preferences {
     int object_interpolation = 1; // Matrix groups for every actor and the player.
     int minimap = 1; // Level map in the bottom-left corner.
     int levitate = 0; // Hold N64 L to rise (Lighthouse cheat).
+    int autosave_minutes = 5; // Minutes of play between autosaves; 0 turns autosave off.
 };
-enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume, AnalogCamera, CameraInvertX, CameraInvertY, Msaa, Supersampling, DrawDistance, DisableLod, MouseAim, MouseSensitivity, MouseInvertY, CameraDistance, StartSkipsCutscenes, ColorFormat, Upscale2D, TextureLod, DitherNoise, ObjectInterpolation, Minimap, Levitate };
+enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume, AnalogCamera, CameraInvertX, CameraInvertY, Msaa, Supersampling, DrawDistance, DisableLod, MouseAim, MouseSensitivity, MouseInvertY, CameraDistance, StartSkipsCutscenes, ColorFormat, Upscale2D, TextureLod, DitherNoise, ObjectInterpolation, Minimap, Levitate, AutosaveMinutes };
 struct OutputRate { int option = 0, manual_hz = 60; };
 inline uint32_t pack_output_rate(OutputRate rate) noexcept {
     return (uint32_t(rate.option) << 16) | uint32_t(rate.manual_hz);

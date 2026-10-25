@@ -112,9 +112,11 @@ ACTOR_DRAW_HOOKS=(('func_8010A79C',0x8010A7E8,_native_call('tooie_actor_draw_beg
                   ('func_800DE498',0x800DF310,_native_call('tooie_model_draw_end')))
 # bainput_update entry, once per character update with the PlayerState in a0:
 # the minimap (src/level_minimap.cpp) samples the player, camera and level
-# collision, and levitation (src/levitate.cpp) lifts the player while L is held.
+# collision, levitation (src/levitate.cpp) lifts the player while L is held,
+# and autosave (src/autosave.cpp) saves the game every few minutes of play.
 PLAYER_UPDATE_HOOKS=(('bainput_update',0x8009819C,
-    _native_call('tooie_level_minimap_observe')+' '+_native_call('tooie_levitate_update')),)
+    _native_call('tooie_level_minimap_observe')+' '+_native_call('tooie_levitate_update')+' '+
+    _native_call('tooie_autosave_update')),)
 # Heap size: the original pool is the 0x2C8800 bytes below 0x80400000 (4 MB, no
 # Expansion Pak), and extended draw distance fills it in dense levels until
 # func_8001A6C0 reports exhaustion. heap_setup stores func_8001E830's size at

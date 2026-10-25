@@ -17,6 +17,7 @@
 #include "issue_evidence.hpp"
 #include "librecomp/mods.hpp"
 #include "texture_pack_notice.hpp"
+#include "autosave.hpp"
 #endif
 #include <atomic>
 #ifdef BASELINE_VI_CONTROLLER_CYCLE
@@ -362,6 +363,8 @@ int main(int argc, char** argv) {
 #ifdef BASELINE_PLAYER
         // QA --import-save, or the one-time offer of an older default save.
         baseline::player::prepare_saves(player_arguments, options.profile);
+        // A save cut short by a crash while it was written comes back from the autosave backup.
+        tooie::autosave::recover(options.profile / "saves" / baseline::player::save_name);
 #else
         if (!options.reuse_profile) {
             std::ofstream marker(options.profile / ".baseline-profile", std::ios::binary);

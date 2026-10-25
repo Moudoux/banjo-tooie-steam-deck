@@ -571,6 +571,8 @@ inline constexpr char version[] = "@TOOIE_PLAYER_VERSION@";
     target_sources(TooieBaseline PRIVATE src/level_minimap.cpp)
     # Hold L to levitate (Lighthouse), from the same bainput_update raw hook.
     target_sources(TooieBaseline PRIVATE src/levitate.cpp)
+    # Timed autosave with a backup first, from the same hook; "Saving..." in the overlay.
+    target_sources(TooieBaseline PRIVATE src/autosave.cpp)
     if(NOT TOOIE_BASELINE_RT64_GENERIC_FIXES)
         message(FATAL_ERROR "The player's object matrix groups need TOOIE_BASELINE_RT64_GENERIC_FIXES")
     endif()
