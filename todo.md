@@ -28,7 +28,7 @@ Trot toggle, MSAA as an option.
   - [ ] Startup intro (`0x18B`) at the display rate. It is still presented at
     the original rate (`devices.cpp` `update_screen`); game select (`0x158`)
     already follows the chosen rate. Tried on 2026-10-24 and reverted:
-    - Lifting the force with Interpolate all objects on: the camera and the
+    - Lifting the force with Interpolate all objects on (since removed): the camera and the
       solid N64 logo (actor model `80206340`, its own `0xE0` group, 32 calls
       under the `A0000003` projection) interpolate, but the Rareware card
       turned at 20 fps: it turns by its vertices under one fixed matrix, and
@@ -40,9 +40,9 @@ Trot toggle, MSAA as an option.
       and alpha are not interpolated (expected). Registration measurements
       on the spinning logo were unreliable, locally and on the slow-motion
       video.
-    - Next: an F4 trace on the Deck (`TOOIE_INTERPOLATION_TRACE=1`) during
-      the solid N64 logo, to see whether its group or the camera's
-      projection changes between frames.
+    - Next: retry on Alpha 4.4 (upstream's camera ids and object groups may
+      change the picture), with an F4 marker during the solid N64 logo to see
+      whether its group or the camera's projection changes between frames.
 
 ## Deck and controls
 

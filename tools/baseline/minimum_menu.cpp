@@ -373,8 +373,6 @@ void video(const Snapshot& snapshot) {
     int color=prefs.color_format;
     if(ImGui::Combo("Color precision",&color,"Standard\0High (less banding)\0Automatic\0"))preference(Preference::ColorFormat,color);
     if(color!=snapshot.latched_color_format)ImGui::TextDisabled("Color precision changes on the next launch.");
-    bool objects=prefs.object_interpolation!=0;
-    if(ImGui::Checkbox("Interpolate all objects",&objects))preference(Preference::ObjectInterpolation,int(objects));
     bool minimap=prefs.minimap!=0;
     if(ImGui::Checkbox("Minimap (bottom left, F5)",&minimap))preference(Preference::Minimap,int(minimap));
 #endif

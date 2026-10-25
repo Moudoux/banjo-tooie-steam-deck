@@ -181,10 +181,9 @@ The CPU matrix regression can prove source-matrix and clip-depth preservation,
 not that Greg's Jinjo Village scene or other reported artifacts are resolved.
 The full product recipe remains unchanged.
 
-## Object groups observer
+## Object groups observer (removed)
 
-`object_groups.delta.json` targets the same pin and MIT-licensed
-`src/hle/rt64_interpreter.cpp`. It adds `RT64::tooieCommandObserver`, null by
-default, and calls it with each HLE display-list command's RDRAM address before
-the command runs. The player sets it only while "Interpolate all objects" is
-on (`src/object_interpolation.cpp`); with it null, interpretation is unchanged.
+`object_groups.delta.json` added `RT64::tooieCommandObserver` to
+`src/hle/rt64_interpreter.cpp` for this fork's "Interpolate all objects". Both
+were removed after the Alpha 4.4 rebase, whose BK pipeline gives objects their
+own identities (`linux/PORT_NOTES.md`); `rt64_interpreter.cpp` is now unpatched.

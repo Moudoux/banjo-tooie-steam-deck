@@ -78,8 +78,9 @@ Almost every input is hash-pinned, and a mismatch stops the build on purpose.
   `linux/INTERPOLATION.md`. Scripted runs drift with loading times, so check a
   screenshot before trusting a comparison.
 - The owner tests on the Steam Deck. For anything you cannot reach locally, ask
-  for a slow-motion phone video or an F4 trace (`TOOIE_INTERPOLATION_TRACE=1`)
-  rather than guessing; say what is verified and what is not.
+  for a slow-motion phone video or F4 issue markers (evidence reports next to
+  `player.log`, see `linux/INTERPOLATION.md`) rather than guessing; say what is
+  verified and what is not.
 
 ## Commits
 

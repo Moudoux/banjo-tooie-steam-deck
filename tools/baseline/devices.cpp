@@ -20,7 +20,6 @@
 #if TOOIE_BASELINE_HOST
 #include "minimum_host.hpp"
 #include "minimum_render.hpp"
-#include "object_interpolation.hpp"
 #if BASELINE_RENDERER_COMPARISON
 #error Minimum host and developer comparison own different Inspectors; select one
 #endif
@@ -488,12 +487,8 @@ public:
         }
         app->state->rsp->reset();
         app->interpreter->loadUCodeGBI(task->t.ucode & 0x3FFFFFF, task->t.ucode_data & 0x3FFFFFF, true);
-#ifdef BASELINE_PLAYER
-        tooie::objects::begin_display_list(app->state.get(), task->t.data_ptr & 0x3FFFFFF);
-#endif
         app->processDisplayLists(app->core.RDRAM, task->t.data_ptr & 0x3FFFFFF, 0, true);
 #ifdef BASELINE_PLAYER
-        tooie::objects::end_display_list(app->state.get());
         record_graphics(issue_evidence::GraphicsRecord::ParseEnd, task);
 #endif
         if (first) {

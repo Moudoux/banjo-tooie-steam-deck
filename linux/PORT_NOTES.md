@@ -450,13 +450,17 @@ Steam Deck features:
   actors get matrix groups (`src/menu_interpolation.cpp`) and follow the chosen
   rate; the startup intro (map `0x18B`) is still presented at Original
   (`devices.cpp` `update_screen`, logged as `baseline map=0x... menu_rate_original=`).
-  **Interpolate all objects** (Video menu, `baseline_object_interpolation`, on by
-  default) gives every actor and the player its own group without writing to the
-  game's display lists (`src/object_interpolation.cpp`, RT64 repair
-  `object_groups`), which fixed Cheato's pages, Stony's backpack and the warp pad
-  menu. `projection_residual` revision 2 stops the letterbox from squashing the
-  scene as it opens. `TOOIE_INTERPOLATION_TRACE=1` makes F4 log three frames of
-  objects and RT64 matching data to `player.log`.
+  `projection_residual` revision 2 stops the letterbox from squashing the
+  scene as it opens. This fork's **Interpolate all objects** (a matrix group
+  per actor and for the player, `src/object_interpolation.cpp` with the RT64
+  recipe `object_groups`) was removed after the Alpha 4.4 rebase: upstream's
+  BK pipeline now gives actors and the player their own identities, the two
+  clashed in the pause menu (honeycomb health pops, Banjo-Kazooie head
+  ghosts), and with ours off the owner confirmed on the Deck (2026-10-25)
+  that Cheato's pages, Stony's backpack menu and the warp pad icons, the
+  cases it was written for, still look right. Its raw hooks at
+  `func_8010A79C` are back to the game-select menu groups only, and the
+  `func_800DE498` entry/return hooks are gone.
 
 - **Analog camera** (Deck default on, invert X on): the retired frontend's
   `src/camera_analog.cpp`, unchanged, linked into the player
@@ -578,7 +582,7 @@ Steam Deck features:
 - Steam Deck, confirmed by the owner after the RT64 update: the build runs,
   game select, the picture options and the settings menu work. With
   Interpolate all objects: Cheato, Stony and the warp pad menu (including the
-  letterbox opening) look right at Display rate, and nothing looked worse.
+  letterbox opening) look right at Display rate, and nothing looked worse (the option was removed after the Alpha 4.4 rebase; see above).
 - Not verified: real gamepad input with the XBLA layout, battery and
   90 Hz pacing, extended gameplay.
 - Alpha 4.4 rebase (2026-10-25), dev machine only: the clean build passes all
@@ -588,8 +592,7 @@ Steam Deck features:
   shuts down cleanly with the save persisted. Not yet verified, and needed
   from the Deck: Fit window at 16:10 in gameplay, upstream's right-stick
   first-person aim in place of the old twin-stick Blaster, levitate and
-  autosave from the moved hook, Interpolate all objects next to upstream's new
-  per-object identities, and the profile rename with upstream's folder lock.
+  autosave from the moved hook, and the profile rename with upstream's folder lock.
 - Bounding-box culling with the BK pipeline (2026-10-25), dev machine only:
   RT64's draws, vertices and render passes in Jinjo Village match the
   pre-rebase build exactly (68.4k draws/s at 60 presents); four concurrent

@@ -8,7 +8,6 @@
 #include "platform_support.hpp"
 #include "camera_analog.hpp"
 #include "draw_distance.hpp"
-#include "object_interpolation.hpp"
 #include "level_minimap.hpp"
 #include "levitate.hpp"
 #include "autosave.hpp"
@@ -204,7 +203,6 @@ void mark_issue() {
         : saved ? std::string(" saved at ") + clock_stamp + ". Report busy/unavailable; send player.log."
         : std::string(" at ") + clock_stamp + " could not be written to player.log.");
     marker_until = std::chrono::steady_clock::now() + std::chrono::seconds(4);
-    tooie::objects::request_trace(); // Only with TOOIE_INTERPOLATION_TRACE=1.
     if (notice.rfind("F4 is bound to ", 0) == 0) notice.clear();
 }
 #endif
@@ -401,10 +399,6 @@ void update_preference(Preference key, int value) {
         if (value < 0 || value > 100) return;
         selected.dither_noise = value; settings::set_int("baseline_dither_noise", value);
         publish_picture(); break;
-    case Preference::ObjectInterpolation:
-        if (value < 0 || value > 1) return;
-        selected.object_interpolation = value; settings::set_bool("baseline_object_interpolation", value != 0);
-        tooie::objects::set_enabled(value != 0); break;
     case Preference::Minimap:
         if (value < 0 || value > 1) return;
         selected.minimap = value; settings::set_bool("baseline_minimap", value != 0);
@@ -707,8 +701,6 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     selected.texture_lod = settings::get_bool("baseline_texture_lod", true) ? 1 : 0;
     selected.dither_noise = bounded(settings::get_int("baseline_dither_noise", 100), 0, 100, 100);
     publish_picture();
-    selected.object_interpolation = settings::get_bool("baseline_object_interpolation", true) ? 1 : 0;
-    tooie::objects::set_enabled(selected.object_interpolation != 0);
     selected.minimap = settings::get_bool("baseline_minimap", true) ? 1 : 0;
     tooie::level_minimap::set_enabled(selected.minimap != 0);
     selected.levitate = settings::get_bool("baseline_levitate", false) ? 1 : 0;

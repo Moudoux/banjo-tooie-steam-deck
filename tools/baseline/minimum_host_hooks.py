@@ -87,15 +87,11 @@ EGG_AIM_YAW_TEXT=('{ extern void tooie_egg_aim_yaw(uint8_t*, recomp_context*); '
     'tooie_egg_aim_yaw(rdram, ctx); }')
 def _native_call(name):
     return '{ extern void %s(uint8_t*, recomp_context*); %s(rdram, ctx); }' % (name, name)
-# Actor matrix groups (src/object_interpolation.cpp, src/menu_interpolation.cpp):
-# func_8010A79C, the actor draw dispatcher, calls the template's draw at 0x8010A7E8
-# with the actor in a0 and returns to 0x8010A7F0, which no branch reaches.
-# func_800DE498 (model render) for draws outside any actor (the player): entry,
-# and its single return path at L_800DF310.
-ACTOR_DRAW_HOOKS=(('func_8010A79C',0x8010A7E8,_native_call('tooie_actor_draw_begin')),
-                  ('func_8010A79C',0x8010A7F0,_native_call('tooie_actor_draw_end')),
-                  ('func_800DE498',0x800DE498,_native_call('tooie_model_draw_begin')),
-                  ('func_800DE498',0x800DF310,_native_call('tooie_model_draw_end')))
+# Menu-map matrix groups (src/menu_interpolation.cpp): func_8010A79C, the actor draw
+# dispatcher, calls the template's draw at 0x8010A7E8 with the actor in a0 and
+# returns to 0x8010A7F0, which no branch reaches.
+MENU_GROUP_HOOKS=(('func_8010A79C',0x8010A7E8,_native_call('tooie_menu_group_begin')),
+                  ('func_8010A79C',0x8010A7F0,_native_call('tooie_menu_group_end')))
 # Once per character update, just before func_800991B0 calls bainput_update
 # (0x80099228; its delay slot passes the PlayerState from s0, so the hook loads
 # a0 from s0 itself). Upstream's Talon Trot toggle replaces bainput_update with a
@@ -119,7 +115,7 @@ GRAPHICS_HOOKS=(('func_808002A4_bafpctrl',0x80800368,MOUSE_AIM_TEXT),
                 ('func_800E42C0',0x800E42D4,DRAW_DISTANCE_TEXT),
                 ('func_800DD214',0x800DD298,LOD_GEO_TEXT),
                 ('func_800DD2E8',0x800DD32C,LOD_GEO_TEXT),
-                ('func_800DD37C',0x800DD3C0,LOD_GEO_TEXT))+ACTOR_DRAW_HOOKS+PLAYER_UPDATE_HOOKS+HEAP_HOOKS
+                ('func_800DD37C',0x800DD3C0,LOD_GEO_TEXT))+MENU_GROUP_HOOKS+PLAYER_UPDATE_HOOKS+HEAP_HOOKS
 
 def add_hooks(hooks,selected):
     assert type(selected) is bool
