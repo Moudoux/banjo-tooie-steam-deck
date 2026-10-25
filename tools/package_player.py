@@ -224,7 +224,7 @@ def compute_receipt(build: Path, allow: dict) -> tuple[dict, dict[str, Path]]:
     raw = build.joinpath(*safe_relative(spec["raw"]).parts).resolve()
     need(raw.is_dir() and raw.is_relative_to(build), "Selected raw corpus is missing or outside the build")
     count = allow["rawFunctionCount"]
-    gate = argparse.Namespace(build=build, raw=raw, archive=archive, exe=exe, map=map_path,
+    gate = argparse.Namespace(format="pe", build=build, raw=raw, archive=archive, exe=exe, map=map_path,
                               snapshot=snapshot_path, expected_count=count,
                               tools=deps.joinpath(*safe_relative(spec["llvmTools"]).parts))
     snapshot = read_json(snapshot_path)
