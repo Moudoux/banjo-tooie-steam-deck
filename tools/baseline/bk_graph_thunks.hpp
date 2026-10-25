@@ -19,14 +19,81 @@ extern "C" void baseline_bk_skin_segment(uint8_t* rdram,recomp_context* ctx) {
     clone.r5=(gpr)(int32_t)MEM_W(0xB8,ctx->r29);
     tooie_bk_skin_segment(rdram,&clone);
 }
+#ifndef _WIN32
+namespace bk_pipeline {
+// Culling may only skip subtrees that leave cur_model_transform_id_offset alone, so later bones keep
+// their ordinals. Leaf types (no DE2A4 call) and pure containers qualify: 6 (u32 +8), LOD 8 (u32 +0x1C,
+// all three tables) and nested bbox 13 (s16 +0x14). Billboard 0, sort 1, bone 2, selector 12 and the
+// undecoded containers 14/15 do not, nor does anything unreadable or deeper than the bounds.
+inline bool bbox_node(uint32_t address) {
+    return !(address&3u) && address>=0x80000000u && address<=0x80800000u-0x20u;
+}
+bool bbox_subtree_ordinal_free(uint8_t* rdram,uint32_t list) {
+    uint32_t pending[32],top=0,visits=0;
+    pending[top++]=list;
+    while(top) {
+        uint32_t node=pending[--top];
+        for(;;) {
+            if(++visits>1024 || !bbox_node(node))return false;
+            const uint32_t type=uint32_t(MEM_W(0,(gpr)(int32_t)node));
+            const uint32_t next=uint32_t(MEM_W(4,(gpr)(int32_t)node));
+            uint32_t child=0;
+            switch(type) {
+            case 3: case 4: case 5: case 7: case 9: case 10: case 11: case 16: case 17:
+            case 18: case 19: case 20: case 21: case 22: case 23: case 24: break;
+            case 6: {
+                const uint32_t offset=uint32_t(MEM_W(8,(gpr)(int32_t)node));
+                if(!offset)return false;
+                child=node+offset;
+                break;
+            }
+            case 8: {
+                const uint32_t offset=uint32_t(MEM_W(0x1C,(gpr)(int32_t)node));
+                if(offset)child=node+offset;
+                break;
+            }
+            case 13: {
+                const int32_t offset=int16_t(MEM_H(0x14,(gpr)(int32_t)node));
+                if(offset)child=node+uint32_t(offset);
+                break;
+            }
+            default: return false;
+            }
+            if(child) {
+                if(top==32)return false;
+                pending[top++]=child;
+            }
+            if(!next)break;
+            node+=next;
+        }
+    }
+    return true;
+}
+}
+#endif
 // BK culling_patches GeoCmdD and transform_tagging's geo-wide frustum disable: the original bbox and
 // in-graph sphere predicates retain their call side effects. At these exact post-call branches v0 alone
 // decides child traversal; the guest decides it (tooie_bk_bbox_visible).
+#ifdef _WIN32
 extern "C" void baseline_bk_bbox_visible(uint8_t* rdram, recomp_context* ctx) {
     recomp_context clone;camera_clone_context(clone,*ctx);
     tooie_bk_bbox_visible(rdram,&clone);
     ctx->r2=clone.r2;
 }
+#else
+// Linux: drawing every culled subtree doubled Jinjo Village's geometry and cost the Deck its
+// 90 fps at 3x (linux/PORT_NOTES.md). A culled subtree stays culled when skipping it cannot shift
+// BK ordinals; otherwise it is drawn, as BK does. The node is s0 in both bbox handlers (DDD14 sets it;
+// DDC28 runs with DE2A4's s0, the node it dispatched). At the sphere seams (DDDC4, DDF14, DDFA0) s0 is
+// that handler's own node, never type 13, so those are drawn as upstream draws them.
+extern "C" void baseline_bk_bbox_visible(uint8_t* rdram,recomp_context* ctx) {
+    if(ctx->r2!=0)return;
+    const uint32_t node=uint32_t(ctx->r16);
+    const bool keep_culled=bk_pipeline::bbox_node(node) && MEM_W(0,(gpr)(int32_t)node)==13 &&
+        bk_pipeline::bbox_subtree_ordinal_free(rdram,node+uint32_t(int32_t(int16_t(MEM_H(0x14,(gpr)(int32_t)node)))));
+    if(!keep_culled)ctx->r2=1;
+}
+#endif
 namespace bk_pipeline {
 // Buffers sp+0xF8, key sp+0xCC, effective model sp+0x10C (camera_clone_de498_args).
 void skin_capture(uint8_t* rdram,recomp_context* ctx) {

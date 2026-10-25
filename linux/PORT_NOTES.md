@@ -236,6 +236,53 @@ Steam Deck features:
   inactive far away, and level geometry culled by other means (fog is
   unchanged).
 
+- **Bounding-box culling kept with upstream's BK pipeline**
+  (`tools/baseline/bk_graph_thunks.hpp`, `baseline_bk_bbox_visible`; Linux
+  only, Windows keeps upstream's). Alpha 4.4's BK pipeline ports BanjoRecomp's
+  `culling_patches`: after the game's bounding-box test (`func_800E3D0C`) in
+  the type-13 geo handlers `func_800DDC28` / `func_800DDD14` it forced
+  "visible", so every culled sub-model and level chunk was drawn, including
+  everything behind the camera. In Jinjo Village (owner's save, 8x) that
+  took RT64 from about 1,140 to 2,650 draws and 19k to 39k vertices per
+  presented frame (Vulkan layer counts, `local/deck-perf/stats.sh`), plus more
+  decal/depth render-pass switches; at 3x the Deck dropped from 90 to about
+  60 fps (RT64 skips interpolated frames it cannot render in time), while 2x
+  and 1x stayed near 90. Upstream draws everything so that culling cannot
+  shift BK's transform ordinals (`cur_model_transform_id_offset` advances on
+  billboard 0, sort 1, bone 2 and player selector 12 nodes): skipping a
+  subtree containing one would give later bones another ID for a frame, and
+  RT64 would pair the wrong transforms. The thunk now keeps the game's result
+  when the culled subtree is ordinal-free: it walks the subtree like
+  `func_800DE2A4` (node `+4` links; children of 6 at `u32 +8`, LOD 8 at
+  `u32 +0x1C`, nested bbox 13 at `s16 +0x14`) and accepts only leaf types
+  (3, 4, 5, 7, 9, 10, 11, 16-24, none calls `func_800DE2A4`) and those
+  containers. Anything else, unreadable, or past 1,024 nodes / 32 pending
+  branches is drawn as upstream does. In Jinjo Village about 75% of bbox tests
+  cull and 0.2% of culled subtrees fall back to drawn. The node is `s0` in
+  both handlers (`func_800DDD14` sets it; `func_800DDC28` runs with the
+  dispatcher's `s0`, the node it dispatched). Edge pop-in while turning
+  relies on the frustum padding above, as before the rebase; the game's
+  frustum still follows the widescreen setting (4:3 draws less). Worth
+  reporting upstream: the same cost applies on Windows.
+
+- **Camera scenes paired by their IDs** (RT64 recipe
+  `patches/rt64/owner_index_guard_scene_ids.delta.json`, selected instead of
+  `owner_index_guard` when not `WIN32`). Alpha 4.4's camera emits explicit
+  matrix-group IDs for the sky (`a0000005` locally) and world (`a0000008`)
+  projections, which share the view. RT64's `matchScenes` pairs current and
+  previous scenes greedily by matrix distance and only then compares IDs
+  position by position; while the camera moves, "current world vs previous
+  sky" is sometimes the closest pair, so both pairs cross, nothing maps and
+  the camera is not interpolated for one game frame (three presented frames
+  hold, then jump). On the Deck this was the micro-stutter while turning
+  (F4 reports 2026-10-25: camera unmapped in pairs of workloads three apart,
+  flags `0x10033`). With AUTO IDs (before the rebase) any pairing mapped.
+  The recipe keeps the distance sort and then moves pairs with different
+  explicit IDs behind the rest; scenes without explicit IDs behave as before.
+  Found with a throwaway scene logger in `src/rt64_matrix_trace.cpp` (not
+  kept): the same scripted run snapped at workloads 884 and 887 every time
+  without the recipe and never with it. Also worth reporting upstream (RT64).
+
 - **Heap: low-memory cleanup and a bigger pool.** Extended draw distance draws
   the props of many more cubes, and their models fill the game's heap in dense
   levels (Glitter Gulch Mine at 6x quit the player within seconds of entering).
@@ -543,6 +590,19 @@ Steam Deck features:
   first-person aim in place of the old twin-stick Blaster, levitate and
   autosave from the moved hook, Interpolate all objects next to upstream's new
   per-object identities, and the profile rename with upstream's folder lock.
+- Bounding-box culling with the BK pipeline (2026-10-25), dev machine only:
+  RT64's draws, vertices and render passes in Jinjo Village match the
+  pre-rebase build exactly (68.4k draws/s at 60 presents); four concurrent
+  copies at 8x + MSAA 8x run faster than without it (68 vs 42 and 235 vs 93
+  fps total in two noisy rounds); a recorded sweep around the village shows
+  the same edge behaviour as without it (no single-frame edge spikes in
+  either). Steam Deck, confirmed by the owner (2026-10-25): holds 90 fps at
+  3x in Jinjo Village. With the camera scene pairing recipe added
+  (build `60d0f39f`), confirmed by the owner the same day: the micro-stutter
+  while turning is gone and 90 fps holds. With Interpolate all objects off,
+  the pause-menu jitter (honeycomb pops, head ghosts) is gone, and Cheato's
+  pages, Stony's backpack menu and the warp pad icons still look right, so
+  upstream's per-object identities now cover what that option was for.
 
 ## Testing gotcha: SDL on the dev machine
 

@@ -1,0 +1,195 @@
+{
+  "schema": 1,
+  "name": "rt64_owner_index_guard_scene_ids",
+  "delta_revision": 1,
+  "upstream": {
+    "dependency": "rt64",
+    "commit": "d9817c68ffd7328cd0af383af124971489366e18",
+    "path": "src/hle/rt64_game_frame.cpp",
+    "sha256": "a9527bfcdb06b876a45f06a181ca76b6cf7869d01e2c06a0c81ed9f96f1dd87a",
+    "lines": 1042
+  },
+  "output": {
+    "filename": "rt64_game_frame.cpp",
+    "sha256": "ebcec7013b368ba88a94ffe328da401193fd384794c6d727ff31e80e13ec65b9",
+    "lines": 1093
+  },
+  "operations": [
+    {
+      "original_start": 333,
+      "original_end": 333,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "        // Tooie: an explicit matrix ID on a scene's first projection names its camera. Matrix distance alone\n",
+        "        // can pair a moving camera's world scene with the previous sky scene (same view, other projection),\n",
+        "        // and then no projection in either pair maps, so the camera snaps for a frame.\n",
+        "        auto sceneGroupId = [&](const GameScene &scene) {\n",
+        "            const GameIndices::Projection &first = scene.projections[0];\n",
+        "            const Workload &workload = workloadQueue.workloads[first.workloadIndex];\n",
+        "            const Projection &proj = workload.fbPairs[first.fbPairIndex].projections[first.projectionIndex];\n",
+        "            return workload.drawData.transformGroups[workload.drawData.viewProjTransformGroups[proj.transformsIndex]].matrixId;\n",
+        "        };\n",
+        "\n"
+      ]
+    },
+    {
+      "original_start": 338,
+      "original_end": 338,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                const GameFrameMap::WorkloadMap &curWorkloadMap = frameMap.workloads[curFirstProj.workloadIndex];\n",
+        "                if (!curWorkloadMap.mapped) continue;\n"
+      ]
+    },
+    {
+      "original_start": 345,
+      "original_end": 345,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                    if (prevFirstProj.workloadIndex != curWorkloadMap.prevWorkloadIndex) continue;\n"
+      ]
+    },
+    {
+      "original_start": 359,
+      "original_end": 359,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "            // Pairs whose explicit IDs differ go last, keeping distance order within each part.\n",
+        "            std::stable_partition(matchCandidates.begin(), matchCandidates.end(), [&](const MatchCandidate &candidate) {\n",
+        "                const uint32_t curId = sceneGroupId(curScenes[candidate.curIndex]);\n",
+        "                const uint32_t prevId = sceneGroupId(prevScenes[candidate.prevIndex]);\n",
+        "                const bool curExplicit = (curId != G_EX_ID_IGNORE) && (curId != G_EX_ID_AUTO);\n",
+        "                const bool prevExplicit = (prevId != G_EX_ID_IGNORE) && (prevId != G_EX_ID_AUTO);\n",
+        "                return !curExplicit || !prevExplicit || (curId == prevId);\n",
+        "            });\n"
+      ]
+    },
+    {
+      "original_start": 414,
+      "original_end": 414,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "        if (!firstCurWorkloadMap.mapped ||\n",
+        "            firstCurWorkloadMap.prevWorkloadIndex != firstPrevProjIndices.workloadIndex) return;\n"
+      ]
+    },
+    {
+      "original_start": 433,
+      "original_end": 433,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "            if (curProjIndices.workloadIndex != firstCurProjIndices.workloadIndex) continue;\n"
+      ]
+    },
+    {
+      "original_start": 434,
+      "original_end": 435,
+      "original_sha256": "6d25a653223aacacdd30a7570b3e86e54134e3a67ee642283953f54c2c8d707e",
+      "replacement_lines": [
+        "            const uint32_t currentGroupIndex = curWorkload.drawData.viewProjTransformGroups[curProj.transformsIndex];\n",
+        "            const TransformGroup &currentGroup = curWorkload.drawData.transformGroups[currentGroupIndex];\n",
+        "            if (currentGroup.matrixId == G_EX_ID_IGNORE) {\n",
+        "                firstCurWorkloadMap.viewProjections[curProj.transformsIndex] = GameFrameMap::ViewProjectionMap();\n",
+        "                continue;\n",
+        "            }\n",
+        "\n",
+        "            // Reuse only the first anchor with the same effective projection policy.\n"
+      ]
+    },
+    {
+      "original_start": 436,
+      "original_end": 437,
+      "original_sha256": "f31bd6033ba03baa87335c8c461970ceb6752815385a41298d933e9451cc42c5",
+      "replacement_lines": [
+        "                const uint32_t anchorGroupIndex = firstCurWorkload.drawData.viewProjTransformGroups[mappedViewProjIndex];\n",
+        "                const TransformGroup &anchorGroup = firstCurWorkload.drawData.transformGroups[anchorGroupIndex];\n",
+        "                const auto compatibleProjection = [](const TransformGroup &a, const TransformGroup &b) {\n",
+        "                    if ((a.matrixId == G_EX_ID_IGNORE) || (b.matrixId == G_EX_ID_IGNORE)) return false;\n",
+        "                    if (a.matrixId != b.matrixId) return false;\n",
+        "                    if (a.matrixId == G_EX_ID_AUTO) return true;\n",
+        "                    return (a.decompose == b.decompose) &&\n",
+        "                        (a.positionInterpolation == b.positionInterpolation) &&\n",
+        "                        (a.rotationInterpolation == b.rotationInterpolation) &&\n",
+        "                        (a.scaleInterpolation == b.scaleInterpolation) &&\n",
+        "                        (a.skewInterpolation == b.skewInterpolation) &&\n",
+        "                        (a.perspectiveInterpolation == b.perspectiveInterpolation);\n",
+        "                };\n",
+        "                if (compatibleProjection(currentGroup, anchorGroup)) {\n",
+        "                    firstCurWorkloadMap.viewProjections[curProj.transformsIndex] = firstCurWorkloadMap.viewProjections[mappedViewProjIndex];\n",
+        "                    continue;\n",
+        "                }\n"
+      ]
+    },
+    {
+      "original_start": 444,
+      "original_end": 445,
+      "original_sha256": "e6403880e619cc28efd3f3c9cec39b07ab7cc3f24388b1a13445131b4e4651dd",
+      "replacement_lines": [
+        "            {\n"
+      ]
+    },
+    {
+      "original_start": 447,
+      "original_end": 448,
+      "original_sha256": "5d15cbbb38f19153df684f701df464c65d03f9be45e31d63dec6824406e287dd",
+      "replacement_lines": [
+        "                    if (mappedViewProjIndex == UINT32_MAX) mappedViewProjIndex = curProj.transformsIndex;\n"
+      ]
+    },
+    {
+      "original_start": 452,
+      "original_end": 452,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                if (prevProjIndices.workloadIndex != firstPrevProjIndices.workloadIndex) continue;\n"
+      ]
+    },
+    {
+      "original_start": 497,
+      "original_end": 498,
+      "original_sha256": "676f8ed3b77c8f24343bab2ca22992f7d6af40d81cf3514e22783a31e9fe492f",
+      "replacement_lines": [
+        "                if (viewProjMap.mapped && (mappedViewProjIndex == UINT32_MAX)) {\n"
+      ]
+    },
+    {
+      "original_start": 533,
+      "original_end": 533,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "replacement_lines": [
+        "                const bool callOwnersMatch =\n",
+        "                    (curProjIndices.workloadIndex == firstCurProjIndices.workloadIndex) &&\n",
+        "                    (prevProjIndices.workloadIndex == firstPrevProjIndices.workloadIndex);\n"
+      ]
+    },
+    {
+      "original_start": 535,
+      "original_end": 536,
+      "original_sha256": "b0751697e9a5d3eee83ca36c173abd0ecdad5977fc9265c3f498d03240ce7c53",
+      "replacement_lines": [
+        "                if (callOwnersMatch && (curWorldMatrixCount == prevWorldMatrixCount) && curIt.second.doTransformMatching && prevIt->second.doTransformMatching) {\n"
+      ]
+    },
+    {
+      "original_start": 549,
+      "original_end": 550,
+      "original_sha256": "bf4cf97f5e9ca4fa2e6e95d9d5b719d02c89a10e14c4cd0049fedaa95b451332",
+      "replacement_lines": [
+        "                if (callOwnersMatch && (curCall.callDesc.tileCount == prevCall.callDesc.tileCount) && (curIt.second.doTileInterpolation && prevIt->second.doTileInterpolation)) {\n"
+      ]
+    },
+    {
+      "original_start": 565,
+      "original_end": 566,
+      "original_sha256": "ac77a484a6ed774f7e87509cd398b7b1cbf597fbc6b323cb7243e5f5f5a953eb",
+      "replacement_lines": [
+        "                if (callOwnersMatch && curUsesTextureGen && prevUsesTextureGen && (true && true)) { // TODO: Do look at matching condition.\n"
+      ]
+    }
+  ],
+  "integration_purpose": [
+    "workload owner and index guards",
+    "same-scene projection reuse eligibility and conservative ordinal fallback",
+    "explicit projection matrix IDs decide scene pairing before matrix distance"
+  ]
+}
