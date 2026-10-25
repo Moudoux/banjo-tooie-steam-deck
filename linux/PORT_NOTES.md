@@ -433,6 +433,27 @@ Steam Deck features:
   every Deck launch. `SDL_ENABLE_SCREEN_KEYBOARD=0` at default priority (the
   environment variable still wins); text input events and Steam+X still work.
 
+- **No startup crash after a slow first RT64 workload** (`tools/baseline/devices.cpp`,
+  `stop_dummy_workloads`, non-Windows only). Until the game starts, ultramodern's VI thread
+  queues a dummy workload every VI: a 320x240 RGBA16 fill at `0x80700000` / `0x80725800`
+  and a full sync, which writes that framebuffer back into RDRAM. The player started the
+  game on the first VI, without waiting for them. When the graphics thread's first workload
+  was slow (RT64 building its first pipelines on a cold shader cache), a dummy workload
+  still in flight finished about 0.6 s after start, by when the game's heap owned
+  `0x80700000+`: it zeroed `0x80715A90..0x80725800`, which holds the sky model loaded by
+  `gcskyDll` (`func_800A72A4`). The first frame's `G_DL 0x8071F5A8` then ran through zero
+  words (no-ops) into stray data until a `G_TRI2` with no vertex loaded, and
+  `RSP::drawIndexedTri` read `tcFloats[0]` of an empty workload (SIGSEGV, about 1 launch
+  in 3-4 on the dev machine, every launch with `__GL_SHADER_DISK_CACHE=0`). Proved with
+  a hardware write watchpoint on the sky DL word (`local/`, not tracked): the game
+  thread writes it, then `send_dummy_workload` -> `State::fullSync` ->
+  `copyNativeToRAM` zeroes it. Now `send_dummy_workload` runs under a mutex and does
+  nothing once stopped; the start path try-locks it each SDL update, sets "stopped" and
+  only then calls `start_game` (logged as `baseline start_game deferred for a running
+  dummy workload updates=N` when it had to wait). The bug is upstream's (the same code
+  runs on Windows, where a warm driver cache hides it) and still to be reported
+  there; the Windows build is left unchanged here.
+
 - **Frustum padding** (`tools/baseline/minimum_host_hooks.py`, `FRUSTUM_HOOKS`):
   Tooie keeps its culling planes in the camera struct (FOV `+0xE4`, aspect
   `+0xE8`, plane normals from `+0xF8`), built by `func_800CA1B0`,
@@ -606,6 +627,13 @@ Steam Deck features:
   the pause-menu jitter (honeycomb pops, head ghosts) is gone, and Cheato's
   pages, Stony's backpack menu and the warp pad icons still look right, so
   upstream's per-object identities now cover what that option was for.
+- Startup crash fix (2026-10-25), dev machine only: with the NVIDIA shader
+  disk cache off (`__GL_SHADER_DISK_CACHE=0`), the trigger, the unfixed build
+  `c02fd344` crashed 10 of 10 launches and the fixed build 0 of 30; with the
+  normal cache, 0 of 30. A 45 s run with the cache off waited for the dummy
+  workload (833 updates), then loaded the save into Jinjo Village and rendered
+  normally. Not verified on the Deck: the crash was never seen there, but a
+  cold RADV/Fossilize cache (first launch after an update) could trigger it.
 
 ## Testing gotcha: SDL on the dev machine
 
@@ -633,7 +661,7 @@ breaks one of them is not done. In practice:
   16:10, XBLA layout, intro and cutscene skips, picture and anti-aliasing
   options, draw distance and LOD, frustum padding, minimap, levitate,
   autosave, heap, analog camera, mouse/gyro aim, the culling and camera
-  fixes, and anything added since).
+  fixes, the startup dummy-workload fix, and anything added since).
 - When a conflict or a moved/failed raw hook touches one, carry it over (move
   the hook, re-anchor the code); never drop it to make the build pass.
 - Drop ours only where upstream now provides the same feature (as with rumble,

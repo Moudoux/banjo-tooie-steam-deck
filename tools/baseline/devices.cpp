@@ -173,6 +173,21 @@ std::atomic<bool> quit_published = false;
 std::atomic<bool> initial_vi_ready = false;
 std::atomic<uint32_t> first_dl_start{0}, first_dl_size{0};
 std::atomic<bool> first_dl_armed{false}, first_dl_processed{false};
+#if !defined(_WIN32)
+// Until the game starts, ultramodern queues a dummy workload every VI. Its full sync writes the
+// 320x240 dummy framebuffer (0x80700000 / 0x80725800) back into RDRAM, which the started game
+// owns as heap: one still queued or running at start_game (a slow first RT64 workload, e.g. a
+// cold shader cache) zeroed loaded models and crashed the first display list (linux/PORT_NOTES.md).
+// The game therefore starts only once dummy workloads are stopped and none is in flight.
+std::mutex dummy_workload_mutex;
+bool dummy_workloads_stopped = false;
+bool stop_dummy_workloads() {
+    std::unique_lock lock(dummy_workload_mutex, std::try_to_lock);
+    if (!lock.owns_lock()) return false;
+    dummy_workloads_stopped = true;
+    return true;
+}
+#endif
 std::mutex input_mutex;
 input::Player input_player;
 // Same critical section/publication as Player's physical input.
@@ -504,6 +519,10 @@ public:
     }
     void send_dummy_workload(uint32_t fb) override {
         if (!valid()) fail("Dummy workload on invalid renderer");
+#if !defined(_WIN32)
+        std::lock_guard dummy_guard(dummy_workload_mutex);
+        if (dummy_workloads_stopped) return;
+#endif
 #ifdef BASELINE_PLAYER
         record_graphics(issue_evidence::GraphicsRecord::DummyBegin);
 #endif
@@ -1196,6 +1215,12 @@ void update_gfx(void*) {
     if(!start_requested && !quit_requested && !start_refused && !lifecycle_stopping && initial_vi_ready.load(std::memory_order_acquire)) {
 #ifdef BASELINE_PLAYER
         if (!texture_only_selection()) { start_refused=true; return; }
+#endif
+#if !defined(_WIN32)
+        static uint32_t start_deferrals = 0;
+        if (!stop_dummy_workloads()) { ++start_deferrals; return; } // A dummy workload is running; retried next update.
+        if (start_deferrals)
+            std::fprintf(stderr, "baseline start_game deferred for a running dummy workload updates=%u\n", start_deferrals);
 #endif
         // HOST selects the compiled typed guest presentation provider too.
         // Static capability is independent of lazy menu renderer readiness.
