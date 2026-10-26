@@ -573,6 +573,8 @@ inline constexpr char version[] = "@TOOIE_PLAYER_VERSION@";
     target_sources(TooieBaseline PRIVATE src/levitate.cpp)
     # Timed autosave with a backup first, from the same hook; "Saving..." in the overlay.
     target_sources(TooieBaseline PRIVATE src/autosave.cpp)
+    # Pause-menu warp to the world's activated warp pads, from the gcnewpause raw hooks.
+    target_sources(TooieBaseline PRIVATE src/pause_warp.cpp)
     # Underwater sway at host width, from the func_800C54F0 / func_800CB124 raw hooks.
     target_sources(TooieBaseline PRIVATE src/underwater_aspect.cpp)
     if(NOT TOOIE_BASELINE_RT64_GENERIC_FIXES)

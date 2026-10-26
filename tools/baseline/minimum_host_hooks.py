@@ -145,7 +145,26 @@ MENU_GROUP_HOOKS=(('func_8010A79C',0x8010A7E8,_native_call('tooie_menu_group_beg
 # game every few minutes of play.
 PLAYER_UPDATE_HOOKS=(('func_800991B0',0x80099228,
     'ctx->r4 = ctx->r16; '+_native_call('tooie_level_minimap_observe')+' '+_native_call('tooie_levitate_update')+' '+
-    _native_call('tooie_autosave_update')),)
+    _native_call('tooie_autosave_update')+' '+_native_call('tooie_pause_warp_update')),)
+# Pause-menu warp (src/pause_warp.cpp): a WARP row after gcnewpause's own
+# rows opens the current world's warp pad list. gcnewpause_entrypoint_0
+# allocates PAUSE_WARP_EXTRA more bytes for the feature's state (v0 holds the
+# OptionState size before heap_alloc's delay slot adds 0x30); func_80800A08
+# adds the row before gcnewoption_entrypoint_36 (s4 pause, s3 OptionState, s2
+# the variant's row count) and func_80800C54 its text before the cursor is
+# set (s3 OptionState); the pause update marks Start hiding the list (s0
+# pause, before it clears the HUD flag); the option callback (entrypoint_4) and the text lookup
+# (gldbstring_entrypoint_1) answer the row and the pad list at entry. The
+# warp itself runs from the player update above once play resumes.
+PAUSE_WARP_EXTRA=0x40
+def _native_return(name):
+    return '{ extern int %s(uint8_t*, recomp_context*); if (%s(rdram, ctx)) return; }' % (name, name)
+PAUSE_WARP_HOOKS=(('gcnewpause_entrypoint_0',0x80800010,'ctx->r2 = ADD32(ctx->r2, %#x);' % PAUSE_WARP_EXTRA),
+                  ('func_80800A08_gcnewpause',0x80800ADC,_native_call('tooie_pause_warp_setup')),
+                  ('func_80800C54_gcnewpause',0x80800CB8,_native_call('tooie_pause_warp_texts')),
+                  ('gcnewpause_entrypoint_2',0x80800184,_native_call('tooie_pause_warp_start')),
+                  ('gcnewpause_entrypoint_4',0x808007D8,_native_return('tooie_pause_warp_event')),
+                  ('gldbstring_entrypoint_1',0x8080003C,_native_return('tooie_pause_warp_text')))
 # Heap size: the original pool is the 0x2C8800 bytes below 0x80400000 (4 MB, no
 # Expansion Pak), and extended draw distance fills it in dense levels until
 # func_8001A6C0 reports exhaustion. heap_setup stores func_8001E830's size at
@@ -166,7 +185,7 @@ GRAPHICS_HOOKS=(('func_808002A4_bafpctrl',0x80800368,MOUSE_AIM_TEXT),
                 ('func_800E42C0',0x800E42D4,DRAW_DISTANCE_TEXT),
                 ('func_800DD214',0x800DD298,LOD_GEO_TEXT),
                 ('func_800DD2E8',0x800DD32C,LOD_GEO_TEXT),
-                ('func_800DD37C',0x800DD3C0,LOD_GEO_TEXT))+BODY_AIM_HOOKS+MENU_GROUP_HOOKS+PLAYER_UPDATE_HOOKS+HEAP_HOOKS+UNDERWATER_ASPECT_HOOKS
+                ('func_800DD37C',0x800DD3C0,LOD_GEO_TEXT))+BODY_AIM_HOOKS+MENU_GROUP_HOOKS+PLAYER_UPDATE_HOOKS+HEAP_HOOKS+UNDERWATER_ASPECT_HOOKS+PAUSE_WARP_HOOKS
 
 def add_hooks(hooks,selected):
     assert type(selected) is bool

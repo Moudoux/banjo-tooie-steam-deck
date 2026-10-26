@@ -470,6 +470,66 @@ Steam Deck features:
   backup. "Saving..." shows in the bottom-right corner for at least 1.5 s and
   until the save is on disk. Log lines start with `player autosave`.
 
+- **Pause-menu warp** (`src/pause_warp.cpp`, raw hooks `PAUSE_WARP_HOOKS` in
+  `minimum_host_hooks.py`; always on, no setting). The game's own pause list
+  (gcnewpause) gets a WARP row after its own rows. Choosing it turns the same
+  list into the menu a warp pad opens (chwarppad state 3): the world's pad text
+  block `0x185A + world` with its title (string 0, "Choose a destination") and
+  portrait `0x6F` in the header box, the pad names (strings `pad + 9`) and the
+  pad table's icons, only for the pads activated in the current world (save
+  flags `0x3AB + world * 5 + pad`). Rows the current form may not use are
+  greyed and answered with the pad's refusal text, as at a pad (the table's
+  transformation mask through `func_80090178`, colour and texts from
+  `D_80801344` / `D_80801080`). The pause HUD counts are hidden while the pad
+  list shows. A on a usable row closes the pause like Return to Game; on the
+  first player update back in play (the bainput_update hook; the player update
+  also runs while the pause closes, game state 4) it sets
+  `FLAG3_9FE_WARPING_VIA_WARPPAD` and calls `_gcgoto_entrypoint_1(map, 0x1E +
+  pad - 1)`, so the destination pad places the player as after a real pad
+  warp. B returns to the pause list with the cursor on WARP; Start closes the
+  pause.
+  - The row is hidden unless the world (`D_8012762C`) has warp pads, at least
+    one activated pad is usable in the current form, the pause is a story
+    variant (0..3, not replay or multiplayer), the map is not a boss arena,
+    minigame (story or `MP_` copy), Chuffy's cab or wagon (`k_blocked_maps`),
+    and the game's own "may talk to an object" test passes
+    (`func_800F4B8C(player, -1, 4)`, the test a pad uses through
+    subaddiedialog: steady footing, no cutscene or transition, not Clockwork
+    Kazooie or the Golden Goliath). A minigame played on an open map (JRL's
+    Mini-Sub Challenge) is only covered by that test.
+  - How it is built without guest patches. The option table `D_80802070` is
+    not changed: the row is the index one past the variant's rows, and the
+    hooks answer that index. `gcnewpause_entrypoint_0` allocates `0x40` more
+    bytes, which hold the feature's state (a marker, the world, the activated
+    pads, the list flag, the label). Never keep host pointers to the pause or
+    into it: the game's heap defragmentation moves the pause while it is open
+    (seen in testing; a first version that pointed the table at the pause broke
+    on it). Hooks: `func_80800A08` before `0x80800ADC` adds the row (count and
+    icon `0x97`; at most five rows visible, since an OptionState has five row
+    boxes at `+0x3C`: a six-row list scrolls, and a sixth visible row crashed
+    the first Deck test); `func_80800C54` before `0x80800CB8` its text index `0x7E`;
+    `gldbstring_entrypoint_1` at entry returns "WARP" for that index of the
+    open pause's block (`D_80128AF0`); `gcnewpause_entrypoint_4` (the option
+    callback) at entry runs the row's A/B/execute events as the original does
+    for a row without a confirmation, and on execute rebuilds the pause's own
+    OptionState as the pad list (mode 0, the pad's `gcnewoption` calls), then
+    answers that list's events; `gcnewpause_entrypoint_2` before `0x80800184`
+    marks Start hiding the list. Destinations are the pad table
+    (`D_808010B0_chwarppad`) with `func_80800E10_chwarppad`'s ROM lookups
+    resolved offline; the warppad overlay is not loaded during the pause.
+  - Log: `player pause warp: world W pad P -> map M exit E`.
+  - Verified locally (2026-10-26, owner's save copy, Mayahem Temple with one
+    activated pad): the row shows after Save and Quit with the label; WARP
+    opens the pad list with title, portrait, name and icon; A warps (the
+    game's jigsaw transition, the area title, Banjo on the pad); B returns to
+    the pause list; Start from the pad list resumes play. Not verified: a
+    cross-map warp, several rows (scrolling past four), greyed rows and their
+    refusal text, other worlds, the variants with Objects / Jinjos rows.
+  - Steam Deck, confirmed by the owner (2026-10-26, build `a31b7984`, real
+    save): the six-row pause list scrolls to WARP, warping works (log: Mayahem
+    Temple pad 4 to Jade Snake Grove, map `0xC4`), and "everything looks good".
+    The first Deck build crashed opening that pause (six visible rows); fixed.
+
 - **First-person mouse aiming, for Steam Input gyro-as-mouse** (Camera
   settings, `tooie_mouse_aim` default on, `tooie_mouse_sensitivity` in
   hundredths of a degree per count, default 0.06, `tooie_mouse_invert_y`
@@ -823,7 +883,7 @@ breaks one of them is not done. In practice:
   16:10, XBLA layout, intro and cutscene skips, picture and anti-aliasing
   options, draw distance and LOD, frustum padding, underwater sway width,
   minimap, levitate,
-  autosave, heap, analog camera, mouse/gyro aim, the culling and camera
+  autosave, pause-menu warp, heap, analog camera, mouse/gyro aim, the culling and camera
   fixes, draw-call matching speed, the F4 RAM snapshot, the startup
   dummy-workload fix, and anything added since).
 - When a conflict or a moved/failed raw hook touches one, carry it over (move
