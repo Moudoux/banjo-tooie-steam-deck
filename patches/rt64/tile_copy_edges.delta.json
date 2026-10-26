@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "name": "rt64_tile_copy_edges",
+  "delta_revision": 1,
+  "upstream": {
+    "dependency": "rt64",
+    "commit": "d9817c68ffd7328cd0af383af124971489366e18",
+    "path": "src/hle/rt64_framebuffer_manager.cpp",
+    "sha256": "1a97e98b34dc4707d4a9514ef6992bd751e5a0d6fe2c5bcefd50234b41686fd5",
+    "lines": 1093
+  },
+  "output": {
+    "filename": "rt64_framebuffer_manager.cpp",
+    "sha256": "3410847b0b4041d234d36abc60595b02d5f698379acadc0c9944140de4a93a33",
+    "lines": 1097
+  },
+  "operations": [
+    {
+      "original_start": 113,
+      "original_end": 115,
+      "original_sha256": "dc6d7d0282e0e73b57fad39767cd94378c92ded663c55cb909494f2a438291da",
+      "replacement_lines": [
+        "        // Copy between the rounded scaled edges, where rectangles sampling the copy are drawn. Rounding the\n",
+        "        // width separately can leave the copy a pixel narrower than its rectangle at fractional scales.\n",
+        "        const long scaledLeft = lround(fbTile.left * resolutionScale.x);\n",
+        "        const long scaledTop = lround(fbTile.top * resolutionScale.y);\n",
+        "        const uint32_t tileWidth = std::clamp<long>(lround(fbTile.right * resolutionScale.x) - scaledLeft, 1L, RenderTarget::MaxDimension);\n",
+        "        const uint32_t tileHeight = std::clamp<long>(lround(fbTile.bottom * resolutionScale.y) - scaledTop, 1L, RenderTarget::MaxDimension);\n"
+      ]
+    },
+    {
+      "original_start": 119,
+      "original_end": 121,
+      "original_sha256": "3aa923ecc1d5d8b23324dc8dd9cb4635a85e75dcaa91d92a4518895d7e41c904",
+      "replacement_lines": [
+        "        tileCopy.left = std::clamp<long>(scaledLeft, 0, RenderTarget::MaxDimension);\n",
+        "        tileCopy.top = std::clamp<long>(scaledTop, 0, RenderTarget::MaxDimension);\n"
+      ]
+    }
+  ]
+}

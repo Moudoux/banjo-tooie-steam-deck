@@ -305,6 +305,26 @@ Steam Deck features:
   frame; before, 31.7 presents/s). The game thread's parse still takes ~16.5 ms
   median there (texture loads and TMEM hashing are the largest part).
 
+- **Pause backdrop without a shifted strip** (RT64 recipe
+  `patches/rt64/tile_copy_edges.delta.json`, generic fixes, not `WIN32`).
+  While paused the game copies the frozen frame with 32x32 texture rectangles
+  (`func_800C0BC0`: into a saved buffer once by `func_800C0F8C`, back to the
+  screen every paused frame by `func_800C0FD8`), and RT64 serves each from a
+  hi-res tile copy. At fractional horizontal scales the rectangle is drawn
+  between the rounded scaled edges, but `createTileCopySetup` rounded the left
+  edge and the width separately, so one column's copy was a pixel narrower
+  than its rectangle. At 1280x800 (scale 3.5987, 1094 px for the 304-pixel
+  framebuffer) that is column 3, native x 96-127: 116 px drawn from a 115 px
+  copy, twice, which showed as a full-height strip a bit more than a quarter
+  in, shifted right about 2 px (owner report, 2026-10-26). The recipe takes
+  the copy between the same rounded edges. Found with throwaway logging of the
+  rectangles and tile copies (not kept). Verified locally: pausing in Jinjo
+  Village (copy of the owner's save) showed the strip every time at 1280x800,
+  1064x800 and 1600x1000 (1280x720, scale 4.0, never did); with the recipe
+  the paused backdrop matches the last live frame pixel for pixel outside the
+  menu and HUD at all three sizes. Confirmed on the Deck by the owner
+  (2026-10-26): the pause backdrop looks right. Worth reporting upstream (RT64).
+
 - **F4 reports carry a guest RAM snapshot** (`tools/baseline/issue_evidence.cpp`):
   F4 also copies the 8 MB guest RDRAM once and writes it next to the report as
   `<report>-rdram.bin` (recomp layout), plus a `game_state` row (map, player
@@ -884,7 +904,7 @@ breaks one of them is not done. In practice:
   options, draw distance and LOD, frustum padding, underwater sway width,
   minimap, levitate,
   autosave, pause-menu warp, heap, analog camera, mouse/gyro aim, the culling and camera
-  fixes, draw-call matching speed, the F4 RAM snapshot, the startup
+  fixes, draw-call matching speed, the pause backdrop tile copies, the F4 RAM snapshot, the startup
   dummy-workload fix, and anything added since).
 - When a conflict or a moved/failed raw hook touches one, carry it over (move
   the hook, re-anchor the code); never drop it to make the build pass.
