@@ -166,13 +166,17 @@ Steam Deck features:
   ticker runs the story cutscene chains in its map table at `D_808008C4`
   (intro `0xA1`-`0xAC`, the Jingaling chain from `0x18E`, the Bottles chain
   from `0x194`, the ending `0x191`/`0x196`, startup `0x18B`). The game
-  already skips to a chain's end on a fresh Z (`func_80016B30(0, 1)`, button
-  index 1 = `BUTTON_Z` in `include/buttons.h`). A raw hook before
-  `0x80800684` also accepts a fresh Start (index 0 of controller 0's table at
-  `0x800799E0`); `func_80800530_chintroticker` still looks the map up and
-  exits. Cutscenes played inside a level (glcut camera scenes started by
-  actors such as Jamjars or world doors) have no skip in the game and are
-  unchanged.
+  already skips to a chain's end on a fresh press of slot 1 of controller
+  0's press counters (`func_80016B30(0, 1)`), which is N64 B. A raw hook before
+  `0x80800684` also accepts a fresh Start, slot 13 (`0x80079A14`):
+  `func_8001608C` fills the counters at `0x800799E0` in libultra bit order
+  (A, B, ..., Start `0x1000` at `+0x34`), not in `include/buttons.h`'s order.
+  The hook first read slot 0 (A) because of that header, so Start never
+  skipped; the test suite found it (2026-10-27, `start_skips_cutscenes`) and
+  it now reads slot 13 (Start skips the opening in about 2 s).
+  `func_80800530_chintroticker` still looks the map up and exits. Cutscenes
+  played inside a level (glcut camera scenes started by actors such as
+  Jamjars or world doors) have no skip in the game and are unchanged.
 
 - **Rumble** is upstream's since Alpha 4.4, the same design this fork had
   (virtual Rumble Pak on port 0 from the `osPfsInit` adapter, `rumble_strength`
