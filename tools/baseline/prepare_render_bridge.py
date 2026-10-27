@@ -26,7 +26,7 @@ BONE_DATA = {'D_8012C968': 0x8012C968, 'D_8012CE58': 0x8012CE58}
 
 
 def authenticate_function_table(elf_path, overlay_path, section_name, expected_names):
-    """Order one declared table by actual ELF offsets; preserve all other text."""
+    """Authenticate one declared table against actual ELF offsets and extents; the generated text stays as emitted."""
     with elf_path.open('rb') as stream:
         elf=ELFFile(stream);index=elf.get_section_index(section_name);section=elf.get_section(index)
         symbols={s.name:s for s in elf.get_section_by_name('.symtab').iter_symbols() if s.name}
@@ -45,11 +45,8 @@ def authenticate_function_table(elf_path, overlay_path, section_name, expected_n
         assert parsed and parsed[1] not in rows
         name=parsed[1];assert name in expected and (int(parsed[2],16),int(parsed[3],16))==expected[name];rows[name]=line
     assert set(rows)==set(expected) and len(lines)==len(expected)
-    block='\n'.join(rows[name] for name in ordered)
-    result=text[:match.start(2)]+block+text[match.end(2):]
-    assert result[:match.start(2)]==text[:match.start(2)] and result[match.start(2)+len(block):]==text[match.end(2):]
-    if result!=text:overlay_path.write_bytes(result.encode())
-    return dict(section=section_name,index=index,elf_sha256=sha(elf_path),before_sha256=hashlib.sha256(text.encode()).hexdigest(),after_sha256=sha(overlay_path),members=[dict(name=name,offset=expected[name][0],bytes=expected[name][1]) for name in ordered],only_declared_rows_reordered=True)
+    # N64Recomp's traversal order is kept: the runtime lookups and the registry validators are order-independent.
+    return dict(section=section_name,index=index,elf_sha256=sha(elf_path),overlay_sha256=sha(overlay_path),generated_order=list(rows),members=[dict(name=name,offset=expected[name][0],bytes=expected[name][1]) for name in ordered],rows_rewritten=False)
 PAIR_FUNCTIONS = FUNCTIONS[6:]
 PAIR_CALLEES = {'func_800DF47C', 'func_801027F4', 'func_801018D8', 'func_8010347C',
                 'func_800A7180', 'func_800DE498'}

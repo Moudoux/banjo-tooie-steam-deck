@@ -31,7 +31,7 @@ std::atomic<bool> menu{false}, ready{false}, started{false};
 std::atomic<bool> sticky_close{false}, sticky_quit{false}, overflow{false};
 std::atomic<int> vsync{-1}, resolution{1}, cutscene_aspect{0}, texture_filter{0}, output_filter{0};
 std::atomic<bool> quiet_talon_trot{false}, talon_trot_toggle{false};
-std::atomic<int> music_volume{100};
+std::atomic<int> master_volume{100}, music_volume{100};
 std::atomic<uint32_t> output_rate{pack_output_rate({})};
 Preferences latched, selected;
 std::string notice;
@@ -150,7 +150,7 @@ void mark_issue() {
     ++marker_seq;
     // Guest publication is sampled independently; these fields do not attest displayed pixels.
     bool saved = std::fprintf(stderr, "baseline issue-marker seq=%u local=%s utc=%s version=%s game_started=%d menu=%d "
-        "requested_resolution=%d startup_wide=%d startup_aspect=%d startup_cutscene_aspect=%d requested_cutscene_aspect=%d requested_output_rate=%d requested_manual_hz=%d requested_vsync=%d sdl_fullscreen=%d controller=\"%s\" published_aspect_bits=0x%08x requested_aspect=%d drawable=%dx%d requested_wide=%d requested_quiet_trot=%d requested_trot_toggle=%d requested_texture_filter=%d requested_output_filter=%d guest_publication=0x%08x\n",
+        "requested_resolution=%d startup_wide=%d startup_aspect=%d startup_cutscene_aspect=%d requested_cutscene_aspect=%d requested_output_rate=%d requested_manual_hz=%d requested_vsync=%d sdl_fullscreen=%d controller=\"%s\" published_aspect_bits=0x%08x requested_aspect=%d drawable=%dx%d requested_wide=%d requested_quiet_trot=%d requested_trot_toggle=%d requested_texture_filter=%d requested_output_filter=%d requested_master_volume=%d requested_music_volume=%d guest_publication=0x%08x\n",
         marker_seq, local_stamp, utc_stamp, baseline::player::build::version,
         int(started.load(std::memory_order_acquire)), int(menu.load(std::memory_order_acquire)),
         selected.resolution, latched.wide, latched.native_aspect, latched.cutscene_aspect, selected.cutscene_aspect,
@@ -158,10 +158,12 @@ void mark_issue() {
         int((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0), controller.c_str(),
         published_live_aspect, selected.native_aspect, pixel_width, pixel_height,
         selected.wide, selected.quiet_talon_trot, selected.talon_trot_toggle,
-        selected.texture_filter, selected.output_filter,
+        selected.texture_filter, selected.output_filter, selected.master_volume, selected.music_volume,
         render::publication_word()) > 0 && std::fflush(stderr) == 0;
     // Accepted captures retain one audio snapshot for both the report and log.
     const bool capturing = issue_evidence::capture(marker_seq);
+    // L05 F4 run: only an accepted evidence report arms the single renderer run.
+    if (capturing) RT64::tooieL05BridgeArm.fetch_add(1, std::memory_order_release);
     if (!capturing) {
         try { saved = baseline::sound_trace::dump(stderr, marker_seq) && saved; }
         catch (...) { saved = false; }
@@ -260,6 +262,14 @@ void update_preference(Preference key, int value) {
         if (value < 0 || value > 100) return;
         selected.rumble_strength = value;
         settings::set_number("rumble_strength", double(value));
+        break;
+    case Preference::MasterVolume:
+        if (value < 0 || value > 100) return;
+        selected.master_volume = value;
+        settings::set_int("tooie_master_volume_percent", value);
+#if BASELINE_PLAYER
+        master_volume.store(value, std::memory_order_release);
+#endif
         break;
     case Preference::MusicVolume:
         if (value < 0 || value > 100) return;
@@ -522,6 +532,7 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     selected.vsync = bounded(settings::get_int("baseline_vsync", -1), -1, 1, -1);
     selected.fullscreen = bounded(settings::get_int("baseline_fullscreen", 0), 0, 1, 0);
 #if BASELINE_PLAYER
+    selected.master_volume = std::clamp(settings::get_int("tooie_master_volume_percent", 100), 0, 100);
     selected.music_volume = std::clamp(settings::get_int("tooie_music_volume_percent", 100), 0, 100);
     selected.quiet_talon_trot = bounded(settings::get_int("tooie_quiet_talon_trot", 0), 0, 1, 0);
     selected.talon_trot_toggle = bounded(settings::get_int("tooie_talon_trot_toggle", 0), 0, 1, 0);
@@ -531,6 +542,7 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
         TOOIE_FP_AIM_SENSITIVITY_MIN, TOOIE_FP_AIM_SENSITIVITY_MAX, TOOIE_FP_AIM_SENSITIVITY_DEFAULT);
     selected.first_person_aim_invert = bounded(settings::get_int("tooie_first_person_aim_invert", 0), 0, 3, 0);
 #else
+    selected.master_volume = 100;
     selected.music_volume = 100;
     selected.quiet_talon_trot = 0;
     selected.talon_trot_toggle = 0;
@@ -541,6 +553,7 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     texture_filter.store(selected.texture_filter, std::memory_order_release);
     output_filter.store(selected.output_filter, std::memory_order_release);
     cutscene_aspect.store(selected.cutscene_aspect, std::memory_order_release);
+    master_volume.store(selected.master_volume, std::memory_order_release);
     music_volume.store(selected.music_volume, std::memory_order_release);
     quiet_talon_trot.store(selected.quiet_talon_trot != 0, std::memory_order_release);
     talon_trot_toggle.store(selected.talon_trot_toggle != 0, std::memory_order_release);
@@ -576,6 +589,7 @@ void shutdown() noexcept {
     texture_filter.store(0, std::memory_order_release);
     output_filter.store(0, std::memory_order_release);
     cutscene_aspect.store(0, std::memory_order_release);
+    master_volume.store(100, std::memory_order_release);
     music_volume.store(100, std::memory_order_release);
     quiet_talon_trot.store(false, std::memory_order_release);
     talon_trot_toggle.store(false, std::memory_order_release);
@@ -759,6 +773,7 @@ int requested_cutscene_aspect() noexcept { return cutscene_aspect.load(std::memo
 bool requested_quiet_talon_trot() noexcept { return quiet_talon_trot.load(std::memory_order_acquire); }
 bool requested_talon_trot_toggle() noexcept { return talon_trot_toggle.load(std::memory_order_acquire); }
 int requested_music_volume() noexcept { return music_volume.load(std::memory_order_acquire); }
+int requested_master_volume() noexcept { return master_volume.load(std::memory_order_acquire); }
 OutputRate requested_output_rate() noexcept { return unpack_output_rate(output_rate.load(std::memory_order_acquire)); }
 }
 namespace tooie::input {

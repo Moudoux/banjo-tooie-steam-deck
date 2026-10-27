@@ -11,6 +11,11 @@ enum Counter : uint32_t { Reset, Init, InitRefused, Free, Enter, EnterUnregister
     ModelEnd, RootGroupDelta,
     ModelOutsideOption,   // 80801424 box model outside any option box occurrence (other zoomboxes)
     TransitionModel, TransitionTagged, TransitionCut, TransitionRefused,
+    EnterAdmitted,        // menu_scope.hpp admit: an owner with no slot admitted (fresh) at its draw
+    EnterGapCut,          // a registered owner restarting fresh after a skipped construction
+    // Option-box text owner (bk_menu_text_thunks.hpp): scope opened at 80800FE0, owned B798C push (B7A84), owned
+    // record found at B74EC, record admitted (bracket written), rectangle converted at B7164.
+    TextScope, TextPushed, TextOwned, TextAdmitted, TextConverted,
     Count };
 struct Snapshot {
     std::array<uint32_t,Count> counts{};

@@ -227,4 +227,32 @@ int main() {
         assert(threw && json(shared.userConfig)==before_shared && json(app)==before_app);
         assert(!shared.userConfigChanged && !shared.fbConfigChanged && shared.newConfigValidated);
     }
+    // RT64 SharedQueueResources contract: producers raise change flags under configurationMutex and only
+    // the workload queue clears them. The present-thread aspect owner writes aspect fields alone, and the
+    // graphics-owner rate/resolution/filter writers keep that aspect (a whole-struct setUserConfig would not).
+    {
+        const json before_app=app;
+        auto expected=shared.userConfig;
+        expected.aspectRatio=RT64::UserConfiguration::AspectRatio::Manual;
+        expected.extAspectRatio=RT64::UserConfiguration::AspectRatio::Original;
+        expected.aspectTarget=4.0/3.0;
+        const bool rt_changed=shared.rtConfigChanged,swap_changed=shared.swapChainSizeChanged;
+        shared.userConfigChanged=false;shared.fbConfigChanged=false;shared.newConfigValidated=true;
+        assert(reconcile_aspect(shared,settings_word(),bars)==Status::Applied);
+        assert(json(shared.userConfig)==json(expected) && json(app)==before_app);
+        assert(shared.userConfigChanged && shared.fbConfigChanged && !shared.newConfigValidated);
+        assert(shared.rtConfigChanged==rt_changed && shared.swapChainSizeChanged==swap_changed);
+        // An unchanged request neither raises nor clears flags, including a pending discard.
+        shared.userConfigChanged=false;shared.newConfigValidated=true;
+        assert(reconcile_aspect(shared,settings_word(),bars)==Status::Applied);
+        assert(json(shared.userConfig)==json(expected));
+        assert(!shared.userConfigChanged && shared.fbConfigChanged && shared.newConfigValidated);
+        // A later graphics-owner rate change keeps the reconciled aspect and the pending discard.
+        auto next=config;
+        preference_rate(next,2,60);
+        expected.refreshRate=RT64::UserConfiguration::RefreshRate::Display;expected.refreshRateTarget=60;
+        assert(update_rate(app,shared,config,next));
+        assert(json(shared.userConfig)==json(expected) && shared.fbConfigChanged);
+        assert(app.aspectRatio==RT64::UserConfiguration::AspectRatio::Original);
+    }
 }

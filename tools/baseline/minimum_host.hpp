@@ -3,6 +3,7 @@
 #include "input.hpp"
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -27,10 +28,11 @@ struct Preferences {
     int first_person_aim = 0;
     int first_person_aim_sensitivity = 100;
     int first_person_aim_invert = 0; // Bit0 X, bit1 Y.
+    int master_volume = 100;
     int music_volume = 100;
     int rumble_strength = 100;
 };
-enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength };
+enum class Preference { Resolution, OutputRate, ManualHz, Wide, NativeAspect, CutsceneAspect, VSync, Fullscreen, QuietTalonTrot, TalonTrotToggle, FirstPersonAim, FirstPersonAimSensitivity, FirstPersonAimInvert, TextureFilter, OutputFilter, MusicVolume, RumbleStrength, MasterVolume };
 struct OutputRate { int option = 0, manual_hz = 60; };
 inline uint32_t pack_output_rate(OutputRate rate) noexcept {
     return (uint32_t(rate.option) << 16) | uint32_t(rate.manual_hz);
@@ -115,6 +117,16 @@ int requested_cutscene_aspect() noexcept; // Guest frame/cutscene boundary.
 bool requested_quiet_talon_trot() noexcept; // Guest sound-call boundary.
 bool requested_talon_trot_toggle() noexcept; // Guest input/state boundary.
 int requested_music_volume() noexcept; // Requested percent; guest music-update boundary.
+int requested_master_volume() noexcept; // Requested percent; audio sink chunk boundary.
 // Graphics owner only: consume the SDL owner's atomic requested pair.
 OutputRate requested_output_rate() noexcept;
+// Audio sink only: in-place master gain for one queued S16 chunk. 100 or more is
+// exact identity, so the default leaves samples bit-identical; lower values
+// truncate toward zero and never exceed the original magnitude.
+inline void apply_master_volume(int16_t* samples, size_t count, int percent) noexcept {
+    if (percent >= 100) return;
+    const int32_t gain = percent > 0 ? percent : 0;
+    for (size_t i = 0; i < count; ++i)
+        samples[i] = int16_t(int32_t(samples[i]) * gain / 100);
+}
 }

@@ -1,4 +1,4 @@
-Banjo-Tooie: Scurvy Dog Port 0.1.0-alpha.4.4 - Windows x64
+Banjo-Tooie: Scurvy Dog Port 0.1.0-alpha.4.5 - Windows x64
 ================================================
 
 Unofficial alpha release.
@@ -52,17 +52,21 @@ that option. Gameplay aspect applies when the game is wide. Cutscene aspect
 changes need a restart.
 Default (Original) is the former Current choice.
 
-TEXTURE PACKS (EXPERIMENTAL)
+TEXTURE PACKS (EXPERIMENTAL, UNTESTED)
 Place RT64 .rtz packs in %LOCALAPPDATA%\BanjoTooieScurvyDogPort\mods and restart.
 Only texture replacements are supported; code mods and ROM patches are not.
-In-game texture appearance has not yet been verified.
+Untested in this release: in-game texture replacement has not been checked.
 
 AUDIO
+Master volume controls all game audio; Music volume controls music. Both
+default to 100% and are saved with your settings.
 Mute Talon Trot movement sound is optional and applies to the next movement sound.
 
 KNOWN ISSUES
-- Backpack shadows and shadows while sliding on slopes can render incorrectly.
-- The latest menu and transition-edge corrections need broader player testing.
+- The backpack shadow can appear detached in some situations.
+- The warp menu can jitter while it opens.
+- Deferred: a shadow issue on the tent slope and the Clockwork view.
+- Texture packs are untested.
 - F6 fast-forward is not available in this player.
 - The full game has not been verified start to finish.
 

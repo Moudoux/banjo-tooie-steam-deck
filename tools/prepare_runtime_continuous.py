@@ -18,11 +18,13 @@ BASELINE_THREADS_SHA = '64ddcfdd413bd1a893ab00bae1b7b2ad08f251af446687abd605fa0a
 BASELINE_COMPOSED_SHA = '1dd1f42bd82ff50226e5ba2d0824ae1d3f343e08f518d0e208a8feb2adb9c48e'
 CLEANUP_PATCH_SHA = '9b4261af055d9677c061065c1d7588e79fcec74f679dac6cf12d3c069e2319fb'
 PATCH_ROOT = Path(__file__).resolve().parents[1] / 'patches/runtime'
-# Tracked edits for recipes with one behaviour over one pinned original; every mode
-# applies the same bytes. This module is itself pinned by the selected composer.
+# Tracked edits over one pinned original; each edit has one representation. The
+# selected player omits only pi-save-root (legacy registered profile save folder).
+# This module is itself pinned by the selected composer.
 RECIPE_PATCHES = {
     'mesgqueue-lifecycle-wait': ('2e4d6eaa8a609424d04b304f14844265aee7095bc4d355b75d1afef2e362eced', 'mesgqueue.cpp', 3),
-    'pi-save-persistence': ('bd015254e4ee9a5c0ff13f3ac3ddda780e9e22e9a7691a7d9daa9fd29ed1685e', 'pi.cpp', 10),
+    'pi-save-persistence': ('1beae9092b62bb89b616f990b35fcad2c3bc005feb5ba35622d9419fe0dc4056', 'pi.cpp', 9),
+    'pi-save-root': ('36dd8a931904b9341a0e04d7916da72a24c489bf5fd65553b6a3ba1c4ec1ce77', 'pi.cpp', 1),
 }
 def sha(data): return hashlib.sha256(data).hexdigest()
 def replace(text, old, new, count=1):
@@ -547,9 +549,12 @@ def translation(text):
     }
     assert(false);''')
 
-def saving(text):
-    # Save root, temporary-file promotion, generation tracking and final drain.
-    return recipe_patch(text, 'pi-save-persistence')
+def saving(text, save_root=True):
+    # Temporary-file promotion, generation tracking and final drain. The legacy engine
+    # also redirects to its registered profile save root; the selected player keeps
+    # the runtime's config_path/saves derivation (save_root=False).
+    text = recipe_patch(text, 'pi-save-persistence')
+    return recipe_patch(text, 'pi-save-root') if save_root else text
 
 def standard_start(text):
     # Sole product child of the exact pinned source. Baseline never selects it.

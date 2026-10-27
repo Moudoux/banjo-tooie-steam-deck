@@ -11,7 +11,13 @@
 #if TOOIE_CKCOPY && !TOOIE_CPU625
 #error P04a rows join the selected CPU625 owner
 #endif
-#if TOOIE_CPU625
+#if !defined(TOOIE_BK_PIPELINE) || (TOOIE_BK_PIPELINE != 0 && TOOIE_BK_PIPELINE != 1)
+#error Explicit boolean TOOIE_BK_PIPELINE selection required
+#endif
+#if TOOIE_CKCOPY && TOOIE_BK_PIPELINE
+#error BK retires P04b: no ckpack copy storage in the BK selection
+#endif
+#if TOOIE_CPU625 && !TOOIE_BK_PIPELINE /* L06c-4: BK links no CPU625 helper, retire or state */
 #define CPU625 __attribute__((section(".tooie_cpu625_helpers"),noinline))
 #define CS tooie_cpu625_state
 #define CX CS.context
@@ -331,6 +337,9 @@ SI u32 c625_attach_admit(u32 buffers,u32 cursor_slot,u32 model,u32 draw_command,
     return 0;
 }
 #endif
+#if !TOOIE_BK_PIPELINE
+/* L06b-4: BK installs none of the begin/end/DEFA0 transports (prepare_camera_bridge add_cpu625_hooks
+ * gate); the lifecycle retire below is BK-OFF too (L06c-4, file gate above). */
 CPU625 u32 tooie_cpu625_begin(u32 self,u32 model) {
     u32 slot,backpack;
     if(CS.magic!=TOOIE_CPU625_MAGIC || CS.layout!=TOOIE_CPU625_LAYOUT)return c625_trip(1u);
@@ -511,6 +520,7 @@ CPU625 u32 tooie_cpu625_end(u32 self) {
     if(CAM_STATE.control.main_begin<current+8u)CAM_STATE.control.main_begin=current+8u;
     c625_clear();return CS.tripwires?1u:0u;
 }
+#endif
 CPU625 u32 tooie_cpu625_retire(u32 self,u32 requested,u32 reason) {
     u32 backpack,old=0;
     if(reason==1u) {

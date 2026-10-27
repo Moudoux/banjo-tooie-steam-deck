@@ -1,5 +1,22 @@
 # Release notes
 
+## 0.1.0-alpha.4.5 — Banjo-Tooie: Scurvy Dog Port
+
+- Added Master volume above Music volume. Both are saved with your
+  settings.
+- Fixed low-rate save-select animation.
+- Changed renderer ownership and shared interpolation handling. Player testing has accepted ordinary
+  models, split play, camera movement and widescreen zone transitions.
+- Texture pack support remains in the source but is untested in this release.
+
+Known issues: the backpack shadow can appear detached in some situations, and the warp
+menu can jitter while it opens. A shadow issue on the tent slope and the
+Clockwork Kazooie view are deferred. F6 fast-forward is not available, and the
+full game has not been verified start to finish.
+
+Upgrade: extract the full ZIP into a new folder. Existing Scurvy Dog Port saves
+and settings carry over.
+
 ## 0.1.0-alpha.4.4 — Banjo-Tooie: Scurvy Dog Port
 
 - Changed character interpolation to share consistent object, model-part and

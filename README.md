@@ -30,54 +30,35 @@ first launch, choose your ROM when asked.
   Alpha 3 save, controls, settings and troubleshooting.
 - [Release notes](docs/RELEASE_NOTES.md): changes and known issues.
 
-## What changed in Alpha 4
+## Renderer direction
 
-Feedback on Alpha 1 to 3 exposed three design problems:
+The port draws through the original game's recompiled code. Smoother output
+comes from labelling that output for RT64, not from running the game faster.
+The renderer work follows three principles:
 
-- The port rewrote code that N64Recomp had generated, instead of patching
-  through N64Recomp's patch system.
-- Native C++ code quietly took over game logic and game memory that the
-  original game should own.
-- Game-specific policy was built into the runtime and the renderer.
+- **Stable history.** Each object, model part and view keeps a consistent
+  identity across game updates, so interpolation pairs the right transforms.
+- **Shared handling.** Deformation, attachments and split play follow common
+  rules rather than fixes for individual characters.
+- **Correct ownership.** Game behavior stays in patches to the game's own
+  code; the runtime and renderer provide services, not game policy.
 
-Alpha 4 changes direction:
+Player testing has accepted ordinary models, split play, camera movement,
+save-select animation and widescreen zone transitions. Known issues are in the
+[release notes](docs/RELEASE_NOTES.md), and [Rendering](docs/RENDERING.md)
+describes the current design and its limits. Texture pack support is in the
+source but untested; code mods and ROM patches are not supported.
 
-- Game changes are written as plain C patches for the original game's ABI.
-  They are compiled to MIPS and recompiled in N64Recomp's patch mode.
-- Start-up, overlays, input, audio and saves use the runtime's intended
-  mechanisms.
-- Smooth frame interpolation is tagged with RT64's public display-list
-  commands.
+## Looking ahead to Alpha 5
 
-This is progress, not a finished migration. Native hooks, carried upstream
-patches, raw memory offsets and the custom menu remain. Current source supports
-[RT64 texture packs](docs/PLAYER_GUIDE.md); code mods and ROM patches are not
-supported. [Architecture](docs/ARCHITECTURE.md) lists what is still open.
+These are general aims, not promises or a schedule:
 
-## Renderer improvements since Alpha 4
-
-Alpha 4 rebuilt the port around the original game's recompiled code. The work
-since then has focused on keeping rendering consistent between game updates,
-including model parts that deform, change branches or draw separately.
-
-The selected character pipeline tracks which object, model part and view a draw
-belongs to across frames. CPU-deformed animation supplies floating-point vertex
-positions and motion alongside the original game output. Banjo and Kazooie have
-separate histories when split, and attachments use their owner's identity rather
-than whichever character happened to draw last.
-
-Camera and model transforms have separate responsibilities. Geometry branches
-keep consistent labels, and an abrupt change can skip interpolation for one
-update without losing the object's identity. Submitted display-list data is
-protected until the renderer has parsed it. These shared rules address causes
-that can affect many characters, rather than relying only on individual enemy
-fixes. They do not change the game's simulation rate.
-
-Player testing has confirmed improvements to ordinary models, split-player
-animation and camera movement. Backpack and slope shadows remain known issues.
-Alpha 4.4 also includes menu and transition-edge corrections that await broader
-player testing. This is not a claim that every scene or effect is correct. See the
-[rendering architecture](docs/RENDERING.md) for the current design and limits.
+- Make maintained game patches, runtime integration and build tools easier to
+  understand and change.
+- Simplify duplicated handling while preserving established game behavior and
+  renderer lifetimes.
+- Prove improvements on small, independently reviewed examples before expanding
+  them across the port.
 
 ## Build and contribute
 

@@ -1,6 +1,6 @@
 # Rendering
 
-This page describes the selected Alpha 4.4 renderer. It does not describe every historical renderer file retained in the repository, and it does not imply that every scene has been visually verified.
+This page describes the selected renderer in Alpha 4.5. It does not describe every historical renderer file retained in the repository, and it does not imply that every scene has been visually verified.
 
 ## What the renderer receives
 
@@ -14,11 +14,16 @@ Actor draws use the descriptor's creation generation, with separate ranges for v
 
 Player identity follows the drawn player's roster slot, rather than whichever player currently receives input. Banjo and Kazooie therefore retain separate histories when split or when control changes. Owner scopes save and restore the enclosing identity. [draw_boundaries.c](../tools/baseline/guest/silo-candidate/draw_boundaries.c) enters those scopes, while [bk_attach.inc](../tools/baseline/guest/silo-candidate/bk_attach.inc) handles Tooie's separately drawn backpack attachment. Player-slot reuse and unusual unowned draw paths remain distinct lifecycle obligations.
 
-The shared model root opens the appropriate group, resets traversal numbering and restores the enclosing state when it closes. Geometry helpers in [bk_graph.inc](../tools/baseline/guest/silo-candidate/bk_graph.inc) and [bk_sort.inc](../tools/baseline/guest/silo-candidate/bk_sort.inc) place labels throughout supported traversal. This replaces the earlier description of the selected renderer as only a set of per-character palette owners. Retained palette and numbered route files do not, by their presence alone, establish which branch is selected.
+The shared model root opens the appropriate group, resets traversal numbering and restores the enclosing state when it closes. Geometry helpers in [bk_graph.inc](../tools/baseline/guest/silo-candidate/bk_graph.inc) and [bk_sort.inc](../tools/baseline/guest/silo-candidate/bk_sort.inc) place labels throughout supported traversal. This replaces the earlier description of the selected renderer as only a set of per-character palette owners. Retained palette and numbered route files do not, by their presence alone, establish which branch is selected. The actor palette remains active in the player presets; the legacy player boundary is limited to engineering configurations:
+
+- the actor palette gives a projection ID to the header-bit40 actor draws it recognizes, including the save-select hand and props; it adds its own modelview group only when the draw's BK actor owner is not current (runtime acceptance pending);
+- the legacy player boundary, only where an engineering configuration enables it (the player does not), adds an outer, fully skipped group around the primary player body.
+
+Other header-bit40 draws that are neither shadow- nor menu-owned keep an IGNORE projection. These are source facts listed in [Architecture](ARCHITECTURE.md#what-is-still-not-in-that-shape); whether RT64 consumes each label in play has not been established.
 
 ## Changing geometry and animation history
 
-A model can change which geometry branches it draws. [bk_select.inc](../tools/baseline/guest/silo-candidate/bk_select.inc) reserves stable spans for supported selector alternatives, so later bones do not receive different IDs merely because an earlier branch disappears. Its preflight authenticates the expected handler table, bounds traversal and respects the per-model ID window. Unsupported graphs keep the original traversal; they do not receive an invented correspondence.
+A model can change which geometry branches it draws. [bk_select.inc](../tools/baseline/guest/silo-candidate/bk_select.inc) reserves stable spans for supported selector alternatives in player and projected-shadow roots, so later bones do not receive different IDs merely because an earlier branch disappears. Its preflight authenticates the expected handler table, bounds traversal and respects the per-model ID window. Unsupported graphs keep the original traversal; they do not receive an invented correspondence. Actor roots keep the original traversal numbering, as in BK.
 
 A separate Tooie-specific branch guard compares supported player choices with the last submitted baseline. On a discontinuity it can skip interpolation for the connected body and attachments for one workload, rather than mix old and newly visible parts. This is a conservative policy with a visible trade-off: a deliberate snap can remain. It is not a universal animation fix, and it must not be removed without showing that connected parts still agree.
 
@@ -29,6 +34,8 @@ Some vertices are deformed by the CPU before rendering. [bk_float.inc](../tools/
 Velocity requires the same owner sample, the same model and the immediately preceding construction frame, with no applicable interpolation cut. The existing 1024-record table searches for the actual owner and reuses only eligible stale storage. A new owner cannot evict another current or adjacent-frame owner merely because their hash buckets collide. At true capacity exhaustion the draw can retain floating-point positions without explicit velocity. This is a finite table, not unlimited per-object history.
 
 Nested draws restore their enclosing streams. A draw that cannot use its own float stream suspends an inherited one rather than apply it to unrelated vertices. CPU-written leaf lists temporarily suspend stale float data after their CPU callbacks have run; the suspension bracket contains command writes and address conversion, not another guest model draw. Nesting beyond the root-state capacity disables inherited float streams until the outermost overflow draw returns. These safeguards preserve the original draw; they do not prove every unsupported nesting path has equivalent interpolation.
+
+The selected graph path forces the visible result at four sphere-test branches, alongside the existing bbox traversal policy. Original predicate calls and separate null-child guards remain intact. This stabilizes which children are traversed; model-level culling remains a separate coverage item. Source, generated-code and native binding checks passed for this change; demo and visual re-acceptance remain pending.
 
 ## Camera and shadow transforms
 
@@ -44,7 +51,7 @@ The runtime's parsed acknowledgement follows its display-list processing call; t
 
 ## Limits and verification
 
-Current player testing supports improvements to ordinary models, split-player moves and camera motion. Shadows, menu elements, screen edges and transition effects remain under investigation. Model-level culling, unsupported geometry, reflected or repeated camera production, and unusual identity reuse need their own evidence. The implementation contains bounds and refusals; it does not promise complete correspondence for every draw.
+Player testing has accepted ordinary models, split-player moves, camera motion, save-select animation and widescreen zone transitions. Backpack-shadow detachment and warp-menu opening jitter remain open; a tent-slope shadow issue and the Clockwork view are deferred. Model-level culling, unsupported geometry, reflected or repeated camera production, and unusual identity reuse need their own evidence. The implementation contains bounds and refusals; it does not promise complete correspondence for every draw.
 
 F4 records selected guest and RT64 CPU-side evidence. It can help distinguish an ownership, history or projection problem, but the records are not GPU images or proof that a frame looked correct. A successful build, a passing fixture, a measured API presentation rate and a player's visual acceptance are separate results.
 

@@ -79,12 +79,18 @@ decoder reads count correctly but reads the selector from word 0 bit 8. The
 one-line recipe corrects only that selector read; public-command correctness
 belongs in RT64 rather than game-owned identity policy.
 
-The reviewed current authored projection groups use NOPUSH, and their group
-pops target MODELVIEW: PRE's paid push/pop is also MODELVIEW. No authored
-projection-group POP consumer was found in those selected guest emitters, so
-the projection-specific correction is dormant for that reviewed scope. Retain
-it as a pinned generic correctness exception; this is not a runtime hit,
-current Tooie visual requirement, mod-command inventory or retirement claim.
+Literal search of the authored emitters finds one projection-selector pop,
+and the selected player depends on this repair for it. The BK menu-text
+bracket (`tools/baseline/menu_text.hpp`) pushes a PROJECTION matrix group in
+`open()` and pops it in `close()` with `0x6400000D` / `1 | (1 << 8)`: count
+1, projection selector in word 1 bit 8. Opcode `0x0D` leaves word 0 bit 8
+clear, so the unrepaired decoder would pop the MODELVIEW group stack and
+leave the projection group pushed. The recipe is therefore **required**
+while that emitter ships; it is not dormant and not a retirement candidate.
+`cmake/Baseline.cmake` refuses a BK pipeline configuration without it
+(`tooie-pop-projection-guard`). This is a source and selection fact: the
+menu-text path is linked into the selected player, but its runtime behaviour
+is not observed here. An upstream offer of the one-line fix stays optional.
 
 # Historical product-overlay provenance
 

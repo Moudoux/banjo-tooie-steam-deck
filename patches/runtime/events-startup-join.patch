@@ -1,0 +1,7 @@
+--- a/events.cpp
++++ b/events.cpp
+@@ -622,1 +622,3 @@
+-    events_context.vi.thread.join();
++    // init_events throws before creating the VI thread when renderer setup fails.
++    if (events_context.vi.thread.joinable())
++        events_context.vi.thread.join();

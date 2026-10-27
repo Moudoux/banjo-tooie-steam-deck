@@ -9,8 +9,8 @@
  * one offset advance at each logical boundary even for a zero child. When the original chose
  * the reversed path (B then A, including NaN), three nonreturning branch-list commands keep
  * the RSP execution order B then A: first -> B, middle -> after-all, last -> A. One-sided
- * mode keeps its original single child call; its one advance is made natively at the bit0
- * branch point, before that call. */
+ * mode keeps its original single child call; its one advance is made at the bit0 branch point,
+ * before that call (tooie_bk_sort_onesided), and this epilogue returns for it. */
 void func_800DE2A4(SiloBuffers*, u8*);
 
 SI void bk_branch_list(GfxCommand* at, u32 target) {
@@ -21,9 +21,11 @@ SI void bk_branch_list(GfxCommand* at, u32 target) {
 
 BK_HELPER void tooie_bk_sort_children(u32 buffers, u32 node, u32 reversed) {
     SiloBuffers* b = (SiloBuffers*)buffers;
-    s32 a = *(volatile s16*)(node + 0x22u);
-    s32 second = *(volatile s32*)(node + 0x24u);
+    s32 a, second;
     GfxCommand *before_cmds, *before_a, *between_cmds, *before_b, *after_b, *after_cmds;
+    if (tooie_bk_sort_one_sided(*(volatile u8*)(node + 0x21u))) return;
+    a = *(volatile s16*)(node + 0x22u);
+    second = *(volatile s32*)(node + 0x24u);
     if (!reversed) {
         /* BK: increment before the first child, then before the second. */
         BK.cur_model_transform_id_offset += 1u;

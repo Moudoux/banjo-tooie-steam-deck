@@ -7,6 +7,8 @@
 #error Explicit boolean TOOIE_BK_PIPELINE_SELECTED required
 #endif
 #if TOOIE_BK_PIPELINE_SELECTED
+// The DF944 UI owner's DE498-entry half (bk_menu_thunks.hpp, included later in this carrier).
+static void baseline_bk_ui_de498_entry(uint8_t* rdram,recomp_context* ctx);
 
 #ifdef BASELINE_PLAYER
 #include "issue_evidence_guest.hpp"
@@ -28,6 +30,12 @@ extern "C" void baseline_bk_origin_background_begin(uint8_t* rdram,recomp_contex
 extern "C" void baseline_bk_origin_background_end(uint8_t*,recomp_context*) {
     baseline::issue_evidence::guest::world_producer_end();
 }
+// DE498 first instruction: the DF944 UI owner, then the F4 caller witness (its exact a1 and the caller's
+// sp; never translated r31). The owner runs first, so an owned UI root is no longer an unowned witness row.
+extern "C" void baseline_bk_de498_entry(uint8_t* rdram,recomp_context* ctx) {
+    baseline_bk_ui_de498_entry(rdram,ctx);
+    baseline::issue_evidence::guest::de498_entry(rdram,uint32_t(ctx->r29),uint32_t(ctx->r5));
+}
 #else
 // Origin hooks exist in every BK selection; diagnostics are player-only.
 extern "C" void baseline_bk_origin_slot_begin(uint8_t*,recomp_context*) {}
@@ -36,6 +44,7 @@ extern "C" void baseline_bk_origin_resolved_begin(uint8_t*,recomp_context*) {}
 extern "C" void baseline_bk_origin_resolved_end(uint8_t*,recomp_context*) {}
 extern "C" void baseline_bk_origin_background_begin(uint8_t*,recomp_context*) {}
 extern "C" void baseline_bk_origin_background_end(uint8_t*,recomp_context*) {}
+extern "C" void baseline_bk_de498_entry(uint8_t* rdram,recomp_context* ctx) { baseline_bk_ui_de498_entry(rdram,ctx); }
 #endif
 #include <cstddef>
 #include <cstring>
@@ -53,6 +62,11 @@ static_assert(TOOIE_BK_BRANCH_OFFSET+sizeof(TooieBkBranch)*TOOIE_BK_BRANCH_ENTRI
 extern "C" void tooie_bk_frame_begin(uint8_t*,recomp_context*);
 extern "C" void tooie_bk_root_begin(uint8_t*,recomp_context*);
 extern "C" void tooie_bk_root_end(uint8_t*,recomp_context*);
+// Native-seam policy helpers (bk_pipeline.c): the guest decides, these thunks only marshal.
+extern "C" void tooie_bk_branch_submitted(uint8_t*,recomp_context*);
+extern "C" void tooie_bk_lod_distance(uint8_t*,recomp_context*);
+extern "C" void tooie_bk_player_lod_distance(uint8_t*,recomp_context*);
+extern "C" void tooie_bk_player_lod_tier(uint8_t*,recomp_context*);
 namespace bk_pipeline {
 constexpr gpr state=(gpr)(int32_t)TOOIE_BK_STATE;
 constexpr uint32_t queue=TOOIE_BK_STATE+TOOIE_BK_PARSED_QUEUE_OFFSET;
@@ -60,28 +74,6 @@ constexpr uint32_t message=TOOIE_BK_STATE+TOOIE_BK_PARSED_MESSAGE_OFFSET;
 void count(uint8_t* rdram,uint32_t word) {
     const uint32_t value=uint32_t(MEM_W(TOOIE_BK_DIAGNOSTICS_OFFSET+word,state));
     if(value!=0xFFFFFFFFu)MEM_W(TOOIE_BK_DIAGNOSTICS_OFFSET+word,state)=int32_t(value+1u);
-}
-// One visible-branch table at `offset`: its guest words are copied out, committed with the shared pure
-// rule (tooie_bk_branch_commit) and copied back; nothing else in the state is touched.
-void branch_commit_table(uint8_t* rdram,uint32_t offset,uint32_t frame) {
-    constexpr uint32_t words=uint32_t(sizeof(TooieBkBranch)*TOOIE_BK_BRANCH_ENTRIES/4u);
-    uint32_t raw[words];
-    TooieBkBranch table[TOOIE_BK_BRANCH_ENTRIES];
-    for(uint32_t i=0;i<words;++i)raw[i]=uint32_t(MEM_W(offset+4u*i,state));
-    std::memcpy(table,raw,sizeof(table));
-    tooie_bk_branch_commit(table,frame);
-    std::memcpy(raw,table,sizeof(table));
-    for(uint32_t i=0;i<words;++i)MEM_W(offset+4u*i,state)=int32_t(raw[i]);
-}
-// Visible-branch history (bk_select.inc): the submitted construction's staged choices become the
-// committed baseline; every other entry becomes unknown. Player bodies and projected shadows keep
-// separate tables, committed together for the same construction.
-void branch_commit(uint8_t* rdram) {
-    const uint32_t frame=uint32_t(MEM_W(TOOIE_BK_DIAGNOSTICS_OFFSET,state));
-    branch_commit_table(rdram,TOOIE_BK_BRANCH_OFFSET,frame);
-    branch_commit_table(rdram,TOOIE_BK_SHADOW_BRANCH_OFFSET,frame);
-    const uint32_t commits=uint32_t(MEM_W(TOOIE_BK_BRANCH_COMMITS_OFFSET,state));
-    if(commits!=0xFFFFFFFFu)MEM_W(TOOIE_BK_BRANCH_COMMITS_OFFSET,state)=int32_t(commits+1u);
 }
 // BK game_draw 125-142: fatal after construction when the physically backed list overflowed.
 // This checks the selected Gfx pool. Float camera blocks are charged to the expanded ordinary
@@ -95,40 +87,37 @@ void construction_end_check(uint8_t* rdram) {
     if(cursor<slot || cursor>slot+TOOIE_CAMERA_M_BYTES)rejected_body("BK construction-end Gfx main pool overflow");
 }
 }
-// BK GeoCmd8 fixed distance50, expressed as squared distance for Tooie's original
-// type8 comparisons. Called only after each original distance function returns;
-// null-child and table0 ordinal-override routes never reach these seams.
-extern "C" void baseline_bk_lod_distance(uint8_t* rdram,recomp_context* ctx) {
-    (void)rdram;
-    ctx->f0.fl = 2500.0f;
-}
 namespace bk_pipeline {
-// Guest RAM range for native reads: KSEG0, 8 MiB, word-aligned.
+// Guest RAM range for native reads (transition view_of): KSEG0, 8 MiB, word-aligned.
 inline bool lod_word(uint32_t address,uint32_t bytes) {
     return !(address&3u) && address>=0x80000000u && uint64_t(address)+bytes<=0x80800000ull;
 }
-// D_80117DD0's resources: ordinary 62A/62B and Dragon 838/839 (tier0/tier1).
-inline bool lod_table_resource(uint32_t resource) {
-    return resource==0x62Au || resource==0x62Bu || resource==0x838u || resource==0x839u;
-}
-// Body component (player+0x50) with the alias primary selector 0x607 (s16 +0x0C) and an installed
-// table resource (+0x10C). Other selectors, null/custom resources and unreadable owners are untouched.
-inline bool lod_alias_body(uint8_t* rdram,uint32_t player) {
-    if(!lod_word(player,0x54))return false;
-    const uint32_t body=uint32_t(MEM_W(0x50,(gpr)(int32_t)player));
-    if(!lod_word(body,0x110))return false;
-    return int16_t(MEM_H(0x0C,(gpr)(int32_t)body))==0x607 && lod_table_resource(uint32_t(MEM_W(0x10C,(gpr)(int32_t)body)));
+// The guest LOD helpers return IEEE-754 bits in v0; f0 is written only when they change it.
+inline void set_f0(recomp_context* ctx,uint32_t bits) {
+    uint32_t current;std::memcpy(&current,&ctx->f0.fl,4);
+    if(current!=bits)std::memcpy(&ctx->f0.fl,&bits,4);
 }
 }
-// 94070 940B8: EEAD4 has returned the linear player-camera distance in f0; the tier walk follows.
-// BK lod_patches fixes its LOD distance at 50; this table compares linear distance, so 50.0 (tier 0).
-// s0 is the player. Only f0 changes; reaching this call already passed the original D90A4 timer gate.
+// BK GeoCmd8 fixed distance (tooie_bk_lod_distance), after each original distance function returns;
+// null-child and table0 ordinal-override routes never reach these seams. Only f0 changes.
+extern "C" void baseline_bk_lod_distance(uint8_t* rdram,recomp_context* ctx) {
+    recomp_context clone;camera_clone_context(clone,*ctx);
+    tooie_bk_lod_distance(rdram,&clone);
+    bk_pipeline::set_f0(ctx,uint32_t(clone.r2));
+}
+// 94070 940B8: EEAD4 has returned the linear player-camera distance in f0 and s0 is the player; the
+// guest keeps or fixes it (tooie_bk_player_lod_distance). Reaching this call already passed the
+// original D90A4 timer gate. Only f0 changes.
 extern "C" void baseline_bk_player_lod_distance(uint8_t* rdram,recomp_context* ctx) {
-    if(bk_pipeline::lod_alias_body(rdram,uint32_t(ctx->r16)))ctx->f0.fl=50.0f;
+    uint32_t distance;std::memcpy(&distance,&ctx->f0.fl,4);
+    recomp_context clone;camera_clone_context(clone,*ctx);
+    clone.r4=ctx->r16;clone.r5=(gpr)(int32_t)distance;
+    tooie_bk_player_lod_distance(rdram,&clone);
+    bk_pipeline::set_f0(ctx,uint32_t(clone.r2));
 }
 // Fixed-detail initialization: exact 94038 caller scope authenticates 93F30 entry after
-// its original delay slot loaded a0; translated r31 is not caller provenance. The caller's sp+0x18 holds the player. Map-table tier 1 becomes tier 0;
-// 93F30 keeps the form column, and the original install path runs unchanged.
+// its original delay slot loaded a0; translated r31 is not caller provenance. The caller's sp+0x18 holds
+// the player; the guest decides the tier (tooie_bk_player_lod_tier) and the original install path runs unchanged.
 // Native guest-thread lexical token, never inferred from translated r31.
 struct BaselineBkInitialLodScope { uint8_t* rdram; recomp_context* ctx; bool armed; };
 static thread_local BaselineBkInitialLodScope baseline_bk_initial_lod_scope{};
@@ -140,12 +129,12 @@ extern "C" void baseline_bk_player_lod_initial_end(uint8_t*, recomp_context*) {
 }
 extern "C" void baseline_bk_player_lod_initial(uint8_t* rdram,recomp_context* ctx) {
     const auto scope = baseline_bk_initial_lod_scope;
-    baseline_bk_initial_lod_scope = {}; // Consume before any refusal or guest reads.
-    if (!scope.armed || scope.rdram != rdram || scope.ctx != ctx || uint32_t(ctx->r4)!=1u) return;
-    const uint32_t player=uint32_t(MEM_W(0x18,ctx->r29));
-    if(!bk_pipeline::lod_word(player,0x54))return;
-    const uint32_t body=uint32_t(MEM_W(0x50,(gpr)(int32_t)player));
-    if(bk_pipeline::lod_word(body,0x10) && int16_t(MEM_H(0x0C,(gpr)(int32_t)body))==0x607)ctx->r4=0;
+    baseline_bk_initial_lod_scope = {}; // Consume before any refusal or guest call.
+    if (!scope.armed || scope.rdram != rdram || scope.ctx != ctx) return;
+    recomp_context clone;camera_clone_context(clone,*ctx);
+    clone.r4=(gpr)(int32_t)MEM_W(0x18,ctx->r29);clone.r5=ctx->r4;
+    tooie_bk_player_lod_tier(rdram,&clone);
+    if(uint32_t(clone.r2)!=uint32_t(ctx->r4))ctx->r4=clone.r2;
 }
 // A7888, appended after the camera construction begin.
 extern "C" void baseline_bk_frame_begin(uint8_t* rdram,recomp_context* ctx) {
@@ -167,8 +156,10 @@ extern "C" void baseline_bk_submit_register(uint8_t* rdram,recomp_context* ctx) 
     MEM_W(TOOIE_BK_PARSED_ARMED_OFFSET,state)=1;
     count(rdram,TOOIE_BK_DIAG_PARSED_ARMS);
     // This construction (diagnostics.frames, counted at A7888) is the workload RT64 receives: only
-    // here does a construction commit its visible-branch baseline; a suppressed one never does.
-    branch_commit(rdram);
+    // here does a construction commit its visible-branch baseline (tooie_bk_branch_submitted); a
+    // suppressed one never does.
+    recomp_context clone;camera_clone_context(clone,*ctx);
+    tooie_bk_branch_submitted(rdram,&clone);
     baseline_bk_menu_submitted(rdram);
 }
 // A7840 78F0: after 1A270 returns, and the 789C suppression destination. Blocks only for an

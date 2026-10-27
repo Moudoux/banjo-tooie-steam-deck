@@ -5,11 +5,14 @@
 #include "rt64_trace_window.hpp"
 
 #include "hle/rt64_workload_queue.h"
+#include "common/rt64_math.h"
+#include "../tools/baseline/guest/silo-candidate/render_bridge.h"   // L05 evidence: bridge block domain
 #include "../tools/baseline/guest/silo-candidate/bk_pipeline.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>   // L05 F4 run: steady time of the run's lines
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -833,6 +836,14 @@ const TransformGroup *tooieWorldGroup(const DrawData &data, uint32_t index) noex
     return group < data.transformGroups.size() ? &data.transformGroups[group] : nullptr;
 }
 
+// The group ID of viewProj index p, when its group is inside the draw data.
+bool tooieProjectionGroup(const DrawData &data, uint32_t p, uint32_t &id) noexcept {
+    if (p >= data.viewProjTransformGroups.size() || data.viewProjTransformGroups[p] >= data.transformGroups.size())
+        return false;
+    id = data.transformGroups[data.viewProjTransformGroups[p]].matrixId;
+    return true;
+}
+
 // RT64 allocation-range count (may include modified copies owned by an earlier transform).
 // Zero also covers an unavailable/invalid range; not an exact drawn-vertex count.
 uint32_t tooieWorldVertices(const DrawData &data, uint32_t index, uint32_t &first) noexcept {
@@ -842,6 +853,20 @@ uint32_t tooieWorldVertices(const DrawData &data, uint32_t index, uint32_t &firs
     const uint32_t end = index + 1 < data.worldTransformVertexIndices.size()
         ? data.worldTransformVertexIndices[index + 1] : data.vertexCount();
     return first <= end && end <= data.vertexCount() ? end - first : 0;
+}
+
+// Max model-space position change between two equally sized vertex ranges (RT64 matchTransform velocity input).
+float tooieVertexDelta(const DrawData &current, uint32_t first, const DrawData &previous, uint32_t priorFirst,
+    uint32_t count) noexcept {
+    if (size_t(first) + count > current.posFloats.size() / 3 || size_t(priorFirst) + count > previous.posFloats.size() / 3)
+        return -1.0f;
+    float delta = 0.0f;
+    for (size_t i = 0; i < size_t(count) * 3; ++i) {
+        const float step = std::fabs(current.posFloats[size_t(first) * 3 + i] - previous.posFloats[size_t(priorFirst) * 3 + i]);
+        if (!std::isfinite(step)) return INFINITY;
+        delta = std::max(delta, step);
+    }
+    return std::isfinite(delta) ? delta : INFINITY;
 }
 
 uint32_t tooieLerpFlags(const RigidBody &body, bool transform) noexcept {
@@ -858,17 +883,50 @@ bool tooieIsPlayerTransformId(uint32_t id) noexcept {
         (id >= TOOIE_BK_PLAYER_SLOT_ID_START && id < TOOIE_BK_PLAYER_SLOT_ID_END);
 }
 
+// L05 evidence: the bridge block domain is exactly [0x90000000, 0xA0000000); camera IDs start at its end.
+static_assert(TOOIE_BRIDGE_ID_BASE == 0x90000000u && TOOIE_BRIDGE_ID_BASE + TOOIE_BRIDGE_BLOCK_COUNT * 512u == 0xA0000000u,
+    "bridge block domain changed: re-derive the L05 +129 predicate");
+bool tooieIsBridgePlayerOuterId(uint32_t id) noexcept {
+    return id >= TOOIE_BRIDGE_ID_BASE && id - TOOIE_BRIDGE_ID_BASE < TOOIE_BRIDGE_BLOCK_COUNT * 512u &&
+        (id - TOOIE_BRIDGE_ID_BASE) % 512u == 129u;
+}
+
+void tooieCountBridgePlayerOuter(const DrawData &data, TooieBridgeOuterCount &count) noexcept {
+    for (uint32_t index = 0; index < data.worldTransforms.size(); ++index) {
+        ++count.worlds;
+        if (index >= data.worldTransformGroups.size() ||
+            data.worldTransformGroups[index] >= data.transformGroups.size()) { ++count.unresolved; continue; }
+        const uint32_t id = data.transformGroups[data.worldTransformGroups[index]].matrixId;
+        if (tooieIsPlayerTransformId(id)) ++count.players;
+        if (!tooieIsBridgePlayerOuterId(id)) continue;
+        if (!count.hits++) { count.firstIndex = index; count.firstId = id; }
+    }
+}
+
 bool tooieIsSupplementalRootId(uint32_t id) noexcept {
     const bool actor = id >= TOOIE_BK_ACTOR_ID_START && id < TOOIE_BK_ACTOR_ID_END;
-    // Menu model component occupies even 256-ID blocks; odd blocks are reserved for sprites.
-    const bool menu = id >= tooieMenuModelIdStart && id < tooieMenuModelIdEnd && !(id & 0x100u);
+    // Menu model components occupy even 256-ID blocks, their option-box sprite components the odd ones.
+    const bool menu = id >= tooieMenuModelIdStart && id < tooieMenuModelIdEnd;
     // All five transition windows are models, including odd blocks.
     const bool transition = id >= tooieTransitionIdStart && id < tooieTransitionIdEnd;
     // Shadow modelview roots occupy the gap between the two player domains.
     // Projection-only group IDs have no world transform and are collected through referenced vertices.
     const bool shadow = id >= TOOIE_BK_PLAYER_ID_END && id < TOOIE_BK_PLAYER_SLOT_ID_START;
-    return !(id & 0xFFu) && (actor || menu || transition || shadow);
+    // Option-box text: the first glyph of each 128-ID line only; the text projection ID (the range end) is excluded.
+    const bool text = id >= tooieMenuTextIdStart && id < tooieMenuTextIdEnd && !(id & 0x7Fu);
+    return (!(id & 0xFFu) && (actor || menu || transition || shadow)) || text;
 }
+
+namespace {
+// Orthographic witness groups: AUTO, IGNORE and every explicit ID that no player or supplemental-root row reports.
+bool tooieOrthoWitnessGroup(uint32_t id) noexcept {
+    return id == G_EX_ID_AUTO || !(tooieIsPlayerTransformId(id) || tooieIsSupplementalRootId(id));
+}
+// Option-box UI groups (menu model/sprite components, text lines). Each owns few matrices; all are observed together.
+bool tooieIsMenuUiId(uint32_t id) noexcept {
+    return (id >= tooieMenuModelIdStart && id < tooieMenuModelIdEnd) || (id >= tooieMenuTextIdStart && id < tooieMenuTextIdEnd);
+}
+} // namespace
 
 bool tooiePlayerPriorSlotValid(const GameFrameMap::WorkloadMap *map, uint32_t currentSlot, uint64_t currentId,
     const std::vector<uint32_t> &previousWorkloads, size_t queueWorkloads, uint64_t previousId) noexcept {
@@ -897,6 +955,7 @@ void tooieCollectPlayerRows(uint64_t presentation, const DrawData &current, uint
         q.presentation = presentation; q.workload_id = currentId; q.workload_slot = currentSlot;
         q.previous_slot = previousSlot; q.previous_workload_id = previous ? previousId : 0;
         q.flags = owner | (projectionsProcessed ? uint32_t(ProjectionRow::ProjectionsProcessed) : 0u); q.index = p;
+        q.weight = weight;
         if (p < current.viewProjTransformGroups.size() &&
             current.viewProjTransformGroups[p] < current.transformGroups.size()) {
             q.flags |= ProjectionRow::GroupKnown;
@@ -914,6 +973,7 @@ void tooieCollectPlayerRows(uint64_t presentation, const DrawData &current, uint
             if (previous && mapping.prevTransformIndex < previous->viewProjTransforms.size()) {
                 q.flags |= ProjectionRow::PriorIndexValid;
                 tooieCopyBits(previous->viewProjTransforms[mapping.prevTransformIndex], q.prior);
+                tooieProjectionGroup(*previous, mapping.prevTransformIndex, q.previous_group_id);
             }
         }
         projections.push_back(q);
@@ -922,16 +982,21 @@ void tooieCollectPlayerRows(uint64_t presentation, const DrawData &current, uint
     size_t supplementalCount = supplementalRoots ? std::count_if(rows.begin(), rows.end(),
         [](const Row& row) { return tooieIsSupplementalRootId(row.group_id); }) : 0u;
     const size_t count = std::min(current.worldTransforms.size(), current.worldTransformGroups.size());
+    const bool menuFirst = supplementalRoots && representativesOnly;
+    for (unsigned priority=0; priority<(menuFirst ? 2u : 1u); ++priority) {
     for (uint32_t t = 0; t < count; ++t) {
         const TransformGroup *group = tooieWorldGroup(current, t);
         if (!group || !(supplementalRoots ? tooieIsSupplementalRootId(group->matrixId) :
             tooieIsPlayerTransformId(group->matrixId))) continue;
+        if (menuFirst && tooieIsMenuUiId(group->matrixId) != (priority==0u)) continue;
         if (supplementalRoots) {
             // A group may own many matrices. Give late groups a representative before duplicates
             // consume the shared budget; a later fill pass retains remaining matrices when possible.
+            // A menu UI group keeps every matrix in the representative pass (a box root group owns two).
+            const bool every = tooieIsMenuUiId(group->matrixId);
             const bool retained = std::any_of(rows.begin(), rows.end(), [&](const Row& row) {
                 return row.workload_id == currentId && row.workload_slot == currentSlot &&
-                    (representativesOnly ? row.group_id == group->matrixId : row.index == t);
+                    (representativesOnly && !every ? row.group_id == group->matrixId : row.index == t);
             });
             if (retained) continue;
         }
@@ -949,7 +1014,9 @@ void tooieCollectPlayerRows(uint64_t presentation, const DrawData &current, uint
         row.weight = weight; row.previous_weight = previousWeight;
         row.flags = frameFlags | owner | (transformsProcessed ? uint32_t(Row::TransformsProcessed) : 0u);
         row.index = t; row.group_id = group->matrixId;
-        if (supplementalRoots && representativesOnly) {
+        // Only the group's first retained matrix is its representative; a menu group's later matrices are plain rows.
+        if (supplementalRoots && representativesOnly && !std::any_of(rows.begin(), rows.end(), [&](const Row& r) {
+                return r.workload_id == currentId && r.workload_slot == currentSlot && r.group_id == group->matrixId; })) {
             row.flags |= Row::Representative;
             for (uint32_t i = 0; i < count; ++i) {
                 const TransformGroup *other = tooieWorldGroup(current, i);
@@ -959,6 +1026,7 @@ void tooieCollectPlayerRows(uint64_t presentation, const DrawData &current, uint
         uint32_t first = 0;
         row.vertices = tooieWorldVertices(current, t, first);
         row.physical = t < current.worldTransformPhysicalAddresses.size() ? current.worldTransformPhysicalAddresses[t] : 0;
+        if (supplementalRoots && group->vertexInterpolation == G_EX_COMPONENT_SKIP) row.flags |= Row::VertexSkip;
         tooieCopyBits(current.worldTransforms[t], row.raw);
         if (transformsProcessed && t < current.lerpWorldTransforms.size()) {
             row.flags |= Row::Interpolated;
@@ -989,14 +1057,355 @@ void tooieCollectPlayerRows(uint64_t presentation, const DrawData &current, uint
                 row.previous_group_id = prior->matrixId;
                 row.previous_vertices = tooieWorldVertices(*previous, mapping.prevTransformIndex, priorFirst);
                 tooieCopyBits(previous->worldTransforms[mapping.prevTransformIndex], row.prior);
+                // Owned geometry under a matched root: vertex motion only over an unchanged range; a count change is
+                // range topology (vertices != previous_vertices) and keeps -1.
+                if (supplementalRoots && row.vertices && row.previous_vertices == row.vertices) {
+                    row.vertex_delta = tooieVertexDelta(current, first, *previous, priorFirst, row.vertices);
+                    if (row.vertex_delta >= 0.0f) row.flags |= Row::VertexMeasured;
+                }
             }
         }
         rows.push_back(row);
         if (supplementalRoots) ++supplementalCount;
     }
+    }
+}
+
+// ---- Warp-UI witness (rt64_player_rows.hpp) --------------------------------------------------
+bool tooiePairScenes(const float *difference, uint32_t currentScenes, uint32_t previousScenes,
+    uint32_t *paired) noexcept {
+    if (currentScenes > tooieOrthoPairingScenes || previousScenes > tooieOrthoPairingScenes) return false;
+    for (uint32_t k = 0; k < currentScenes * previousScenes; ++k)
+        if (std::isnan(difference[k])) return false;
+    bool currentUsed[tooieOrthoPairingScenes]{}, previousUsed[tooieOrthoPairingScenes]{};
+    for (uint32_t i = 0; i < currentScenes; ++i) paired[i] = UINT32_MAX;
+    // Taking the smallest remaining candidate whose sides are both free, ties in (current, previous)
+    // order, is exactly RT64's stable_sort followed by the skip-if-either-side-matched walk.
+    for (;;) {
+        uint32_t bestCurrent = UINT32_MAX, bestPrevious = UINT32_MAX;
+        float best = 0.0f;
+        for (uint32_t i = 0; i < currentScenes; ++i) {
+            if (currentUsed[i]) continue;
+            for (uint32_t j = 0; j < previousScenes; ++j) {
+                if (previousUsed[j]) continue;
+                const float d = difference[i * previousScenes + j];
+                if (bestCurrent == UINT32_MAX || d < best) { best = d; bestCurrent = i; bestPrevious = j; }
+            }
+        }
+        if (bestCurrent == UINT32_MAX) return true;
+        currentUsed[bestCurrent] = previousUsed[bestPrevious] = true;
+        paired[bestCurrent] = bestPrevious;
+    }
+}
+
+bool tooieOrthoSceneInterpolating(const DrawData &current, const GameFrameMap::WorkloadMap *map,
+    const DrawData *previous, uint32_t transformsIndex) noexcept {
+    if (!map || !map->mapped || !previous || transformsIndex >= map->viewProjections.size() ||
+        transformsIndex >= current.viewProjTransforms.size()) return false;
+    const auto &mapping = map->viewProjections[transformsIndex];
+    if (!mapping.mapped || mapping.prevTransformIndex >= previous->viewProjTransforms.size()) return false;
+    uint32_t raw[16], prior[16];
+    tooieCopyBits(current.viewProjTransforms[transformsIndex], raw);
+    tooieCopyBits(previous->viewProjTransforms[mapping.prevTransformIndex], prior);
+    return std::memcmp(raw, prior, sizeof(raw)) != 0;
+}
+
+bool tooieCollectOrthoScene(uint64_t presentation, const DrawData &current, uint32_t currentSlot,
+    uint64_t currentId, const GameFrameMap::WorkloadMap *map, const DrawData *previous, uint32_t previousSlot,
+    uint64_t previousId, float weight, bool projectionsProcessed, uint32_t transformsIndex,
+    const TooieOrthoScene &scene, std::vector<TooiePlayerProjection> &projections) noexcept {
+    using ProjectionRow = TooiePlayerProjection;
+    const uint32_t p = transformsIndex;
+    if (p >= current.viewProjTransforms.size()) return true;
+    if (projections.size() >= projections.capacity()) return false;
+    ProjectionRow q{};
+    q.presentation = presentation; q.workload_id = currentId; q.workload_slot = currentSlot;
+    q.previous_slot = previousSlot; q.previous_workload_id = previous ? previousId : 0;
+    q.flags = (map && map->mapped ? uint32_t(ProjectionRow::OwnerMapped) : 0u) |
+        (previous ? uint32_t(ProjectionRow::PriorSlotValid) : 0u) |
+        (projectionsProcessed ? uint32_t(ProjectionRow::ProjectionsProcessed) : 0u) |
+        uint32_t(ProjectionRow::OrthoScene) | (scene.flags & uint32_t(ProjectionRow::SceneCensus |
+            ProjectionRow::SceneCrossWorkload | ProjectionRow::PairKnown));
+    q.index = p; q.weight = weight;
+    if (tooieProjectionGroup(current, p, q.group_id)) q.flags |= ProjectionRow::GroupKnown;
+    tooieCopyBits(current.viewProjTransforms[p], q.raw);
+    if (projectionsProcessed && p < current.modViewProjTransforms.size()) {
+        q.flags |= ProjectionRow::Final;
+        tooieCopyBits(current.modViewProjTransforms[p], q.final);
+    }
+    if (map && p < map->viewProjections.size() && map->viewProjections[p].mapped) {
+        const auto &mapping = map->viewProjections[p];
+        q.flags |= ProjectionRow::Mapped | tooieLerpFlags(mapping.rigidBody, false);
+        q.previous_index = mapping.prevTransformIndex;
+        if (previous && mapping.prevTransformIndex < previous->viewProjTransforms.size()) {
+            q.flags |= ProjectionRow::PriorIndexValid;
+            tooieCopyBits(previous->viewProjTransforms[mapping.prevTransformIndex], q.prior);
+            tooieProjectionGroup(*previous, mapping.prevTransformIndex, q.previous_group_id);
+        }
+    }
+    q.scene = std::min(scene.ordinal, uint32_t(0xFFFFu)) | (std::min(scene.position, uint32_t(0xFFFFu)) << 16);
+    q.scene_projections = scene.projections;
+    q.scene_counts = std::min(scene.scenes, uint32_t(0xFFFFu)) | (std::min(scene.previousScenes, uint32_t(0xFFFFu)) << 16);
+    if (q.flags & ProjectionRow::PairKnown) {
+        q.paired_scene = scene.pairedScene;
+        q.paired_group_id = scene.pairedGroupId;
+    }
+    projections.push_back(q);
+    return true;
+}
+
+void tooieCollectAutoOrtho(uint64_t presentation, const DrawData &current, uint32_t currentSlot,
+    uint64_t currentId, const GameFrameMap::WorkloadMap *map, const DrawData *previous, uint32_t previousSlot,
+    uint64_t previousId, float weight, float previousWeight, uint32_t frameFlags, bool transformsProcessed,
+    const uint32_t *ortho, size_t orthoCount, TooieAutoOrthoTop &top) noexcept {
+    using Row = TooiePlayerTransform;
+    const uint32_t owner = (map && map->mapped ? uint32_t(Row::OwnerMapped) : 0u) |
+        (previous ? uint32_t(Row::PriorSlotValid) : 0u);
+    const size_t count = std::min(current.worldTransforms.size(), current.worldTransformGroups.size());
+    uint32_t eligible = 0;
+    for (uint32_t t = 0; t < count; ++t) {
+        const TransformGroup *group = tooieWorldGroup(current, t);
+        if (!group || !tooieOrthoWitnessGroup(group->matrixId)) continue;
+        uint32_t first = 0, projection = UINT32_MAX, flags = 0;
+        const uint32_t vertices = tooieWorldVertices(current, t, first);
+        for (uint32_t v = first; v < first + vertices; ++v) {
+            if (v >= current.viewProjIndices.size() || current.worldIndices[v] != t ||
+                current.viewProjIndices[v] >= current.viewProjTransforms.size()) {
+                flags |= Row::ProjectionIncomplete;
+                continue;
+            }
+            const uint32_t p = current.viewProjIndices[v];
+            if (projection == UINT32_MAX) projection = p;
+            else if (p != projection) flags |= Row::ProjectionMixed;
+        }
+        if (projection == UINT32_MAX || std::find(ortho, ortho + orthoCount, projection) == ortho + orthoCount)
+            continue;
+        ++eligible;
+        const GameFrameMap::TransformMap *mapping = map && t < map->transforms.size() && map->transforms[t].mapped
+            ? &map->transforms[t] : nullptr;
+        const bool priorInside = mapping && previous && mapping->prevTransformIndex < previous->worldTransforms.size();
+        float key = -1.0f, vertexDelta = -1.0f;
+        if (priorInside) {
+            const auto &raw = current.worldTransforms[t];
+            const auto &prior = previous->worldTransforms[mapping->prevTransformIndex];
+            const float dx = float(raw[3][0]) - float(prior[3][0]);
+            const float dy = float(raw[3][1]) - float(prior[3][1]);
+            const float dz = float(raw[3][2]) - float(prior[3][2]);
+            key = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (!std::isfinite(key)) key = INFINITY;
+            // A part whose geometry moves under a static matrix ranks by its vertex change.
+            uint32_t priorFirst = 0;
+            if (vertices && tooieWorldVertices(*previous, mapping->prevTransformIndex, priorFirst) == vertices)
+                vertexDelta = tooieVertexDelta(current, first, *previous, priorFirst, vertices);
+            key = std::max(key, vertexDelta);
+        }
+        size_t at = top.count;
+        while (at > 0 && top.keys[at - 1] < key) --at;
+        if (at >= top.rows.size()) continue;
+        Row row{};
+        row.presentation = presentation; row.workload_id = currentId; row.workload_slot = currentSlot;
+        row.previous_slot = previousSlot; row.previous_workload_id = previous ? previousId : 0;
+        row.weight = weight; row.previous_weight = previousWeight;
+        row.flags = frameFlags | owner | flags | Row::AutoOrtho | Row::ProjectionKnown |
+            (transformsProcessed ? uint32_t(Row::TransformsProcessed) : 0u) |
+            (group->matrixId != G_EX_ID_AUTO ? uint32_t(Row::UnrootedOrtho) : 0u) |
+            (group->vertexInterpolation == G_EX_COMPONENT_SKIP ? uint32_t(Row::VertexSkip) : 0u);
+        row.index = t; row.group_id = group->matrixId; row.vertices = vertices; row.projection = projection;
+        row.vertex_delta = vertexDelta;
+        if (vertexDelta >= 0.0f) row.flags |= Row::VertexMeasured;
+        row.physical = t < current.worldTransformPhysicalAddresses.size() ? current.worldTransformPhysicalAddresses[t] : 0;
+        tooieCopyBits(current.worldTransforms[t], row.raw);
+        if (transformsProcessed && t < current.lerpWorldTransforms.size()) {
+            row.flags |= Row::Interpolated;
+            tooieCopyBits(current.lerpWorldTransforms[t], row.interpolated);
+        }
+        if (mapping) {
+            row.flags |= Row::Mapped | tooieLerpFlags(mapping->rigidBody, true);
+            row.previous_index = mapping->prevTransformIndex;
+            const TransformGroup *prior = priorInside ? tooieWorldGroup(*previous, mapping->prevTransformIndex) : nullptr;
+            if (prior) {
+                uint32_t priorFirst = 0;
+                row.flags |= Row::PriorIndexValid;
+                row.previous_group_id = prior->matrixId;
+                row.previous_vertices = tooieWorldVertices(*previous, mapping->prevTransformIndex, priorFirst);
+                tooieCopyBits(previous->worldTransforms[mapping->prevTransformIndex], row.prior);
+            }
+        }
+        for (size_t i = std::min(top.count, top.rows.size() - 1); i > at; --i) {
+            top.rows[i] = top.rows[i - 1];
+            top.keys[i] = top.keys[i - 1];
+        }
+        top.rows[at] = row;
+        top.keys[at] = key;
+        if (top.count < top.rows.size()) ++top.count;
+    }
+    for (size_t i = 0; i < top.count; ++i)
+        if (top.rows[i].presentation == presentation && top.rows[i].workload_slot == currentSlot &&
+            top.rows[i].workload_id == currentId) top.rows[i].group_matrix_count = eligible;
+    top.eligible += eligible;
+}
+
+void tooieEmitAutoOrtho(const TooieAutoOrthoTop &top, std::vector<TooiePlayerTransform> &rows) noexcept {
+    size_t added = 0;
+    for (size_t i = 0; i < top.count && rows.size() < rows.capacity(); ++i, ++added) rows.push_back(top.rows[i]);
+    if (added && (added < top.eligible || top.truncated)) rows.back().flags |= TooiePlayerTransform::Truncated;
 }
 
 namespace {
+// One scene projection's workload and viewProj index, or nullptr when any index is outside the data.
+const Workload *tooieSceneProjection(const WorkloadQueue &queue, const GameIndices::Projection &indices,
+    uint32_t &transformsIndex) noexcept {
+    transformsIndex = UINT32_MAX;
+    if (indices.workloadIndex >= queue.workloads.size()) return nullptr;
+    const Workload &workload = queue.workloads[indices.workloadIndex];
+    if (indices.fbPairIndex >= workload.fbPairs.size()) return nullptr;
+    const auto &pair = workload.fbPairs[indices.fbPairIndex];
+    if (indices.projectionIndex >= pair.projections.size()) return nullptr;
+    transformsIndex = pair.projections[indices.projectionIndex].transformsIndex;
+    return transformsIndex < workload.drawData.viewProjTransforms.size() ? &workload : nullptr;
+}
+
+// Warp-UI witness after every player and supplemental row. Census: the first presentation carrying this
+// frame's first workload ID. Scene rows use their own cap after the player projections; AUTO rows use
+// their own cap after the player rows. Workload IDs only; no bk_frame is inferred.
+void traceOrthoWitness(const WorkloadQueue &queue, const GameFrame &curFrame, const GameFrame &prevFrame,
+    uint64_t presentation, float curWeight, float prevWeight, uint32_t frameFlags, bool projectionsProcessed,
+    bool transformsProcessed, std::vector<TooiePlayerTransform> &rows,
+    std::vector<TooiePlayerProjection> &projections) noexcept {
+    using ProjectionRow = TooiePlayerProjection;
+    static uint64_t censusWorkload = 0;
+    static std::vector<uint32_t> orthoIndices;
+    static float difference[tooieOrthoPairingScenes * tooieOrthoPairingScenes];
+    static uint32_t paired[tooieOrthoPairingScenes];
+    static TooieAutoOrthoTop top;
+    bool census = false;
+    if (!curFrame.workloads.empty() && curFrame.workloads[0] < queue.workloads.size()) {
+        const uint64_t id = queue.workloads[curFrame.workloads[0]].workloadId;
+        census = id != censusWorkload;
+        censusWorkload = id;
+    }
+    // The same slot, prior and map rules as the player rows (tracePlayerRows).
+    struct Prior { const GameFrameMap::WorkloadMap *map; const DrawData *previous; uint32_t recorded; uint64_t previousId; };
+    const auto prior = [&](uint32_t c) noexcept {
+        Prior out{c < curFrame.frameMap.workloads.size() ? &curFrame.frameMap.workloads[c] : nullptr, nullptr, UINT32_MAX, 0};
+        out.recorded = out.map && out.map->mapped ? out.map->prevWorkloadIndex : UINT32_MAX;
+        out.previousId = out.recorded < queue.workloads.size() ? queue.workloads[out.recorded].workloadId : 0;
+        if (tooiePlayerPriorSlotValid(out.map, c, queue.workloads[c].workloadId, prevFrame.workloads,
+            queue.workloads.size(), out.previousId)) out.previous = &queue.workloads[out.recorded].drawData;
+        return out;
+    };
+    const auto &scenes = curFrame.orthographicScenes;
+    const auto &previousScenes = prevFrame.orthographicScenes;
+    const uint32_t sceneCount = uint32_t(std::min<size_t>(scenes.size(), UINT32_MAX));
+    const uint32_t previousCount = uint32_t(std::min<size_t>(previousScenes.size(), UINT32_MAX));
+    // RT64 GameFrame::match pairs orthographic scenes by first-projection view + projection difference.
+    bool pairKnown = false;
+    if (curFrame.matched && sceneCount && previousCount &&
+        sceneCount <= tooieOrthoPairingScenes && previousCount <= tooieOrthoPairingScenes) {
+        pairKnown = true;
+        for (uint32_t i = 0; i < sceneCount && pairKnown; ++i) {
+            uint32_t ci = 0;
+            const Workload *cw = scenes[i].projections.empty() ? nullptr :
+                tooieSceneProjection(queue, scenes[i].projections[0], ci);
+            if (!cw || ci >= cw->drawData.viewTransforms.size() || ci >= cw->drawData.projTransforms.size()) {
+                pairKnown = false;
+                break;
+            }
+            for (uint32_t j = 0; j < previousCount; ++j) {
+                uint32_t pj = 0;
+                const Workload *pw = previousScenes[j].projections.empty() ? nullptr :
+                    tooieSceneProjection(queue, previousScenes[j].projections[0], pj);
+                if (!pw || pj >= pw->drawData.viewTransforms.size() || pj >= pw->drawData.projTransforms.size()) {
+                    pairKnown = false;
+                    break;
+                }
+                difference[i * previousCount + j] =
+                    matrixDifference(cw->drawData.viewTransforms[ci], pw->drawData.viewTransforms[pj]) +
+                    matrixDifference(cw->drawData.projTransforms[ci], pw->drawData.projTransforms[pj]);
+            }
+        }
+        pairKnown = pairKnown && tooiePairScenes(difference, sceneCount, previousCount, paired);
+    }
+    size_t emitted = 0, lastScene = SIZE_MAX;
+    for (uint32_t s = 0; s < sceneCount; ++s) {
+        const auto &list = scenes[s].projections;
+        if (list.empty()) continue;
+        // The first projection mapped in its own workload map carries the mapping RT64 copies to the rest of
+        // the scene (rt64_game_frame.cpp matchScene); otherwise the first projection represents it.
+        uint32_t position = 0;
+        bool cross = false;
+        for (size_t k = 0; k < list.size(); ++k) cross |= list[k].workloadIndex != list[0].workloadIndex;
+        for (size_t k = 0; k < list.size(); ++k) {
+            uint32_t t = 0;
+            const uint32_t c = list[k].workloadIndex;
+            if (!tooieSceneProjection(queue, list[k], t) || c >= curFrame.frameMap.workloads.size()) continue;
+            const auto &m = curFrame.frameMap.workloads[c];
+            if (m.mapped && t < m.viewProjections.size() && m.viewProjections[t].mapped) {
+                position = uint32_t(k);
+                break;
+            }
+        }
+        uint32_t t = 0;
+        const Workload *workload = tooieSceneProjection(queue, list[position], t);
+        if (!workload) continue;
+        const uint32_t c = list[position].workloadIndex;
+        const Prior p = prior(c);
+        uint32_t group = 0;
+        const bool automatic = tooieProjectionGroup(workload->drawData, t, group) && group == G_EX_ID_AUTO;
+        if (!census && !(automatic && tooieOrthoSceneInterpolating(workload->drawData, p.map, p.previous, t)))
+            continue;
+        if (emitted >= tooieOrthoScenesPerPresentation) {
+            if (lastScene < projections.size()) projections[lastScene].flags |= ProjectionRow::SceneTruncated;
+            break;
+        }
+        TooieOrthoScene info{};
+        info.ordinal = s; info.position = position; info.projections = uint32_t(list.size());
+        info.scenes = sceneCount; info.previousScenes = previousCount;
+        info.flags = (census ? uint32_t(ProjectionRow::SceneCensus) : 0u) |
+            (cross ? uint32_t(ProjectionRow::SceneCrossWorkload) : 0u);
+        if (pairKnown) {
+            // An unpaired current scene (more scenes now than before) keeps paired_scene UINT32_MAX.
+            info.flags |= ProjectionRow::PairKnown;
+            info.pairedScene = paired[s];
+            uint32_t pt = 0;
+            const Workload *pw = paired[s] < previousCount && !previousScenes[paired[s]].projections.empty()
+                ? tooieSceneProjection(queue, previousScenes[paired[s]].projections[0], pt) : nullptr;
+            if (pw) tooieProjectionGroup(pw->drawData, pt, info.pairedGroupId);
+        }
+        if (!tooieCollectOrthoScene(presentation, workload->drawData, c, workload->workloadId, p.map, p.previous,
+            p.recorded, p.previousId, curWeight, projectionsProcessed, t, info, projections)) {
+            if (lastScene < projections.size()) projections[lastScene].flags |= ProjectionRow::SceneTruncated;
+            break;
+        }
+        lastScene = projections.size() - 1;
+        ++emitted;
+    }
+    if (!census) return;
+    try { orthoIndices.reserve(tooieOrthoIndicesPerWorkload); } catch (...) { return; }
+    top = TooieAutoOrthoTop{};
+    for (uint32_t c : curFrame.workloads) {
+        if (c >= queue.workloads.size()) continue;
+        orthoIndices.clear();
+        for (const auto &scene : scenes) {
+            for (const auto &indices : scene.projections) {
+                uint32_t t = 0;
+                if (indices.workloadIndex != c || !tooieSceneProjection(queue, indices, t)) continue;
+                if (std::find(orthoIndices.begin(), orthoIndices.end(), t) != orthoIndices.end()) continue;
+                if (orthoIndices.size() >= tooieOrthoIndicesPerWorkload) { top.truncated = true; continue; }
+                orthoIndices.push_back(t);
+            }
+        }
+        if (orthoIndices.empty()) continue;
+        const Workload &workload = queue.workloads[c];
+        const Prior p = prior(c);
+        tooieCollectAutoOrtho(presentation, workload.drawData, c, workload.workloadId, p.map, p.previous,
+            p.recorded, p.previousId, curWeight, prevWeight,
+            frameFlags | (workload.paused ? uint32_t(TooiePlayerTransform::Paused) : 0u), transformsProcessed,
+            orthoIndices.data(), orthoIndices.size(), top);
+    }
+    tooieEmitAutoOrtho(top, rows);
+}
+
 // Every presentation, ahead of every trace gate: one sink call carrying this presentation's rows.
 void tracePlayerRows(const WorkloadQueue &queue, const GameFrame &curFrame, const GameFrame &prevFrame,
     float curWeight, float prevWeight, bool projectionsProcessed, bool transformsProcessed) noexcept {
@@ -1006,8 +1415,9 @@ void tracePlayerRows(const WorkloadQueue &queue, const GameFrame &curFrame, cons
     static std::vector<TooiePlayerProjection> projections;
     static uint64_t presentation = 0;
     try {
-        rows.reserve(tooiePlayerRowsPerPresentation);
-        projections.reserve(tooiePlayerProjectionsPerPresentation);
+        // The witness rows have their own room after the unchanged player caps.
+        rows.reserve(tooiePlayerRowsPerPresentation + tooieAutoOrthoRowsPerPresentation);
+        projections.reserve(tooiePlayerProjectionsPerPresentation + tooieOrthoScenesPerPresentation);
     } catch (...) { return; }
     rows.clear();
     projections.clear();
@@ -1039,7 +1449,9 @@ void tracePlayerRows(const WorkloadQueue &queue, const GameFrame &curFrame, cons
         }
     }
     }
-    if (!rows.empty()) sink(rows.data(), rows.size(), projections.data(), projections.size());
+    traceOrthoWitness(queue, curFrame, prevFrame, presentation, curWeight, prevWeight, frameFlags,
+        projectionsProcessed, transformsProcessed, rows, projections);
+    if (!rows.empty() || !projections.empty()) sink(rows.data(), rows.size(), projections.data(), projections.size());
 }
 } // namespace
 
@@ -1058,6 +1470,71 @@ void tooieMatrixTraceFrame(const WorkloadQueue &queue, const GameFrame &curFrame
     // F4 player correspondence (rt64_player_rows.hpp): every presentation, before every gate below.
     tracePlayerRows(queue, curFrame, prevFrame, curFrameWeight, prevFrameWeight,
         projectionsProcessed, transformsProcessed);
+    // L05 F4 run (bridge-domain +129, player_boundary.c): ONE bounded run per session, started by the first accepted
+    // F4 (tooieL05BridgeArm), independent of TOOIE_MATRIX_TRACE. Every presentation of the run is counted; F4 presses
+    // during or after it neither restart nor queue another. Each workload is counted once by its monotonic workload ID
+    // (rt64_state.cpp State::advanceWorkload); a skipped ID, out-of-queue index, out-of-order workload or unresolvable
+    // group is coverage this counter did not see. complete=1 only on the run's last presentation with presentations,
+    // workloads and player worlds above zero and every coverage loss zero. Diagnostic only; BK has no counterpart.
+    {
+        using tooie::rt64_trace::OneShot;
+        static OneShot l05Run;
+        struct BridgeOuterTotals {
+            uint64_t presentations = 0, visits = 0, workloads = 0, gaps = 0, missing = 0, reordered = 0;
+            uint64_t worlds = 0, players = 0, unresolved = 0, hits = 0, lastId = 0, firstId = 0, firstHitWorkload = 0;
+            uint64_t startUs = 0;
+            uint32_t armsAtStart = 0, firstHitIndex = 0, firstHitGroup = 0;
+            bool seen = false;
+        };
+        static BridgeOuterTotals l05;
+        const uint32_t arms = tooieL05BridgeArm.load(std::memory_order_acquire);
+        const uint32_t index = l05Run.next(arms != 0);
+        if (index != OneShot::idle) {
+            const uint64_t nowUs = uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
+            if (!index) { l05.armsAtStart = arms; l05.startUs = nowUs; }
+            ++l05.presentations;
+            const bool seenBefore = l05.seen;
+            const uint64_t countedBefore = l05.lastId;
+            for (uint32_t w : curFrame.workloads) {
+                if (w >= queue.workloads.size()) { ++l05.missing; continue; }
+                ++l05.visits;
+                const Workload &workload = queue.workloads[w];
+                const uint64_t id = workload.workloadId;
+                if (seenBefore && id <= countedBefore) continue;               // counted in an earlier presentation
+                if (l05.seen && id <= l05.lastId) { ++l05.reordered; continue; }
+                if (l05.seen && id > l05.lastId + 1u) l05.gaps += id - l05.lastId - 1u;
+                if (!l05.seen) l05.firstId = id;
+                l05.seen = true; l05.lastId = id; ++l05.workloads;
+                TooieBridgeOuterCount count;
+                tooieCountBridgePlayerOuter(workload.drawData, count);
+                l05.worlds += count.worlds; l05.players += count.players; l05.unresolved += count.unresolved;
+                if (count.hits && !l05.hits) {
+                    l05.firstHitIndex = index; l05.firstHitWorkload = id; l05.firstHitGroup = count.firstId;
+                }
+                l05.hits += count.hits;
+            }
+            const bool lastPresentation = index == OneShot::duration - 1u;
+            if (lastPresentation || index % 11 == 0) {
+                const bool complete = lastPresentation && l05.presentations && l05.workloads && l05.players &&
+                    !l05.gaps && !l05.missing && !l05.reordered && !l05.unresolved;
+                std::fprintf(stderr,
+                    "TOOIE_L05_BRIDGE129 trigger=f4 run_presentation=%u final=%u complete=%u arms_at_start=%u arms=%u "
+                    "start_us=%llu now_us=%llu first_workload=%llu last_workload=%llu presentations=%llu workload_visits=%llu "
+                    "workloads=%llu id_gaps=%llu missing=%llu reordered=%llu worlds=%llu player_worlds=%llu unresolved=%llu "
+                    "hits=%llu first_hit_presentation=%u first_hit_workload=%llu first_hit_gid=%08x\n",
+                    index, unsigned(lastPresentation), unsigned(complete), l05.armsAtStart, arms,
+                    (unsigned long long)l05.startUs, (unsigned long long)nowUs,
+                    (unsigned long long)l05.firstId, (unsigned long long)l05.lastId,
+                    (unsigned long long)l05.presentations, (unsigned long long)l05.visits,
+                    (unsigned long long)l05.workloads, (unsigned long long)l05.gaps,
+                    (unsigned long long)l05.missing, (unsigned long long)l05.reordered,
+                    (unsigned long long)l05.worlds, (unsigned long long)l05.players, (unsigned long long)l05.unresolved,
+                    (unsigned long long)l05.hits, l05.firstHitIndex,
+                    (unsigned long long)l05.firstHitWorkload, l05.firstHitGroup);
+            }
+        }
+    }
     static tooie::rt64_trace::Window screenWindow;
     auto &screenCalls = screenWindow.calls;
     const uint32_t screenArm = screenXTraceArm.load(std::memory_order_acquire);

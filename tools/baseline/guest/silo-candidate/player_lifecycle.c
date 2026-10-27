@@ -16,6 +16,12 @@
 #if !defined(TOOIE_TROT_TOGGLE) || (TOOIE_TROT_TOGGLE != 0 && TOOIE_TROT_TOGGLE != 1)
 #error Explicit boolean TOOIE_TROT_TOGGLE selection required
 #endif
+#if !defined(TOOIE_BK_PIPELINE) || (TOOIE_BK_PIPELINE != 0 && TOOIE_BK_PIPELINE != 1)
+#error Explicit boolean TOOIE_BK_PIPELINE selection required
+#endif
+/* L06b-6: under BK only the retired CPU625/backpack621 begin/admit paths populate the owner tables these
+ * retirements clear (L06b-2/-4), so the BK lifecycle makes neither call; Trot retirement stays. */
+#define TOOIE_LIFECYCLE_ROW_RETIRES (!TOOIE_BK_PIPELINE)
 #if TOOIE_TROT_TOGGLE
 void tooie_trot_toggle_retire(u32);
 #endif
@@ -79,10 +85,10 @@ SI void player_lifecycle(u8* self, u32 complete) {
  * @recomp CPU625/Backpack/Trot retirements and player_lifecycle begin/end
  * are port additions; original call/store and body-reload order stays intact. */
 PATCH void func_80092898(u8* self) {
-#if TOOIE_CPU625
+#if TOOIE_CPU625 && TOOIE_LIFECYCLE_ROW_RETIRES
     tooie_cpu625_retire((u32)self,0u,3u);
 #endif
-#if TOOIE_BACKPACK621
+#if TOOIE_BACKPACK621 && TOOIE_LIFECYCLE_ROW_RETIRES
     tooie_backpack621_retire((u32)self,0u,3u);
 #endif
 #if TOOIE_TROT_TOGGLE
@@ -137,10 +143,10 @@ PATCH void func_80092898(u8* self) {
 /* Original core2/1ECD170 C destruction flow, re-expressed in this guest ABI.
  * @recomp The retirement prelude and player_lifecycle call are port additions. */
 PATCH void func_800F3880(u8* self) {
-#if TOOIE_CPU625
+#if TOOIE_CPU625 && TOOIE_LIFECYCLE_ROW_RETIRES
     tooie_cpu625_retire((u32)self,0u,4u);
 #endif
-#if TOOIE_BACKPACK621
+#if TOOIE_BACKPACK621 && TOOIE_LIFECYCLE_ROW_RETIRES
     tooie_backpack621_retire((u32)self,0u,4u);
 #endif
 #if TOOIE_TROT_TOGGLE

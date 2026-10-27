@@ -13,8 +13,10 @@
 
 namespace baseline::issue_evidence {
 struct FrameRecord {
-    // Frame bits Layout/Frame are DrawRecord's values; Cpu625 is frame-only.
-    enum Valid : uint32_t { Cpu625=4 };
+    // Frame bits Layout/Frame are DrawRecord's values; Cpu625, LegacyPlayer and SecondaryRoute are frame-only.
+    // LegacyPlayer: player_boundary.c's native enable is exactly 1, so its words are observations.
+    // SecondaryRoute: LegacyPlayer, and the PC[8] secondary route is selected outside BK (not runtime installation proof).
+    enum Valid : uint32_t { Cpu625=4, LegacyPlayer=8, SecondaryRoute=16 };
     uint64_t sequence{}, time_us{};
     uint32_t phase{}, epoch{}, map{}, pool_index{}, view{}, camera{}, projection{},
         camera_active{}, camera_latch{}, bridge_poisoned{}, control_slot{},
@@ -22,6 +24,8 @@ struct FrameRecord {
     int32_t requested_period{}, measured_period{}, live_period{};
     uint32_t valid{};
     // Schema 2. Layout covers the two bridge words; Cpu625 covers its allocator cursor.
+    // Schema 3: player_owner..player_refusals, player_last_reason and the primary words need LegacyPlayer,
+    // the secondary words SecondaryRoute. Without its bit a word serializes as null or absent, never zero.
     // last_reason is the latest begin call's word (0xFFFFFFFF admitted), not a per-frame result.
     uint32_t player_last_reason{}, bridge_next_block{}, cpu625_next_block{};
     // PC[8] layout 4: last admitted occurrence's view and the protected primary ledger.
@@ -64,7 +68,7 @@ struct BkDrawRecord {
     // drawn_owner is only that staged candidate; Roster checks its slot/table membership.
     // Control is independent. End: matching DF234 or bit40 DF238. Unclosed: no matching close.
     enum Valid : uint32_t { Layout=1, Frame=2, Owner=4, Staged=8, Route=16, Roster=32, Control=64,
-        ControlOwner=128, End=256, Unclosed=512, RootWitness=1024 };
+        ControlOwner=128, End=256, Unclosed=512, RootWitness=1024, Caller=2048 };
     enum Source : uint32_t { Root=1 };
     enum IdDomain : uint32_t { NoId=0, PlayerId=1, ActorId=2, OtherId=3 };
     uint64_t sequence{}, time_us{};
@@ -79,6 +83,8 @@ struct BkDrawRecord {
     // End: this root's own final offset/bones; group and overflow deltas include nested roots.
     uint32_t end_offset{}, end_uses_bones{}, groups{}, offset_overflows{};
     uint32_t producer_site{}, producer_model{}; // Exact synchronous core callsite, not semantic owner.
+    // Caller: a top-level unowned root's exact DE498 entry a1; actor/pair only for a live actor at a1-4.
+    uint32_t caller_position{}, caller_actor{}, caller_pair{};
     uint32_t late_closes{}, root_overflows{}, scope_overflows{}; // Session-cumulative at begin.
     // Before: capture[8], history[id,frame,model,start], float frame, draw ID.
     // After: segment[pos,vel,base,enabled], selector reserved, decline counter delta.

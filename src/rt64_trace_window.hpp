@@ -21,4 +21,22 @@ struct Window {
     }
 };
 
+// L05 F4 run: one bounded run per session. The first armed presentation starts it; arms while it runs or after it
+// completes are ignored, so repeated presses never restart, extend or queue another run.
+struct OneShot {
+    static constexpr uint32_t duration = 3300;
+    static constexpr uint32_t idle = UINT32_MAX;
+    uint32_t calls = 0;
+    bool started = false;
+    // This presentation's index within the run, or idle outside it.
+    uint32_t next(bool armed) noexcept {
+        if (!started) {
+            if (!armed) return idle;
+            started = true;
+        }
+        return calls < duration ? calls++ : idle;
+    }
+    bool completed() const noexcept { return started && calls == duration; }
+};
+
 } // namespace tooie::rt64_trace

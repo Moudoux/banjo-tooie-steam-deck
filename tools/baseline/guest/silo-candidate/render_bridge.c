@@ -4,6 +4,9 @@
 #include "render_bridge.h"
 #include "rt64_extended_gbi.h"
 #if TOOIE_CAMERA_HONEY
+#if !defined(TOOIE_BK_PIPELINE) || (TOOIE_BK_PIPELINE != 0 && TOOIE_BK_PIPELINE != 1)
+#error Explicit boolean TOOIE_BK_PIPELINE required with TOOIE_CAMERA_HONEY
+#endif
 #define TOOIE_CAMERA_GUEST 1
 #include "camera_identity.h"
 #define TOOIE_RENDER_LOWER_BYTES TOOIE_BRIDGE_LOWER_BYTES
@@ -89,6 +92,9 @@ PATCH Unk80132ED0* func_800EBED4(void* arg0, s32 arg1, s32 arg2, s32 arg3) {
     return descriptor;
 }
 
+/* @recomp L08b (BK selection): no replacement. The selected raw keeps the original body, whose
+   func_80101870 call reaches func_80101808 and its BK owner scope like every other actor. */
+#if !(TOOIE_CAMERA_HONEY && TOOIE_BK_PIPELINE)
 PATCH void func_80800380_chhoneycarrier(Actor* actor, void* arg1) {
     /* @recomp Finite owner/capacity/identity/admission/reentry envelope and public push,
        before the original 80101870 call. */
@@ -241,3 +247,4 @@ PATCH void func_80800380_chhoneycarrier(Actor* actor, void* arg1) {
     if (owns_active) tooie_render_bridge_state.active = 0;
     if (actor->unk7C_12) func_80103110(actor, 1);
 }
+#endif

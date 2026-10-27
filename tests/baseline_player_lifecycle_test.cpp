@@ -14,6 +14,9 @@
 #if !defined(TOOIE_TROT_SELECTED) || (TOOIE_TROT_SELECTED != 0 && TOOIE_TROT_SELECTED != 1)
 #error Supply an explicit boolean selected Trot fixture flag
 #endif
+#if !defined(TOOIE_LIFECYCLE_ROW_RETIRES) || (TOOIE_LIFECYCLE_ROW_RETIRES != 0 && TOOIE_LIFECYCLE_ROW_RETIRES != 1)
+#error Supply an explicit boolean CPU625/backpack621 lifecycle retirement flag (0 under BK, L06b-6)
+#endif
 extern "C" {
 void _babackpack_entrypoint_9(uint8_t*,recomp_context*);
 void func_800936E8(uint8_t*,recomp_context*);
@@ -154,9 +157,9 @@ void retire(RetireKind kind,uint8_t* rdram,recomp_context* c) {
     c->r2=0; // Accepted helper result; producer retirement effects are outside this fixture.
 }
 void check_retirements(const Output& out,bool freeing) {
-    require(out.retire.size()==2+TOOIE_TROT_SELECTED,
+    require(out.retire.size()==2*TOOIE_LIFECYCLE_ROW_RETIRES+TOOIE_TROT_SELECTED,
         "exact CPU625/backpack621/selected Trot retirement calls");
-    for(unsigned i=0;i<2;++i) {
+    for(unsigned i=0;i<2*TOOIE_LIFECYCLE_ROW_RETIRES;++i) {
         const auto& e=out.retire[i];
         require(e.kind==(i==0?CpuRetire:BackpackRetire),"CPU625 retires before backpack621");
         require(e.self==owner && e.requested==0 && e.reason==(freeing?4u:3u),
@@ -165,7 +168,7 @@ void check_retirements(const Output& out,bool freeing) {
             "CPU625/backpack621 retirements precede original calls and lifecycle tombstone");
     }
 #if TOOIE_TROT_SELECTED
-    const auto& trot=out.retire[2];
+    const auto& trot=out.retire[2*TOOIE_LIFECYCLE_ROW_RETIRES];
     require(trot.kind==TrotRetire && trot.self==owner,
         "Trot retires after CPU625/backpack621 with the same self");
     // Trot retirement is unary; unused a1/a2 are not part of its ABI contract.

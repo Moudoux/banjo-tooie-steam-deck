@@ -173,7 +173,9 @@ if(TOOIE_BASELINE_RT64_GENERIC_FIXES)
         "${_baseline_rt64}/src/render" "${_baseline_rt64}/src/common" "${_baseline_rt64}/src/gbi")
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(_baseline_generic_tool "${CMAKE_SOURCE_DIR}/tools/prepare_rt64_matching.py")
-    foreach(_repair IN ITEMS owner_index_guard transform_upload_guard rotation_interpolation pop_matrix_group_projection projection_residual)
+    # pop_matrix_group_projection is required by the selected BK menu text (tooie-pop-projection-guard).
+    set(_baseline_generic_repairs owner_index_guard transform_upload_guard rotation_interpolation pop_matrix_group_projection projection_residual)
+    foreach(_repair IN LISTS _baseline_generic_repairs)
         set(_recipe "${CMAKE_SOURCE_DIR}/patches/rt64/${_repair}.delta.json")
         if(_repair STREQUAL "owner_index_guard")
             set(_relative "src/hle/rt64_game_frame.cpp")
@@ -694,6 +696,7 @@ if(TOOIE_BASELINE_VI_CONTROLLER_CYCLE)
             "${CMAKE_SOURCE_DIR}/patches/runtime/events-next-framebuffer.patch"
             "${CMAKE_SOURCE_DIR}/patches/runtime/events-dp-freeze.patch"
             "${CMAKE_SOURCE_DIR}/patches/runtime/events-sp-exception.patch"
+            "${CMAKE_SOURCE_DIR}/patches/runtime/events-startup-join.patch"
             "${CMAKE_SOURCE_DIR}/patches/runtime/threads-suspended-stop.patch"
             "${CMAKE_SOURCE_DIR}/patches/runtime/producer-quiescent-cleanup.patch"
             "${CMAKE_SOURCE_DIR}/patches/runtime/threadqueue-removal.patch"
@@ -702,6 +705,7 @@ if(TOOIE_BASELINE_VI_CONTROLLER_CYCLE)
             "${CMAKE_SOURCE_DIR}/patches/runtime/mesgqueue-required-admission.patch"
             "${CMAKE_SOURCE_DIR}/patches/runtime/mesgqueue-lifecycle-wait.patch"
             "${CMAKE_SOURCE_DIR}/patches/runtime/pi-save-persistence.patch"
+            "${CMAKE_SOURCE_DIR}/patches/runtime/pi-save-root.patch"
             "${CMAKE_SOURCE_DIR}/patches/runtime/recomp-terminal-fence.patch")
         foreach(_component IN ITEMS events threads threadqueue mesgqueue timer)
             set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RUNTIME_ROOT}/ultramodern/src/${_component}.cpp")
@@ -807,7 +811,7 @@ if(TOOIE_BASELINE_VI_CONTROLLER_CYCLE)
         if(TOOIE_BASELINE_PLAYER)
             set(_baseline_events_selected "${CMAKE_BINARY_DIR}/baseline/guest-clock/events.cpp")
             file(SHA256 "${_baseline_events_selected}" _baseline_guest_events_sha)
-            if(NOT _baseline_guest_events_sha STREQUAL "720195ce6c8d2a77dc6c6b256e4ec10f0f6d744337d3dfe8fbb1221ce100298c")
+            if(NOT _baseline_guest_events_sha STREQUAL "b706c8ba3c63f89879e6d9839fe5b833da2b09b7987a42d0d85ff26ba63a7059")
                 message(FATAL_ERROR "F6 guest-clock events child differs")
             endif()
         endif()
@@ -835,8 +839,8 @@ if(TOOIE_BASELINE_VI_CONTROLLER_CYCLE)
         set(_baseline_recomp_child "${CMAKE_BINARY_DIR}/baseline/lifecycle/recomp.cpp")
         set(_recomp_inputs "${_baseline_recomp_original}" "${_baseline_recomp_patch}" "${_baseline_recomp_child}")
         set(_recomp_hashes af9c6f983fb1620ff5b971836d7792ef0b83a47e77010ab89ddf2fa1fb87e143
-            eb157ab9876972d73b610edc5280cfd6475930591d119b3eb3877429cd12aae2
-            53f3f6480924483fcc3e19a7f90632abf2e6b3997bb6b85c6614ad66501bcc89)
+            969f01d17e35cbf9be5eafb98bc5414c5e75e09431c96cbfbc186fea90278304
+            7edb9c7969f6d9c7ced86889675c565aed813dd450e18b456e873c8ed2e6a2e3)
     endif()
     foreach(_input _expected IN ZIP_LISTS _recomp_inputs _recomp_hashes)
         file(SHA256 "${_input}" _actual)
@@ -865,7 +869,7 @@ if(TOOIE_BASELINE_VI_CONTROLLER_CYCLE)
             "${CMAKE_SOURCE_DIR}/src/runtime_save_root.cpp" "${CMAKE_SOURCE_DIR}/src/save_persistence.hpp")
         set(_save_hashes
             30189d04fe830f26ee69ec0f3aae8a4e37ffedc74cfee3294d5ac135038f90ca
-            e44d154c455cbd1d4d9a1cf61dc9d4c2ca74274b1515f6c0f23e735ce7a868ba
+            80e1960727eda5d26a6fcef6795190c22f51791184b2fe252e9afcaf7fab0a5e
             127b63dc087849530aa4c84c1979898d5e5cf681a0190f615a0ce8c22d2da20c
             5c17d907ed48a9c51c3921e1100626cea5fad0c8912ecc8cdb7a7ca4444553b3)
         foreach(_input _expected IN ZIP_LISTS _save_inputs _save_hashes)
@@ -1026,6 +1030,50 @@ endif()
         add_test(NAME baseline_sp_task_parent_negative COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_SOURCE_DIR}/tests/prepare_sp_task_fixture.py" --check-negative "$<TARGET_FILE:BaselineSPTaskParentTest>")
         set_tests_properties(baseline_sp_task_parent_negative PROPERTIES TIMEOUT 10)
+        if(TOOIE_BASELINE_PLAYER)
+            # Actual startup-thread routing and unstarted-VI join over the selected player children.
+            set(_st_fixture "${CMAKE_BINARY_DIR}/baseline/lifecycle/startup-terminal-fixture")
+            set(_st_tool "${CMAKE_SOURCE_DIR}/tests/prepare_startup_terminal_fixture.py")
+            set(_st_sources recomp-selected "${_baseline_recomp_child}" startup_game_thread_selected
+                recomp-parent "${_baseline_recomp_original}" startup_game_thread_parent
+                events-player "${_baseline_events_selected}" startup_join_events_selected
+                events-parent "${CMAKE_BINARY_DIR}/baseline/lifecycle/events.cpp" startup_join_events_parent)
+            while(_st_sources)
+                list(POP_FRONT _st_sources _st_mode _st_source _st_name)
+                add_custom_command(OUTPUT "${_st_fixture}/${_st_name}.inc"
+                    BYPRODUCTS "${_st_fixture}/${_st_name}.json"
+                    COMMAND "${Python3_EXECUTABLE}" "${_st_tool}" "${_st_mode}" "${_st_source}" "${_st_fixture}/${_st_name}.inc"
+                    DEPENDS "${_st_source}" "${_st_tool}" "${CMAKE_SOURCE_DIR}/tools/prepare_runtime_baseline_selected.py" VERBATIM)
+            endwhile()
+            add_executable(BaselineStartupTerminalTest EXCLUDE_FROM_ALL tests/baseline_startup_terminal_test.cpp
+                "${_st_fixture}/startup_game_thread_selected.inc" "${_st_fixture}/startup_join_events_selected.inc")
+            add_executable(BaselineStartupRecompParentTest EXCLUDE_FROM_ALL tests/baseline_startup_terminal_test.cpp
+                "${_st_fixture}/startup_game_thread_parent.inc" "${_st_fixture}/startup_join_events_selected.inc")
+            target_compile_definitions(BaselineStartupRecompParentTest PRIVATE STARTUP_RECOMP_PARENT=1)
+            add_executable(BaselineStartupEventsParentTest EXCLUDE_FROM_ALL tests/baseline_startup_terminal_test.cpp
+                "${_st_fixture}/startup_game_thread_selected.inc" "${_st_fixture}/startup_join_events_parent.inc")
+            target_compile_definitions(BaselineStartupEventsParentTest PRIVATE STARTUP_EVENTS_PARENT=1)
+            foreach(_target IN ITEMS BaselineStartupTerminalTest BaselineStartupRecompParentTest BaselineStartupEventsParentTest)
+                target_include_directories(${_target} PRIVATE "${_st_fixture}")
+                target_compile_features(${_target} PRIVATE cxx_std_20)
+                target_link_libraries(${_target} PRIVATE Threads::Threads)
+            endforeach()
+            foreach(_mode IN ITEMS recomp-normal recomp-renderer-throw recomp-boot-throw recomp-terminated
+                    recomp-mod-error-quit-race recomp-quit-before-start events-unstarted-vi events-started-vi)
+                add_test(NAME baseline_startup_terminal_${_mode} COMMAND BaselineStartupTerminalTest "${_mode}")
+                set_tests_properties(baseline_startup_terminal_${_mode} PROPERTIES TIMEOUT 10)
+            endforeach()
+            foreach(_kind IN ITEMS recomp events)
+                if(_kind STREQUAL "recomp")
+                    set(_st_parent BaselineStartupRecompParentTest)
+                else()
+                    set(_st_parent BaselineStartupEventsParentTest)
+                endif()
+                add_test(NAME baseline_startup_terminal_${_kind}_parent_negative COMMAND "${Python3_EXECUTABLE}" "${_st_tool}"
+                    --check-negative ${_kind} "$<TARGET_FILE:${_st_parent}>")
+                set_tests_properties(baseline_startup_terminal_${_kind}_parent_negative PROPERTIES TIMEOUT 10)
+            endforeach()
+        endif()
     endif()
     add_executable(BaselineThreadQueueRegression EXCLUDE_FROM_ALL tests/threadqueue_regression.cpp)
     target_link_libraries(BaselineThreadQueueRegression PRIVATE ultramodern)
@@ -1087,8 +1135,30 @@ if(TOOIE_BASELINE_BOOT_PATCH_DIR)
     endif()
     file(STRINGS "${TOOIE_BASELINE_BOOT_PATCH_DIR}/boot.c" _baseline_honey_body REGEX "^RECOMP_FUNC void func_80800380_chhoneycarrier\\(")
     list(LENGTH _baseline_honey_body _baseline_honey_count)
-    if(((TOOIE_BASELINE_HONEY_PATCH OR TOOIE_BASELINE_RENDER_BRIDGE) AND NOT _baseline_honey_count EQUAL 1) OR
-        (NOT TOOIE_BASELINE_HONEY_PATCH AND NOT TOOIE_BASELINE_RENDER_BRIDGE AND NOT _baseline_honey_count EQUAL 0))
+    set(_baseline_honey_expected 0)
+    if(TOOIE_BASELINE_HONEY_PATCH OR TOOIE_BASELINE_RENDER_BRIDGE)
+        set(_baseline_honey_expected 1)
+    endif()
+    set(_baseline_honey_raw_tu "")
+    if(TOOIE_BASELINE_CAMERA_IDENTITY)
+        # L08b: the BK camera image builds no Honey replacement; its raw corpus keeps the original exactly once.
+        file(READ "${TOOIE_BASELINE_BOOT_PATCH_DIR}/receipt.json" _baseline_honey_selection)
+        string(JSON _baseline_honey_bk_type ERROR_VARIABLE _baseline_honey_bk_error TYPE "${_baseline_honey_selection}" bk_pipeline)
+        if(NOT _baseline_honey_bk_error AND _baseline_honey_bk_type STREQUAL "OBJECT")
+            set(_baseline_honey_expected 0)
+            foreach(_baseline_raw_source IN LISTS _baseline_guest)
+                file(STRINGS "${_baseline_raw_source}" _baseline_honey_raw_hit REGEX "^RECOMP_FUNC void func_80800380_chhoneycarrier\\(")
+                if(_baseline_honey_raw_hit)
+                    list(APPEND _baseline_honey_raw_tu "${_baseline_raw_source}")
+                endif()
+            endforeach()
+            list(LENGTH _baseline_honey_raw_tu _baseline_honey_raw_count)
+            if(NOT _baseline_honey_raw_count EQUAL 1)
+                message(FATAL_ERROR "L08b: the BK raw corpus must define the original Honey body exactly once")
+            endif()
+        endif()
+    endif()
+    if(NOT _baseline_honey_count EQUAL _baseline_honey_expected)
         message(FATAL_ERROR "Prepared Honey body must match the explicit guest selection")
     endif()
     if(TOOIE_BASELINE_HONEY_PATCH)
@@ -1198,23 +1268,37 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
     if(TOOIE_BASELINE_CAMERA_IDENTITY)
         string(JSON _baseline_actor_enabled GET "${_baseline_selected_receipt}" actor_palette_enabled)
         string(JSON _baseline_helper_count LENGTH "${_baseline_selected_receipt}" helper_definitions)
-        string(JSON _baseline_demo_type ERROR_VARIABLE _baseline_demo_error TYPE "${_baseline_selected_receipt}" demo_timing)
-        set(_baseline_provider_expected 50)
-        set(_baseline_helper_expected 12)
-        if(_baseline_demo_type STREQUAL "OBJECT")
-            set(_baseline_provider_expected 53)
-            set(_baseline_helper_expected 15)
+        # BEGIN tooie-registry-counts
+        # L06a: the generated registry table (prepare_camera_bridge.write_registry_header, compiled by
+        # camera_registry.hpp) owns this selection's counts: one row per provider, section 0 for a
+        # replacement body and its helper section otherwise. Alias and shared-section rows never match.
+        file(STRINGS "${_baseline_bridge_dir}/camera_registry_data.hpp" _baseline_registry_rows
+            REGEX "^    \\{baseline_boot_patch_registry::[A-Za-z_][A-Za-z0-9_]*,[0-9]+\\},$")
+        file(STRINGS "${_baseline_bridge_dir}/camera_registry_data.hpp" _baseline_registry_helper_rows
+            REGEX "^    \\{baseline_boot_patch_registry::[A-Za-z_][A-Za-z0-9_]*,[1-9][0-9]*\\},$")
+        list(LENGTH _baseline_registry_rows _baseline_provider_expected)
+        list(LENGTH _baseline_registry_helper_rows _baseline_helper_expected)
+        if(NOT _baseline_provider_expected)
+            message(FATAL_ERROR "Generated registry table camera_registry_data.hpp lists no providers")
         endif()
+        # END tooie-registry-counts
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_baseline_bridge_dir}/camera_registry_data.hpp")
+        string(JSON _baseline_demo_type ERROR_VARIABLE _baseline_demo_error TYPE "${_baseline_selected_receipt}" demo_timing)
         string(JSON _baseline_shadow_type ERROR_VARIABLE _baseline_shadow_error TYPE "${_baseline_selected_receipt}" shadow_projection)
         if(_baseline_shadow_type STREQUAL "OBJECT")
             if(NOT _baseline_demo_type STREQUAL "OBJECT")
                 message(FATAL_ERROR "Shadow composition requires accepted demo")
             endif()
-            set(_baseline_provider_expected 61)
-            set(_baseline_helper_expected 23)
         endif()
         string(JSON _baseline_pre_type ERROR_VARIABLE _baseline_pre_error TYPE "${_baseline_selected_receipt}" pre_background)
         string(JSON _baseline_cpu_type ERROR_VARIABLE _baseline_cpu_error TYPE "${_baseline_selected_receipt}" cpu625)
+        # L06c-4: the CPU625 selection stays ON under BK, whose image links no CPU625 section or state (cpu625 null).
+        string(JSON _baseline_cpu_selected ERROR_VARIABLE _baseline_cpu_selected_error GET "${_baseline_selected_receipt}" cpu625_selected)
+        string(JSON _baseline_cpu_present ERROR_VARIABLE _baseline_cpu_present_error GET "${_baseline_selected_receipt}" cpu625_section_present)
+        string(JSON _baseline_cpu_bk_type ERROR_VARIABLE _baseline_cpu_bk_error TYPE "${_baseline_selected_receipt}" bk_pipeline)
+        if(_baseline_cpu_selected_error OR _baseline_cpu_present_error OR _baseline_cpu_bk_error)
+            message(FATAL_ERROR "CPU625 receipt lacks its selection/section-presence contract")
+        endif()
         string(JSON _baseline_host_type ERROR_VARIABLE _baseline_host_error TYPE "${_baseline_selected_receipt}" minimum_host)
         string(JSON _baseline_music_type ERROR_VARIABLE _baseline_music_error TYPE "${_baseline_selected_receipt}" music_gain)
         if(TOOIE_BASELINE_HOST)
@@ -1242,29 +1326,52 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                 "${CMAKE_SOURCE_DIR}/tools/baseline/guest/minimum-host/minimum_host_imports.h"
                 "${CMAKE_SOURCE_DIR}/deps/banjo-tooie/build/us/banjotooie_decompressed.elf"
                 "${_baseline_bridge_dir}/minimum_host_selection_layout.h")
-            math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+7")
-            math(EXPR _baseline_helper_expected "${_baseline_helper_expected}+4")
         elseif(_baseline_host_type STREQUAL "OBJECT" OR _baseline_music_type STREQUAL "OBJECT")
             message(FATAL_ERROR "HOST guest image is ON while native selection is OFF")
         endif()
         string(JSON _baseline_npc_type ERROR_VARIABLE _baseline_npc_error TYPE "${_baseline_selected_receipt}" npc665)
+        # L06c-2: the receipt names the NPC665 selection and its section presence separately. The selection
+        # stays ON under BK, whose image links no NPC665 section or sidecar (npc665 is null there).
+        string(JSON _baseline_npc_selected ERROR_VARIABLE _baseline_npc_selected_error GET "${_baseline_selected_receipt}" npc665_selected)
+        string(JSON _baseline_npc_present ERROR_VARIABLE _baseline_npc_present_error GET "${_baseline_selected_receipt}" npc665_section_present)
+        string(JSON _baseline_npc_bk_type ERROR_VARIABLE _baseline_npc_bk_error TYPE "${_baseline_selected_receipt}" bk_pipeline)
+        if(_baseline_npc_selected_error OR _baseline_npc_present_error OR _baseline_npc_bk_error)
+            message(FATAL_ERROR "NPC665 receipt lacks its selection/section-presence contract")
+        endif()
         if(TOOIE_BASELINE_NPC665)
-            if(NOT _baseline_npc_type STREQUAL "OBJECT" OR NOT _baseline_actor_enabled OR NOT _baseline_pre_type STREQUAL "OBJECT")
+            if(NOT _baseline_npc_selected OR NOT _baseline_actor_enabled OR NOT _baseline_pre_type STREQUAL "OBJECT")
                 message(FATAL_ERROR "NPC665 requires its exact guest object and actor/PRE carrier")
             endif()
-            math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+8")
-            math(EXPR _baseline_helper_expected "${_baseline_helper_expected}+8")
-        elseif(_baseline_npc_type STREQUAL "OBJECT")
+            if(_baseline_npc_bk_type STREQUAL "OBJECT")
+                if(_baseline_npc_present OR NOT _baseline_npc_type STREQUAL "NULL")
+                    message(FATAL_ERROR "L06c-2: the BK image links no NPC665 section")
+                endif()
+            elseif(NOT _baseline_npc_present OR NOT _baseline_npc_type STREQUAL "OBJECT")
+                message(FATAL_ERROR "NPC665 requires its exact guest object and actor/PRE carrier")
+            endif()
+        elseif(_baseline_npc_selected OR _baseline_npc_present OR _baseline_npc_type STREQUAL "OBJECT")
             message(FATAL_ERROR "NPC665 guest image is ON while native selection is OFF")
         endif()
         string(JSON _baseline_b621_type ERROR_VARIABLE _baseline_b621_error TYPE "${_baseline_selected_receipt}" backpack621)
+        # L06c-3: like NPC665, the backpack621 selection stays ON under BK (receipt bk_pipeline OBJECT, read above),
+        # whose image links no 621 section or state (backpack621 is null there).
+        string(JSON _baseline_b621_selected ERROR_VARIABLE _baseline_b621_selected_error GET "${_baseline_selected_receipt}" backpack621_selected)
+        string(JSON _baseline_b621_present ERROR_VARIABLE _baseline_b621_present_error GET "${_baseline_selected_receipt}" backpack621_section_present)
+        if(_baseline_b621_selected_error OR _baseline_b621_present_error)
+            message(FATAL_ERROR "Backpack621 receipt lacks its selection/section-presence contract")
+        endif()
         if(TOOIE_BASELINE_BACKPACK621)
-            if(NOT _baseline_b621_type STREQUAL "OBJECT" OR NOT _baseline_cpu_type STREQUAL "OBJECT" OR
+            if(NOT _baseline_b621_selected OR NOT _baseline_cpu_selected OR
                NOT _baseline_actor_enabled OR NOT _baseline_pre_type STREQUAL "OBJECT")
                 message(FATAL_ERROR "Backpack621 requires exact612-state/eight-helper guest and CPU/actor/PRE carrier")
             endif()
-            math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+9")
-            math(EXPR _baseline_helper_expected "${_baseline_helper_expected}+8")
+            if(_baseline_npc_bk_type STREQUAL "OBJECT")
+                if(_baseline_b621_present OR NOT _baseline_b621_type STREQUAL "NULL")
+                    message(FATAL_ERROR "L06c-3: the BK image links no backpack621 section")
+                endif()
+            elseif(NOT _baseline_b621_present OR NOT _baseline_b621_type STREQUAL "OBJECT")
+                message(FATAL_ERROR "Backpack621 requires exact612-state/eight-helper guest and CPU/actor/PRE carrier")
+            endif()
             string(JSON _baseline_rate_state GET "${_baseline_selected_receipt}" graphics_rate state_bytes)
             if(NOT _baseline_rate_state EQUAL 48)
                 message(FATAL_ERROR "Selected player requires exact two public-rate tails")
@@ -1277,16 +1384,21 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                 "${CMAKE_SOURCE_DIR}/tools/baseline/prepare_backpack621.py"
                 "${CMAKE_SOURCE_DIR}/tools/baseline/guest/backpack621-candidate/backpack621_owner.c"
                 "${CMAKE_SOURCE_DIR}/tools/baseline/guest/backpack621-candidate/backpack621_owner.h")
-        elseif(_baseline_b621_type STREQUAL "OBJECT")
+        elseif(_baseline_b621_selected OR _baseline_b621_present OR _baseline_b621_type STREQUAL "OBJECT")
             message(FATAL_ERROR "Backpack621 guest ON while native selection OFF")
         endif()
         if(TOOIE_BASELINE_CPU625)
-            if(NOT _baseline_cpu_type STREQUAL "OBJECT" OR NOT _baseline_actor_enabled OR NOT _baseline_pre_type STREQUAL "OBJECT")
+            if(NOT _baseline_cpu_selected OR NOT _baseline_actor_enabled OR NOT _baseline_pre_type STREQUAL "OBJECT")
                 message(FATAL_ERROR "CPU625 selection requires its exact guest object and accepted actor/PRE carrier")
             endif()
-            math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+4")
-            math(EXPR _baseline_helper_expected "${_baseline_helper_expected}+4")
-        elseif(_baseline_cpu_type STREQUAL "OBJECT")
+            if(_baseline_cpu_bk_type STREQUAL "OBJECT")
+                if(_baseline_cpu_present OR NOT _baseline_cpu_type STREQUAL "NULL")
+                    message(FATAL_ERROR "L06c-4: the BK image links no CPU625 section")
+                endif()
+            elseif(NOT _baseline_cpu_present OR NOT _baseline_cpu_type STREQUAL "OBJECT")
+                message(FATAL_ERROR "CPU625 selection requires its exact guest object and accepted actor/PRE carrier")
+            endif()
+        elseif(_baseline_cpu_selected OR _baseline_cpu_present OR _baseline_cpu_type STREQUAL "OBJECT")
             message(FATAL_ERROR "CPU625 guest image is ON while native selection is OFF")
         endif()
         if(_baseline_pre_type STREQUAL "OBJECT")
@@ -1327,7 +1439,6 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                 message(FATAL_ERROR "Quiet Trot fields missing/partial/malformed; ON requires HOST and621 coefficient composition")
             endif()
             if(_baseline_quiet_trot)
-                math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+1")
                 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
                     "${CMAKE_SOURCE_DIR}/tools/baseline/prepare_quiet_talon_trot.py"
                     "${CMAKE_SOURCE_DIR}/tools/baseline/guest/minimum-host/quiet_talon_trot.c")
@@ -1349,9 +1460,6 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                 message(FATAL_ERROR "Trot fields missing/partial/malformed; selected HOST/621 coefficient image requires explicit ON")
             endif()
             if(_baseline_trot_toggle)
-                # This gate counts ALL translated functions: 4 providers + 2 helpers.
-                math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+4+2")
-                math(EXPR _baseline_helper_expected "${_baseline_helper_expected}+2")
                 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
                     "${CMAKE_SOURCE_DIR}/tools/baseline/prepare_talon_trot_toggle.py"
                     "${CMAKE_SOURCE_DIR}/tools/baseline/guest/minimum-host/talon_trot_toggle.c"
@@ -1373,8 +1481,6 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                 message(FATAL_ERROR "FPS raw/image selection fields partial/malformed")
             endif()
             if(_baseline_first_person_aim)
-                math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+5+1")
-                math(EXPR _baseline_helper_expected "${_baseline_helper_expected}+1")
                 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
                     "${CMAKE_SOURCE_DIR}/tools/baseline/prepare_modern_fps.py"
                     "${CMAKE_SOURCE_DIR}/tools/baseline/modern_fps_hooks.py"
@@ -1396,7 +1502,6 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                 message(FATAL_ERROR "Flap Flip selection missing or malformed")
             endif()
             if(_baseline_flap_flip)
-                math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+1")
                 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
                     "${CMAKE_SOURCE_DIR}/tools/baseline/prepare_flap_flip.py"
                     "${CMAKE_SOURCE_DIR}/tools/baseline/guest/minimum-host/flap_flip_landing.c"
@@ -1409,7 +1514,7 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                 set(_baseline_bk_receipt ON)
             endif()
             # P04b ckpack copy storage: derived from CPU625 + Flap Flip (prepare_camera_bridge.prepare).
-            # The image object and raw boolean must agree with that derivation; 4 providers, 4 helpers.
+            # The image object and raw boolean must agree with that derivation.
             string(JSON _baseline_ckcopy_type ERROR_VARIABLE _baseline_ckcopy_error TYPE "${_baseline_selected_receipt}" ckpack_copy_storage)
             string(JSON _baseline_raw_ckcopy_type ERROR_VARIABLE _baseline_raw_ckcopy_error TYPE "${_baseline_raw_binding}" ckpack_copy_storage)
             if(TOOIE_BASELINE_CPU625 AND _baseline_flap_flip AND NOT _baseline_bk_receipt)
@@ -1421,9 +1526,6 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                 if(NOT _baseline_raw_ckcopy)
                     message(FATAL_ERROR "ckpack copy storage raw/image/native selection mismatch")
                 endif()
-                # 4 ckcopy helpers + the 2 N3 shadow-attachment helpers in the CPU625 section.
-                math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+6")
-                math(EXPR _baseline_helper_expected "${_baseline_helper_expected}+6")
                 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
                     "${CMAKE_SOURCE_DIR}/tools/baseline/prepare_ckcopy.py"
                     "${CMAKE_SOURCE_DIR}/tools/baseline/ckcopy_hooks.py"
@@ -1444,9 +1546,10 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                     endif()
                 endif()
             endif()
-            # PC[8] secondary route (implementation-s2): derived from CPU625 + Flap Flip like ckpack.
+            # PC[8] secondary route (implementation-s2): derived from CPU625 + Flap Flip with BK off, like ckpack
+            # (L06b-5: BK labels the split player itself and selects no secondary owner).
             # Image and raw selection booleans must agree with that derivation; admission is its own
-            # image boolean (S-A false). 5 providers and 5 helpers in the player helper section.
+            # image boolean (S-A false).
             string(JSON _baseline_secondary_type ERROR_VARIABLE _baseline_secondary_error TYPE "${_baseline_selected_receipt}" player_secondary)
             string(JSON _baseline_raw_secondary_type ERROR_VARIABLE _baseline_raw_secondary_error TYPE "${_baseline_raw_binding}" player_secondary)
             string(JSON _baseline_secondary_admit_type ERROR_VARIABLE _baseline_secondary_admit_error TYPE "${_baseline_selected_receipt}" player_secondary_admit)
@@ -1458,12 +1561,10 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
             string(JSON _baseline_secondary GET "${_baseline_selected_receipt}" player_secondary)
             string(JSON _baseline_raw_secondary GET "${_baseline_raw_binding}" player_secondary)
             string(JSON _baseline_secondary_admit GET "${_baseline_selected_receipt}" player_secondary_admit)
-            if(TOOIE_BASELINE_CPU625 AND _baseline_flap_flip)
+            if(TOOIE_BASELINE_CPU625 AND _baseline_flap_flip AND NOT _baseline_bk_receipt)
                 if(NOT _baseline_secondary OR NOT _baseline_raw_secondary)
                     message(FATAL_ERROR "secondary route raw/image/native selection mismatch")
                 endif()
-                math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+5")
-                math(EXPR _baseline_helper_expected "${_baseline_helper_expected}+5")
                 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
                     "${CMAKE_SOURCE_DIR}/tools/baseline/secondary_hooks.py"
                     "${CMAKE_SOURCE_DIR}/tools/baseline/secondary_thunks.hpp"
@@ -1471,10 +1572,10 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                     "${CMAKE_SOURCE_DIR}/tools/baseline/guest/silo-candidate/player_secondary.h"
                     "${_baseline_bridge_dir}/secondary_selection_layout.h")
             elseif(_baseline_secondary OR _baseline_raw_secondary OR _baseline_secondary_admit)
-                message(FATAL_ERROR "secondary route ON without the CPU625+Flap Flip selection")
+                message(FATAL_ERROR "secondary route ON outside the BK-off CPU625+Flap Flip selection")
             endif()
             # BK pipeline packet1: derived from CPU625 + Flap Flip like the secondary route.
-            # Image object and raw boolean must agree; 9 providers and 9 helpers in section2.
+            # Image object and raw boolean must agree; its helpers join section2.
             string(JSON _baseline_bk_type ERROR_VARIABLE _baseline_bk_error TYPE "${_baseline_selected_receipt}" bk_pipeline)
             string(JSON _baseline_raw_bk_type ERROR_VARIABLE _baseline_raw_bk_error TYPE "${_baseline_raw_binding}" bk_pipeline)
             set(_baseline_bk_pipeline OFF)
@@ -1488,8 +1589,14 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                     message(FATAL_ERROR "BK pipeline raw/image/native selection mismatch")
                 endif()
                 set(_baseline_bk_pipeline ON)
-                math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+29")
-                math(EXPR _baseline_helper_expected "${_baseline_helper_expected}+29")
+                # BEGIN tooie-pop-projection-guard
+                # BK menu text (tools/baseline/menu_text.hpp close()) pops its projection group with selector word1 bit8.
+                # Pinned RT64 reads that selector from word0 bit8, clear for opcode 0x0D, and would pop the MODELVIEW
+                # group stack instead; only the selected pop_matrix_group_projection repair decodes word1 bit8.
+                if(NOT TOOIE_BASELINE_RT64_GENERIC_FIXES OR NOT "pop_matrix_group_projection" IN_LIST _baseline_generic_repairs)
+                    message(FATAL_ERROR "BK menu text requires the selected pop_matrix_group_projection RT64 repair")
+                endif()
+                # END tooie-pop-projection-guard
                 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
                     "${CMAKE_SOURCE_DIR}/tools/baseline/bk_pipeline_hooks.py"
                     "${CMAKE_SOURCE_DIR}/tools/baseline/bk_pipeline_thunks.hpp"
@@ -1502,6 +1609,9 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                     "${CMAKE_SOURCE_DIR}/tools/baseline/guest/silo-candidate/bk_attach.inc"
                     "${CMAKE_SOURCE_DIR}/tools/baseline/bk_menu_hooks.py"
                     "${CMAKE_SOURCE_DIR}/tools/baseline/bk_menu_thunks.hpp"
+                    "${CMAKE_SOURCE_DIR}/tools/baseline/bk_menu_sprite_thunks.hpp"
+                    "${CMAKE_SOURCE_DIR}/tools/baseline/bk_menu_text_thunks.hpp"
+                    "${CMAKE_SOURCE_DIR}/tools/baseline/menu_text.hpp"
                     "${CMAKE_SOURCE_DIR}/tools/baseline/menu_scope.hpp"
                     "${CMAKE_SOURCE_DIR}/tools/baseline/bk_shadow_attach_hooks.py"
                     "${CMAKE_SOURCE_DIR}/tools/baseline/bk_shadow_attach_thunks.hpp"
@@ -1510,6 +1620,7 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                     "${CMAKE_SOURCE_DIR}/tools/baseline/guest/silo-candidate/bk_graph.inc"
                     "${CMAKE_SOURCE_DIR}/tools/baseline/guest/silo-candidate/bk_cut.inc"
                     "${CMAKE_SOURCE_DIR}/tools/baseline/guest/silo-candidate/bk_sort.inc"
+                    "${CMAKE_SOURCE_DIR}/tools/baseline/guest/silo-candidate/bk_text.inc"   # L14-VR03
                     "${CMAKE_SOURCE_DIR}/tools/baseline/guest/silo-candidate/bk_pipeline.c"
                     "${CMAKE_SOURCE_DIR}/tools/baseline/guest/silo-candidate/bk_pipeline.h"
                     "${_baseline_bridge_dir}/bk_pipeline_selection_layout.h")
@@ -1527,16 +1638,6 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
             endif()
             if(_baseline_shadow_coefficients STREQUAL "ON" AND NOT TOOIE_BASELINE_BACKPACK621)
                 message(FATAL_ERROR "Shadow coefficient guest image requires the 621 composition")
-            endif()
-            if(_baseline_shadow_coefficients STREQUAL "ON" AND NOT _baseline_bk_pipeline)
-                # tooie_shadow_mv_end: the coefficient route's silhouette MODELVIEW close helper.
-                math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+1")
-                math(EXPR _baseline_helper_expected "${_baseline_helper_expected}+1")
-            endif()
-            if(_baseline_bk_pipeline AND _baseline_shadow_type STREQUAL "OBJECT")
-                # BK shadow: tooie_shadow_source and tooie_shadow_prepare retire (six helpers remain).
-                math(EXPR _baseline_provider_expected "${_baseline_provider_expected}-2")
-                math(EXPR _baseline_helper_expected "${_baseline_helper_expected}-2")
             endif()
             if(TOOIE_BASELINE_BACKPACK621)
                 # Installed only after actual fullgraph/control/source/ELF acceptance.
@@ -1626,14 +1727,14 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                 if(TOOIE_BASELINE_CPU625 AND TOOIE_BASELINE_NPC665 AND TOOIE_BASELINE_BACKPACK621 AND
                    _baseline_shadow_coefficients STREQUAL "ON" AND _baseline_quiet_trot AND _baseline_trot_toggle AND
                    _baseline_first_person_aim AND _baseline_flap_flip)
-                    set(_baseline_expected_image "263e1d27d21ebd9d1604f7096cf6f97466b1b74041dbd745cce278980b21b3d8")
+                    set(_baseline_expected_image "6845c8ced20a737a46324e7d388cf9c73e07d6f32d8dda8a71467bb8661f5bc8")
                     # Root-measured: two patch-only N64Recomp runs over this image's retained
-                    # ELF/syms, after the eight table sorts, equal each other and these bytes.
+                    # ELF/syms (function tables as N64Recomp emits them), equal each other and these bytes.
                     # Re-pin together with the image above; never from a fresh receipt.
                     set(_baseline_expected_generated_hashes
-                        9c11485f136f2a0b62bdda8ce7732f7d17b3fe17825d81903332529509f540f0
-                        f17f4e168916681cce802092058ba35bdec693b17b3259ab2456249f407d3497
-                        313f6493f8d4115d7e7299388df7ace1565c1f098edafa3505eb7ea7d268a296)
+                        64f22100df22ad9408776b737118905d017a656df5c2659631f58ca2e5b22d6b
+                        d2395994de1e09c8c2ad650c4aef9824a34a76fa7604d55f586dca74b57b7742
+                        3877d5a7cb3a175375514b32aabf30e67248d5673ca40433e1a891d1500dae5b)
                 endif()
             endif()
             if(NOT _baseline_image_sha STREQUAL _baseline_expected_image)
@@ -1656,12 +1757,6 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                     endif()
                 endforeach()
             endif()
-            if(_baseline_actor_enabled)
-                math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+4")
-                math(EXPR _baseline_helper_expected "${_baseline_helper_expected}+3")
-            endif()
-            math(EXPR _baseline_provider_expected "${_baseline_provider_expected}+3")
-            math(EXPR _baseline_helper_expected "${_baseline_helper_expected}+3")
         endif()
         if(_baseline_shadow_type STREQUAL "OBJECT" AND _baseline_actor_enabled AND NOT _baseline_pre_type STREQUAL "OBJECT")
             message(FATAL_ERROR "Combined actor/shadow requires reviewed PRE condition")
@@ -1672,7 +1767,7 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
         endif()
         if(NOT _baseline_selected_state EQUAL 23036 OR NOT _baseline_selected_count EQUAL _baseline_provider_expected OR
            NOT _baseline_actual_body_count EQUAL _baseline_provider_expected OR NOT _baseline_helper_count EQUAL _baseline_helper_expected)
-            message(FATAL_ERROR "Combined camera/helper/player provider/helper/body counts or layout5 extent23036 differ from selected demo condition")
+            message(FATAL_ERROR "Camera provider/helper/body counts differ from the generated registry table, or layout5 extent23036 differs")
         endif()
     elseif(TOOIE_BASELINE_SILO_CANDIDATE)
         string(JSON _baseline_helper_count LENGTH "${_baseline_selected_receipt}" helper_definitions)
@@ -1741,15 +1836,18 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
     if(TOOIE_BASELINE_SILO_CANDIDATE AND _baseline_bk_pipeline)
         list(PREPEND _baseline_draw_fixture_functions tooie_bk_set_model_matrix_group tooie_bk_pop_model_matrix_group
             tooie_bk_frame_begin tooie_bk_root_begin tooie_bk_root_end tooie_bk_scope_end
-            tooie_bk_actor_draw_begin tooie_bk_de448_begin tooie_bk_de448_end tooie_bk_list_begin tooie_bk_list_end)
+            tooie_bk_actor_draw_begin tooie_bk_de448_begin tooie_bk_de448_end tooie_bk_list_begin tooie_bk_list_end tooie_bk_shadow_project)
     endif()
-    if(TOOIE_BASELINE_NPC665)
+    if(TOOIE_BASELINE_NPC665 AND NOT _baseline_bk_pipeline)
+        # L06c-2: the BK image builds no NPC665 END.
         list(APPEND _baseline_draw_fixture_functions tooie_npc665_end)
     endif()
-    if(TOOIE_BASELINE_CPU625)
+    if(TOOIE_BASELINE_CPU625 AND NOT _baseline_bk_pipeline)
+        # L06c-4: the BK image builds no CPU625 retire (its lifecycle bodies call none, L06b-6).
         list(APPEND _baseline_draw_fixture_functions tooie_cpu625_retire)
     endif()
-    if(TOOIE_BASELINE_BACKPACK621)
+    if(TOOIE_BASELINE_BACKPACK621 AND NOT _baseline_bk_pipeline)
+        # L06c-3: the BK image builds no 621 retire (its lifecycle bodies call none, L06b-6).
         list(APPEND _baseline_draw_fixture_functions tooie_backpack621_retire)
     endif()
     if(TOOIE_BASELINE_CAMERA_IDENTITY)
@@ -1782,6 +1880,14 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
     if(_baseline_bk_pipeline)
         # BK shadow: source/prepare/MODELVIEW-close helpers are not in the selected image.
         list(REMOVE_ITEM _baseline_draw_fixture_functions tooie_shadow_source tooie_shadow_prepare tooie_shadow_mv_end)
+        # L08b: nor is a Honey replacement; the L08a cases extract the raw original below.
+        list(REMOVE_ITEM _baseline_draw_fixture_functions func_80800380_chhoneycarrier)
+        # L06b-3: nor are NPC665 admit/bone/leaf; the skeletal groups that call them run BK-OFF only (B4).
+        list(REMOVE_ITEM _baseline_draw_fixture_functions tooie_npc665_admit tooie_npc665_bone_push
+            tooie_npc665_bone_pop tooie_npc665_leaf_begin tooie_npc665_leaf_end)
+        # L06b-7: nor is the actor CPU root; its title53 groups run BK-OFF only (B4).
+        # L06b-8: nor the feather helper; the BK feather cases drive the actual DD024 alone.
+        list(REMOVE_ITEM _baseline_draw_fixture_functions tooie_actor_cpu_root_begin tooie_actor_feather_leaf_id)
     endif()
     add_custom_command(OUTPUT "${_baseline_draw_fixture}" "${_baseline_original_owner_fixture}" "${_baseline_original_draw_fixture}"
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/extract_heap_realloc.py"
@@ -1815,12 +1921,28 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
     endif()
     add_executable(BaselineDrawBoundariesTest EXCLUDE_FROM_ALL tests/baseline_draw_boundaries_state_test.cpp
         "${_baseline_draw_fixture}" "${_baseline_original_owner_fixture}" "${_baseline_original_draw_fixture}")
-    if(TOOIE_BASELINE_NPC665)
+    if(TOOIE_BASELINE_NPC665 AND NOT _baseline_bk_pipeline)
+        # L06c-2: the checked-END double needs the extracted END, which exists BK-OFF only.
         target_compile_definitions(BaselineDrawBoundariesTest PRIVATE TOOIE_NPC665_FIXTURE=1)
     endif()
     if(_baseline_bk_pipeline)
         # BK shadow: the legacy shadow admission/MODELVIEW cases are BK-OFF only (BaselineBkShadowTest).
         target_compile_definitions(BaselineDrawBoundariesTest PRIVATE TOOIE_BK_SHADOW_FIXTURE=1)
+    endif()
+    if(_baseline_bk_pipeline AND _baseline_first_person_aim AND TOOIE_BASELINE_CAMERA_IDENTITY)
+        # L08b: the L08a BK Honey cases run the original body the selected raw keeps, extracted under the
+        # RAW_BINDING hash of its translation unit (that binding is checked against the image receipt above).
+        get_filename_component(_baseline_honey_raw_name "${_baseline_honey_raw_tu}" NAME)
+        file(READ "${_baseline_bridge_dir}/RAW_BINDING.json" _baseline_honey_raw_binding)
+        string(JSON _baseline_honey_raw_sha GET "${_baseline_honey_raw_binding}" outputs "${_baseline_honey_raw_name}")
+        set(_baseline_honey_raw_fixture "${_baseline_draw_fixture_dir}/honey_raw_fixture.inc")
+        add_custom_command(OUTPUT "${_baseline_honey_raw_fixture}"
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/extract_heap_realloc.py"
+                --source-sha256 ${_baseline_honey_raw_sha}
+                "${TOOIE_BASELINE_GENERATED_DIR}" "${_baseline_honey_raw_fixture}" func_80800380_chhoneycarrier
+            DEPENDS tests/extract_heap_realloc.py "${_baseline_honey_raw_tu}" VERBATIM)
+        target_sources(BaselineDrawBoundariesTest PRIVATE "${_baseline_honey_raw_fixture}")
+        target_compile_definitions(BaselineDrawBoundariesTest PRIVATE "TOOIE_HONEY_RAW_FIXTURE=\"honey_raw_fixture.inc\"")
     endif()
     target_include_directories(BaselineDrawBoundariesTest BEFORE PRIVATE "${_baseline_draw_fixture_dir}")
     target_include_directories(BaselineDrawBoundariesTest PRIVATE "${_baseline_bridge_dir}" "${RUNTIME_RECOMP_INCLUDE}")
@@ -1830,7 +1952,12 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
     if(_baseline_skeletal_fixture)
         # Every measured frame from the selected receipt this target already uses, plus nested chains.
         set(_skeletal_frames_all)
-        foreach(_skeletal_owner IN ITEMS npc665 bone pair silo player actor leaf lifecycle)
+        # L06c-2: BK links no NPC665 object, so its frame table and END frame exist BK-OFF only.
+        set(_skeletal_owners bone pair silo player actor leaf lifecycle)
+        if(NOT _baseline_bk_pipeline)
+            list(PREPEND _skeletal_owners npc665)
+        endif()
+        foreach(_skeletal_owner IN LISTS _skeletal_owners)
             if(_skeletal_owner STREQUAL "npc665")
                 string(JSON _skeletal_table GET "${_baseline_bridge_receipt}" objects npc665 frames)
             else()
@@ -1847,17 +1974,26 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                 list(APPEND _skeletal_frames_all ${_skeletal_bytes})
             endforeach()
         endforeach()
-        string(JSON _skeletal_admit GET "${_baseline_bridge_receipt}" objects npc665 frames tooie_npc665_admit)
-        string(JSON _skeletal_end GET "${_baseline_bridge_receipt}" objects npc665 frames tooie_npc665_end)
-        math(EXPR _skeletal_admit "${_baseline_draw_frame}+${_skeletal_admit}")
-        math(EXPR _skeletal_end "${_baseline_draw_frame}+${_skeletal_end}")
         math(EXPR _skeletal_nested "2*${_baseline_draw_frame}+${_baseline_owner_frame}+${_baseline_bk_draw_nested}")
-        list(APPEND _skeletal_frames_all ${_skeletal_admit} ${_skeletal_end} ${_skeletal_nested})
-        string(JSON _title53_begin GET "${_baseline_bridge_receipt}" shared_objects actor frames tooie_actor_cpu_root_begin)
+        list(APPEND _skeletal_frames_all ${_skeletal_nested})
+        if(NOT _baseline_bk_pipeline)
+            string(JSON _skeletal_end GET "${_baseline_bridge_receipt}" objects npc665 frames tooie_npc665_end)
+            math(EXPR _skeletal_end "${_baseline_draw_frame}+${_skeletal_end}")
+            list(APPEND _skeletal_frames_all ${_skeletal_end})
+            # L06b-3: BK builds no NPC665 admit; the groups that call it run BK-OFF only (B4).
+            string(JSON _skeletal_admit GET "${_baseline_bridge_receipt}" objects npc665 frames tooie_npc665_admit)
+            math(EXPR _skeletal_admit "${_baseline_draw_frame}+${_skeletal_admit}")
+            list(APPEND _skeletal_frames_all ${_skeletal_admit})
+        endif()
         string(JSON _title53_end GET "${_baseline_bridge_receipt}" shared_objects actor frames tooie_actor_palette_end)
-        math(EXPR _title53_begin "${_baseline_draw_frame}+${_title53_begin}")
         math(EXPR _title53_end "${_baseline_draw_frame}+${_title53_end}")
-        list(APPEND _skeletal_frames_all ${_title53_begin} ${_title53_end})
+        list(APPEND _skeletal_frames_all ${_title53_end})
+        if(NOT _baseline_bk_pipeline)
+            # L06b-7: BK builds no actor CPU root; its title53 groups run BK-OFF only (B4).
+            string(JSON _title53_begin GET "${_baseline_bridge_receipt}" shared_objects actor frames tooie_actor_cpu_root_begin)
+            math(EXPR _title53_begin "${_baseline_draw_frame}+${_title53_begin}")
+            list(APPEND _skeletal_frames_all ${_title53_begin})
+        endif()
         if(_baseline_bk_pipeline)
             # Actual DD024 -> list_begin -> group; list_end is the alternative close path.
             string(JSON _bk_dd024_frame GET "${_baseline_bridge_receipt}" objects camera_hook_leaves frames func_800DD024)
@@ -1915,6 +2051,7 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
         target_include_directories(BaselinePlayerLifecycleTest PRIVATE "${_baseline_bridge_dir}" "${RUNTIME_RECOMP_INCLUDE}")
         target_compile_definitions(BaselinePlayerLifecycleTest PRIVATE NOMINMAX "TOOIE_PLAYER_STATE_ADDRESS=${_player_state}"
             "TOOIE_TROT_SELECTED=$<BOOL:${_baseline_trot_toggle}>"
+            "TOOIE_LIFECYCLE_ROW_RETIRES=$<NOT:$<BOOL:${_baseline_bk_pipeline}>>"
             "TOOIE_PLAYER_INIT_FRAME_BYTES=${_init_frame}" "TOOIE_PLAYER_FREE_FRAME_BYTES=${_free_frame}")
         set_target_properties(BaselinePlayerLifecycleTest PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
         string(JSON _player_begin_frame GET "${_baseline_bridge_receipt}" player_frames tooie_player_begin)
@@ -1949,6 +2086,9 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
         string(JSON _actor_end_frame GET "${_baseline_bridge_receipt}" actor_frames tooie_actor_palette_end)
         target_compile_definitions(BaselineDrawBoundariesTest PRIVATE TOOIE_ACTOR_PALETTE_FIXTURE=1
             "TOOIE_ACTOR_PALETTE_BEGIN_FRAME_BYTES=${_actor_begin_frame}" "TOOIE_ACTOR_PALETTE_END_FRAME_BYTES=${_actor_end_frame}")
+        if(_baseline_bk_pipeline AND _baseline_skeletal_fixture AND TOOIE_BASELINE_BACKPACK621 AND _baseline_shadow_coefficients STREQUAL "ON")
+            target_compile_definitions(BaselineDrawBoundariesTest PRIVATE TOOIE_HAND862_FIXTURE=1)
+        endif()
         if(_baseline_first_person_aim)
             target_compile_definitions(BaselineDrawBoundariesTest PRIVATE TOOIE_REQUIRED_STOP_FIXTURE=1)
         endif()
@@ -1959,10 +2099,12 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
         set(_baseline_leaf_candidate_fixture "${_baseline_leaf_fixture_dir}/dd998_candidate_fixture.inc")
         set(_baseline_leaf_helpers_fixture "${_baseline_leaf_fixture_dir}/player_leaf_helpers_fixture.inc")
         set(_baseline_leaf_helpers tooie_player_bone_push tooie_player_bone_pop tooie_player_leaf_begin tooie_player_leaf_end)
-        if(TOOIE_BASELINE_NPC665)
+        if(TOOIE_BASELINE_NPC665 AND NOT _baseline_bk_pipeline)
+            # L06b-3: the BK image builds no NPC665 leaf labels.
             list(APPEND _baseline_leaf_helpers tooie_npc665_leaf_begin tooie_npc665_leaf_end)
         endif()
-        if(TOOIE_BASELINE_BACKPACK621)
+        if(TOOIE_BASELINE_BACKPACK621 AND NOT _baseline_bk_pipeline)
+            # L06b-2: the BK image builds no 621 leaf labels.
             list(APPEND _baseline_leaf_helpers tooie_backpack621_leaf_begin tooie_backpack621_leaf_end)
         endif()
         if(_baseline_bk_pipeline)
@@ -2005,7 +2147,11 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
             set(_baseline_bk_boundary_fixture "${_baseline_bk_boundary_dir}/bk_boundaries_fixture.inc")
             set(_baseline_bk_boundary_helpers tooie_bk_scope_end tooie_bk_menu_model_begin tooie_bk_menu_model_end tooie_bk_root_end tooie_bk_root_begin tooie_bk_de448_begin
                 tooie_bk_de448_end tooie_bk_actor_draw_begin tooie_bk_attachment_begin tooie_bk_attachment_end
-                tooie_bk_selector_begin tooie_bk_selector_child tooie_bk_selector_end)
+                tooie_bk_selector_begin tooie_bk_selector_child tooie_bk_selector_end
+                tooie_bk_set_model_matrix_group tooie_bk_pop_model_matrix_group tooie_bk_handler_begin tooie_bk_handler_end
+                # L14-VR03 guest option-box text owner (bk_text_cases.inc)
+                tooie_bk_text_scope tooie_bk_text_freed tooie_bk_text_pushed tooie_bk_text_enter
+                tooie_bk_text_record tooie_bk_text_mark tooie_bk_text_glyph tooie_bk_text_close)
             add_custom_command(OUTPUT "${_baseline_bk_boundary_fixture}"
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/extract_heap_realloc.py"
                     "${TOOIE_BASELINE_BOOT_PATCH_DIR}/boot.c" "${_baseline_bk_boundary_fixture}"
@@ -2019,8 +2165,11 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
             math(EXPR _bk_end_scope "${_bk_frame_tooie_bk_de448_end}+${_bk_frame_tooie_bk_scope_end}")
             math(EXPR _bk_attach_scope "${_bk_frame_tooie_bk_attachment_end}+${_bk_frame_tooie_bk_scope_end}")
             math(EXPR _bk_menu_scope "${_bk_frame_tooie_bk_menu_model_end}+${_bk_frame_tooie_bk_scope_end}")
+            # Sprite group: handler_begin -> set_model_matrix_group, handler_end -> pop_model_matrix_group.
+            math(EXPR _bk_sprite_open "${_bk_frame_tooie_bk_handler_begin}+${_bk_frame_tooie_bk_set_model_matrix_group}")
+            math(EXPR _bk_sprite_close "${_bk_frame_tooie_bk_handler_end}+${_bk_frame_tooie_bk_pop_model_matrix_group}")
             set(_baseline_bk_boundary_helper_frame 0)
-            foreach(_bk_bytes IN ITEMS ${_bk_end_root} ${_bk_end_scope} ${_bk_attach_scope} ${_bk_menu_scope})
+            foreach(_bk_bytes IN ITEMS ${_bk_end_root} ${_bk_end_scope} ${_bk_attach_scope} ${_bk_menu_scope} ${_bk_sprite_open} ${_bk_sprite_close})
                 if(_bk_bytes GREATER _baseline_bk_boundary_helper_frame)
                     set(_baseline_bk_boundary_helper_frame ${_bk_bytes})
                 endif()
@@ -2092,6 +2241,31 @@ if(TOOIE_BASELINE_RENDER_BRIDGE)
                 target_compile_definitions(BaselineBkShadowTest PRIVATE TOOIE_REQUIRED_STOP_FIXTURE=1)
             endif()
             set_target_properties(BaselineBkShadowTest PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
+            # L01/L02: the actual translated native-seam policy helpers and the sort epilogue's one-sided
+            # return, compared with the decisions the native thunks made before (synthetic RAM).
+            set(_baseline_bk_policy_dir "${CMAKE_BINARY_DIR}/baseline/fixtures/bk-policy")
+            set(_baseline_bk_policy_fixture "${_baseline_bk_policy_dir}/bk_policy_fixture.inc")
+            set(_baseline_bk_policy_helpers tooie_bk_sort_children tooie_bk_lod_distance tooie_bk_player_lod_distance
+                tooie_bk_player_lod_tier tooie_bk_bbox_visible tooie_bk_billboard_entry tooie_bk_sort_onesided
+                tooie_bk_branch_submitted tooie_bk_transition_role_begin tooie_bk_transition_role_end)
+            add_custom_command(OUTPUT "${_baseline_bk_policy_fixture}"
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/extract_heap_realloc.py"
+                    "${TOOIE_BASELINE_BOOT_PATCH_DIR}/boot.c" "${_baseline_bk_policy_fixture}" ${_baseline_bk_policy_helpers}
+                DEPENDS tests/extract_heap_realloc.py "${TOOIE_BASELINE_BOOT_PATCH_DIR}/boot.c" VERBATIM)
+            set(_bk_policy_frame 0)
+            foreach(_bk_helper IN LISTS _baseline_bk_policy_helpers)
+                string(JSON _bkp_frame GET "${_baseline_bridge_receipt}" shared_objects bk frames ${_bk_helper})
+                if(_bkp_frame GREATER _bk_policy_frame)
+                    set(_bk_policy_frame ${_bkp_frame})
+                endif()
+            endforeach()
+            add_executable(BaselineBkPolicyTest EXCLUDE_FROM_ALL tests/baseline_bk_policy_test.cpp
+                "${_baseline_bk_policy_fixture}")
+            target_include_directories(BaselineBkPolicyTest BEFORE PRIVATE "${_baseline_bk_policy_dir}")
+            target_include_directories(BaselineBkPolicyTest PRIVATE "${_baseline_bridge_dir}" "${RUNTIME_RECOMP_INCLUDE}")
+            target_compile_definitions(BaselineBkPolicyTest PRIVATE NOMINMAX
+                "TOOIE_BK_POLICY_FIXTURE_FRAME_BYTES=${_bk_policy_frame}")
+            set_target_properties(BaselineBkPolicyTest PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
         endif()
     endif()
     if(TOOIE_BASELINE_SILO_CANDIDATE AND _baseline_secondary)
@@ -2380,6 +2554,19 @@ if(TOOIE_BASELINE_PLAYER)
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/baseline/issue-evidence-test")
     add_test(NAME baseline_issue_evidence COMMAND baseline_issue_evidence_test "${CMAKE_BINARY_DIR}/baseline/issue-evidence-test")
     set_tests_properties(baseline_issue_evidence PROPERTIES TIMEOUT 30)
+    add_executable(baseline_texture_pack_notice_test EXCLUDE_FROM_ALL tests/baseline_texture_pack_notice_test.cpp)
+    target_compile_options(baseline_texture_pack_notice_test PRIVATE -UNDEBUG)
+    set_target_properties(baseline_texture_pack_notice_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
+    add_test(NAME baseline_texture_pack_notice COMMAND baseline_texture_pack_notice_test)
+    # Header-only use of Runtime's public config types: the player's own librecomp include set, nothing linked.
+    get_target_property(_baseline_librecomp_includes librecomp INCLUDE_DIRECTORIES)
+    add_executable(baseline_texture_pack_option_test EXCLUDE_FROM_ALL tests/baseline_texture_pack_option_test.cpp)
+    target_compile_definitions(baseline_texture_pack_option_test PRIVATE NOMINMAX)
+    target_compile_options(baseline_texture_pack_option_test PRIVATE -UNDEBUG)
+    target_include_directories(baseline_texture_pack_option_test PRIVATE ${_baseline_librecomp_includes}
+        "${RUNTIME_RECOMP_INCLUDE}")
+    set_target_properties(baseline_texture_pack_option_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_baseline_executable_dir}")
+    add_test(NAME baseline_texture_pack_option COMMAND baseline_texture_pack_option_test)
     add_executable(baseline_issue_evidence_guest_test EXCLUDE_FROM_ALL tests/baseline_issue_evidence_guest_test.cpp)
     target_compile_definitions(baseline_issue_evidence_guest_test PRIVATE NOMINMAX)
     target_include_directories(baseline_issue_evidence_guest_test PRIVATE tools/baseline
@@ -2459,6 +2646,9 @@ if(TOOIE_BASELINE_RT64_GENERIC_FIXES)
     add_executable(baseline_menu_scope_test tests/baseline_menu_scope_test.cpp)
     target_compile_options(baseline_menu_scope_test PRIVATE -UNDEBUG)
     add_test(NAME baseline_menu_scope COMMAND baseline_menu_scope_test)
+    add_executable(baseline_menu_text_test tests/baseline_menu_text_test.cpp)
+    target_compile_options(baseline_menu_text_test PRIVATE -UNDEBUG)
+    add_test(NAME baseline_menu_text COMMAND baseline_menu_text_test)
     add_executable(baseline_transition_scope_test tests/baseline_transition_scope_test.cpp)
     target_compile_options(baseline_transition_scope_test PRIVATE -UNDEBUG)
     add_test(NAME baseline_transition_scope COMMAND baseline_transition_scope_test)
@@ -2553,12 +2743,15 @@ if(TOOIE_BASELINE_SAVE_DRAIN_FIXTURE OR TOOIE_BASELINE_SAVE_COMPOSITION)
     endif()
     set(_baseline_save_child "${CMAKE_BINARY_DIR}/runtime-continuous/pi.cpp")
     file(SHA256 "${_baseline_save_child}" _baseline_save_sha)
-    if(NOT _baseline_save_sha STREQUAL "e44d154c455cbd1d4d9a1cf61dc9d4c2ca74274b1515f6c0f23e735ce7a868ba")
+    if(NOT _baseline_save_sha STREQUAL "80e1960727eda5d26a6fcef6795190c22f51791184b2fe252e9afcaf7fab0a5e")
         message(FATAL_ERROR "Existing saver materialization differs from the reviewed child")
     endif()
     # The unchanged fixture includes full PI; lazy archives must supply no second PI owner.
     add_executable(continuous_save_drain_test EXCLUDE_FROM_ALL tests/continuous_save_drain_test.cpp
         src/runtime_lifecycle.cpp src/runtime_save_root.cpp)
+    if(TOOIE_BASELINE_PLAYER)
+        target_sources(continuous_save_drain_test PRIVATE src/virtual_clock.cpp)
+    endif()
     set_source_files_properties(tests/continuous_save_drain_test.cpp PROPERTIES
         COMPILE_DEFINITIONS "TOOIE_SAVE_RUNTIME_SOURCE=\"${_baseline_save_child}\"")
     foreach(_property IN ITEMS COMPILE_OPTIONS COMPILE_DEFINITIONS CXX_STANDARD
@@ -2576,7 +2769,7 @@ if(TOOIE_BASELINE_SAVE_DRAIN_FIXTURE OR TOOIE_BASELINE_SAVE_COMPOSITION)
     if(MSVC)
         target_link_options(continuous_save_drain_test PRIVATE "/MAP:${_baseline_executable_dir}/continuous_save_drain_test.map")
     endif()
-    foreach(mode IN ITEMS final-write wait-producer disabled empty write-failure owned-admitted owned-refused startup-held owned-failure)
+    foreach(mode IN ITEMS final-write wait-producer disabled empty write-failure owned-admitted owned-refused startup-held owned-failure save-path-config)
         add_test(NAME continuous_save_drain_${mode} COMMAND continuous_save_drain_test ${mode}
             "${CMAKE_BINARY_DIR}/baseline/save-drain-fixture/${mode}/save.bin")
         set_tests_properties(continuous_save_drain_${mode} PROPERTIES TIMEOUT 15)
@@ -2593,7 +2786,7 @@ if(TOOIE_BASELINE_LIFECYCLE_FIXTURE AND
     file(SHA256 "${_ws_threads}" _ws_threads_sha)
     file(SHA256 "${_ws_pi}" _ws_pi_sha)
     if(NOT _ws_threads_sha STREQUAL "a1227291c933fa003706575e407ad8b0a469f04fe44125b7de03ad16faff8469"
-       OR NOT _ws_pi_sha STREQUAL "e44d154c455cbd1d4d9a1cf61dc9d4c2ca74274b1515f6c0f23e735ce7a868ba")
+       OR NOT _ws_pi_sha STREQUAL "80e1960727eda5d26a6fcef6795190c22f51791184b2fe252e9afcaf7fab0a5e")
         message(FATAL_ERROR "Wait/save fixture owner pins differ")
     endif()
     add_custom_command(

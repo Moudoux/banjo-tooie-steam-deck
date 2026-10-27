@@ -5,7 +5,10 @@
 #include "../camera-candidate/camera_projection_internal_04.h"
 #include "backpack621_owner.h"
 #include "rt64_extended_gbi.h"
-#if TOOIE_BACKPACK621
+#if !defined(TOOIE_BK_PIPELINE) || (TOOIE_BK_PIPELINE != 0 && TOOIE_BK_PIPELINE != 1)
+#error Explicit boolean TOOIE_BK_PIPELINE selection required
+#endif
+#if TOOIE_BACKPACK621 && !TOOIE_BK_PIPELINE /* L06c-3: BK links no 621 helper, retire or state */
 #include "../cpu625-candidate/cpu625_layout.h"
 _Static_assert(TOOIE_CAMERA_ID_END<=TOOIE_BACKPACK621_ID_FIRST,"621/camera domains");
 _Static_assert(TOOIE_CPU625_ID_FIRST+512ULL*TOOIE_CPU625_BLOCKS<=TOOIE_BACKPACK621_ID_FIRST,
@@ -182,6 +185,10 @@ SI u32 b621_live(SiloBuffers* b,u32 bytes) {
        *(volatile u32*)0x8012C844u!=e->vector_cache) {b621_fail(B621_CONTEXT);return 0;}
     return 1;
 }
+#if !TOOIE_BK_PIPELINE
+/* L06b-2: BK installs no CPU625 transports (prepare_camera_bridge add_cpu625_hooks gate; the native
+ * begin/admit/end calls are compiled out) and the BK bone/leaf bodies carry no 621 labels; the
+ * lifecycle retire below is BK-OFF too (L06c-3, file gate above). */
 B621 u32 tooie_backpack621_begin(u32 self,u32 model) {
     if(BS.magic!=TOOIE_BACKPACK621_MAGIC || BS.layout!=TOOIE_BACKPACK621_LAYOUT)
         return b621_stop(B621_BAD_LAYOUT);
@@ -324,6 +331,7 @@ B621 u32 tooie_backpack621_end(u32 self) {
     if(SS.last_end<end)SS.last_end=end;
     u32 failed=BE.failed || BS.tripwires;b621_clear();return failed ? 1u : 0u;
 }
+#endif
 B621 u32 tooie_backpack621_retire(u32 self,u32 requested,u32 reason) {
     if(reason==1u) {
         if(!silo_range(self,24u,3u))return 0;

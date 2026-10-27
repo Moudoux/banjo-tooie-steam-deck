@@ -356,6 +356,11 @@ void video(const Snapshot& snapshot) {
 }
 #if BASELINE_PLAYER
 void audio(const Snapshot& snapshot) {
+    int master_volume = snapshot.preferences.master_volume;
+    if (ImGui::SliderInt("Master volume", &master_volume, 0, 100, "%d%%"))
+        preference(Preference::MasterVolume, master_volume);
+    ImGui::TextWrapped("Scales all game audio, including music and sound effects. "
+        "Music volume below applies on top of this setting. Applies to the next audio the game sends.");
     int music_volume = snapshot.preferences.music_volume;
     if (ImGui::SliderInt("Music volume", &music_volume, 0, 100, "%d%%"))
         preference(Preference::MusicVolume, music_volume);

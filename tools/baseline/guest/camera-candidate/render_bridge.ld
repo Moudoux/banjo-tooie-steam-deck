@@ -33,6 +33,8 @@ SECTIONS {
     ASSERT(SIZEOF(.tooie_bk_cut)==0 || SIZEOF(.tooie_bk_cut)==64, "BK cut adapter layout1 extent")
     .tooie_bk_shadow ALIGN(4) : { *bk.o(.tooie_bk_shadow) } >patch
     ASSERT(SIZEOF(.tooie_bk_shadow)==0 || SIZEOF(.tooie_bk_shadow)==1144, "BK shadow state layout2 extent")
+    .tooie_bk_text ALIGN(4) : { *bk.o(.tooie_bk_text) } >patch
+    ASSERT(SIZEOF(.tooie_bk_text)==0 || SIZEOF(.tooie_bk_text)==1872, "BK option-text owner layout1 extent (L14-VR03)")
     .tooie_camera_state ALIGN(4) : { *(.tooie_camera_state) } >patch
     .tooie_camera_pools ALIGN(16) : { *(.tooie_camera_pools) } >patch
     ASSERT(SIZEOF(.tooie_camera_state)==1380, "camera state extent")

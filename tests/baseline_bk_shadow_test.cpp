@@ -13,6 +13,7 @@
 #include "../tools/baseline/guest/silo-candidate/render_bridge.h"
 #include "../tools/baseline/guest/silo-candidate/bk_pipeline.h"
 #include "../tools/baseline/menu_scope.hpp"
+#include "../tools/baseline/ui_scope.hpp"
 #include "bk_pipeline_selection_layout.h"
 #include "camera_identity_layout.h"
 #include "../tools/baseline/guest/camera-candidate/camera_identity.h"
@@ -721,14 +722,18 @@ unsigned compositor_cases(){
 }
 // Menu bit40 projection (MENU_SOURCE_FINDING): DF944's direct DE498 at DEFB0 under the authenticated menu
 // scope (tooie_bk_menu_model_begin's state, poked) takes its model ID displaced into the menu projection
-// range with BK SimpleNormal (CAM_POLICY_WORLD), or SkipAll (CAM_POLICY_IGNORE) on the menu cut. Every other
-// bit40 draw keeps the existing IGNORE (no saved WORLD camera here, so no palette admission).
+// range with BK SimpleNormal (CAM_POLICY_WORLD), or SkipAll (CAM_POLICY_IGNORE) on the menu cut. An otherwise
+// unowned DF944 UI model (ui_scope.hpp, the same owner scope with a UI-domain ID) is projected the same way.
+// Every other bit40 draw keeps the existing IGNORE (no saved WORLD camera here, so no palette admission).
 static_assert(tooie_menu::first_id==TOOIE_BK_MENU_ID_START && tooie_menu::end_id==TOOIE_BK_MENU_ID_END &&
     tooie_menu::component_stride==TOOIE_BK_TRANSFORM_ID_COUNT && tooie_menu::components==2u,
     "guest menu domain is menu_scope.hpp's model/sprite layout");
+static_assert(tooie_ui::first_id==TOOIE_BK_UI_ID_START && tooie_ui::end_id==TOOIE_BK_UI_ID_END &&
+    tooie_ui::stride==2u*TOOIE_BK_TRANSFORM_ID_COUNT,"guest UI domain is ui_scope.hpp's model components");
 unsigned menu_projection_cases(){
     unsigned cases=0;
     constexpr uint32_t f_owner_id=bk+offsetof(TooieBkState,owner)+offsetof(TooieBkOwner,id);
+    constexpr uint32_t ui_last=TOOIE_BK_UI_ID_START+0x7E00u, ui_mirror=TOOIE_BK_MENU_PROJECTION_OFFSET;
     struct Case{uint32_t kind,owner,current,skip,depth,roots,id,policy;const char* why;};
     const Case table[]={
         {TOOIE_BK_OWNER_MENU,0x30000600u,0x30000600u,0,0,0,0x30080600u,0x02008AAAu,"menu model: displaced stable ID, SimpleNormal"},
@@ -741,6 +746,12 @@ unsigned menu_projection_cases(){
         {TOOIE_BK_OWNER_MENU,0x30000600u,0x30000600u,0,1,0,0,0x00000002u,"nested DE448 draw: IGNORE"},
         {TOOIE_BK_OWNER_MENU,0x30000600u,0x30000600u,0,0,1,0,0x00000002u,"inside an open root: IGNORE"},
         {TOOIE_BK_OWNER_NONE,0x30000600u,0x30000600u,0,0,0,0,0x00000002u,"menu-range ID without the menu owner: IGNORE"},
+        {TOOIE_BK_OWNER_MENU,TOOIE_BK_UI_ID_START,TOOIE_BK_UI_ID_START,0,0,0,TOOIE_BK_UI_ID_START+ui_mirror,0x02008AAAu,
+            "DF944 UI model: displaced stable ID, SimpleNormal"},
+        {TOOIE_BK_OWNER_MENU,ui_last,ui_last,1,0,0,ui_last+ui_mirror,0x00000002u,"last UI model under its cut: the same ID, SkipAll"},
+        {TOOIE_BK_OWNER_MENU,TOOIE_BK_UI_ID_START+0x100u,TOOIE_BK_UI_ID_START+0x100u,0,0,0,0,0x00000002u,
+            "UI sprite half: IGNORE"},
+        {TOOIE_BK_OWNER_MENU,TOOIE_BK_UI_ID_END,TOOIE_BK_UI_ID_END,0,0,0,0,0x00000002u,"past the UI domain: IGNORE"},
     };
     for(const Case& k:table){
         uint8_t* rdram=fresh();camera(rdram,1);
@@ -769,11 +780,10 @@ int main(){
 #else
         const unsigned expected_compositor=2;
 #endif
-        require(scopes==16&&roots==3&&attachments==7&&compositor==expected_compositor&&menus==10u,"all BK shadow cases ran");
+        require(scopes==16&&roots==3&&attachments==7&&compositor==expected_compositor&&menus==14u,"all BK shadow cases ran");
         std::cout<<"BK shadow actual helper fixture passed: scope_cases="<<scopes<<"; root_cases="<<roots<<"; attachment_root_cases="<<attachments
             <<"; compositor_cases="<<compositor<<"; menu_projection_cases="<<menus<<"; frame_bound="<<TOOIE_BK_SHADOW_FIXTURE_FRAME_BYTES
             <<"; DE448/DE498=NOT_RUN; light_allocator=NOT_RUN; RT64=NOT_RUN; runtime=NOT_RUN\n";
         return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }
-

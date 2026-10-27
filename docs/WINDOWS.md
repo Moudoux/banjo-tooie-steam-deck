@@ -2,13 +2,17 @@
 
 This is the maintained way to build the Scurvy Dog Port player (`BanjoTooieScurvyDogPort.exe`)
 from source and, for maintainers, to package it. Players don't need any of it;
-see the [player guide](PLAYER_GUIDE.md). This source describes the local,
-unreleased Alpha 4.4-dev candidate.
+see the [player guide](PLAYER_GUIDE.md). This source describes
+Alpha 4.5. Windows is the supported platform.
 
 Status: these commands follow the current scripts, CMake presets and checks in
 this repository. The step 5 evidence collector was run against the existing
 Alpha 4 build and reproduced its archive hash. The full sequence has not been
 re-run end to end on a fresh machine. Report gaps in the issue tracker.
+Guest preparation needs a preserved copy of three legacy standalone Silo files
+that cannot be regenerated from source, so this is not a from-scratch build;
+see [Reusing or regenerating a build](#reusing-or-regenerating-a-build).
+Preparing a fresh build folder with that copy has not been run yet.
 
 ## How the build fits together
 
@@ -90,7 +94,8 @@ In Ubuntu, from the same checkout:
 ```bash
 cd /mnt/c/path/to/banjo-tooie-scurvy-dog-port
 python3 tools/generate_local.py --rom baserom.us.z64 --jobs "$(nproc)"
-.venv-codegen/bin/python tools/baseline/prepare_player_guest.py --rom baserom.us.z64
+.venv-codegen/bin/python tools/baseline/prepare_player_guest.py --rom baserom.us.z64 \
+  --standalone-reference build/windows-dev.previous/baseline/render-bridge-silo-candidate
 ```
 
 `generate_local.py` does the following:
@@ -104,6 +109,36 @@ python3 tools/generate_local.py --rom baserom.us.z64 --jobs "$(nproc)"
 
 On later runs it reuses decompilation outputs that still verify.
 
+It also changes existing local files: bootstrap may check out a clean
+dependency at its pinned commit (it refuses a modified checkout) and replaces a
+cached download whose hash is wrong; pinned tool files inside
+`deps/banjo-tooie/` are refreshed; `pip` runs again in `.venv-codegen/`; and
+the CPU and audio steps rewrite their outputs under `config/` and `generated/`
+in place, including `generated/audio_mission01/`, whose two pinned files
+configure re-checks.
+
+`--player` is an explicit alternative to the full CPU step. It prepares only
+the four CPU inputs the selected player consumes (`config/selected.syms.toml`,
+`config/overlay-ids.txt`, `generated/core2-expected.bin` and
+`generated/heap-patch-products/heap.o`) in a new `.codegen/player-inputs-*`
+scratch folder, which is left in place. Each input is installed only if
+absent; an existing one must be byte-identical, otherwise the run stops
+without replacing it. The other steps, including audio generation, are
+unchanged, and `--player` cannot be combined with `--reference-generated`.
+Running the later steps from these inputs alone has not been tried.
+
+```bash
+python3 tools/generate_local.py --player --rom baserom.us.z64 --jobs "$(nproc)" \
+  --evidence .local-evidence/player-1
+```
+
+Its CPU evidence and run receipt go to `<evidence>/codegen-player-inputs/`,
+which must be absent or empty; otherwise the run stops before any other step.
+To run again, keep the earlier evidence and pass a new folder, for example
+`--evidence .local-evidence/player-2`. This also keeps the earlier `audio/`
+receipts, which reusing a folder would overwrite. The list of inputs actually
+installed is printed, not saved; keep that output.
+
 `prepare_player_guest.py` writes fresh outputs under
 `build/windows-dev/baseline/`:
 
@@ -116,6 +151,17 @@ On later runs it reuses decompilation outputs that still verify.
 It reads the ROM but never copies it. It refuses to run if any of its output
 folders already exist, and stops if the resulting guest image, layout or shadow
 policy differs from the selected player build.
+
+`--standalone-reference` names a preserved `render-bridge-silo-candidate`
+folder. Its `boot.bin`, `data.syms.toml` and `receipt.json` must match the
+pins in `prepare_player_guest.py` (`STANDALONE_REFERENCE`) before anything is
+written. They are read, never changed, and copied byte-for-byte into the new
+Silo folder with a `STANDALONE_REFERENCE.json` record (`regenerated: false`).
+The Silo step compiles only `bridge.o`, which camera preparation compares
+against its own Honey object, and no standalone image of its own;
+camera preparation still checks the imported image as its fixed legacy
+reference. Without such a preserved copy guest preparation cannot run: these
+files are not regenerated from source.
 
 ## 4. Configure
 
@@ -281,8 +327,14 @@ shown with `--profile-dir`.
   image until those pins are deliberately updated after reviewing the change.
   Do not replace a failing pin merely to make a build pass.
 - **Regenerate on purpose:** guest preparation and qualification never
-  overwrite earlier results. Move the old build folder aside instead of
-  deleting it, then repeat steps 3 to 6:
+  overwrite earlier results. Never delete an old build folder: its
+  `baseline\render-bridge-silo-candidate\` folder holds the earlier standalone
+  silo image (`boot.bin`) with its `receipt.json` and `data.syms.toml`. Camera
+  preparation checks that image as a fixed legacy reference, and the current
+  silo preparer does not reproduce it. To prepare a fresh build folder, rename
+  the old one rather than deleting it, then repeat steps 3 to 6, passing its
+  Silo folder as `--standalone-reference` in step 3. This route has not yet
+  been run end to end:
 
 ```powershell
 Rename-Item build\windows-dev windows-dev.previous
@@ -312,8 +364,8 @@ following:
 ```powershell
 git status --short --untracked-files=all
 python .\tools\package_player.py receipt
-python .\tools\package_player.py package --output-dir dist\scurvy-dog-alpha4.2
-python .\tools\package_player.py verify --output-dir dist\scurvy-dog-alpha4.2
+python .\tools\package_player.py package --output-dir dist\scurvy-dog-v0.1.0-alpha.4.5
+python .\tools\package_player.py verify --output-dir dist\scurvy-dog-v0.1.0-alpha.4.5
 ```
 
 The `git status` command must print nothing.
@@ -350,7 +402,7 @@ line-ending difference does not excuse any other difference.
 | Symptom | Likely cause |
 | --- | --- |
 | Configure says the IPL3, core1 or core2 reference is missing | Step 3 did not finish; check `prepare_player_guest.py` output. |
-| `fresh build tree required` from guest preparation | Earlier outputs exist; reuse them or move the build folder aside. |
+| `fresh build tree required` from guest preparation | Earlier outputs exist; reuse them. Read *Regenerate on purpose* before moving the build folder aside. |
 | `Missing/duplicate successful compile evidence` | The compile log is not from the build that compiled the 416 sources. Start from a fresh build folder. |
 | `Archive member identity/size/hash mismatch` during the build | The raw archive or its inputs changed after qualification. |
 | Packager says the source checkout is not clean | Commit or remove the changes; build outputs must stay in ignored folders. |

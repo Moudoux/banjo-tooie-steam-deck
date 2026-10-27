@@ -1,15 +1,16 @@
 // Included after bk_pipeline_thunks.hpp inside the existing camera native carrier.
 // Mechanical o32 marshalling for the graph seams; the guest helpers own the BK policy.
 #if TOOIE_BK_PIPELINE_SELECTED
-// Exact guest helper set: packet1 9 + list/handler/skin/root-join 7 + selector 3 + sort 1
-// + attachment 2 + shadow producer 5 (route, light event, begin, end, project) + menu owner 2.
-static_assert(TOOIE_BK_HELPERS==29u,"BK guest helper set");
+// The guest helper set is owned by prepare_silo_bridge.BK_HELPERS (exact definition order) and counted by
+// the generated registry table; these thunks name the helpers they call and restate no count.
 static_assert(!TOOIE_CKCOPY_SELECTED,"The P04b redirect is never selected with the BK pipeline");
 extern "C" void tooie_bk_skin_segment(uint8_t*,recomp_context*);
 extern "C" void tooie_bk_skin_capture(uint8_t*,recomp_context*);
 extern "C" void tooie_bk_handler_begin(uint8_t*,recomp_context*);
 extern "C" void tooie_bk_handler_end(uint8_t*,recomp_context*);
 extern "C" void tooie_bk_root_join(uint8_t*,recomp_context*);
+extern "C" void tooie_bk_bbox_visible(uint8_t*,recomp_context*);
+extern "C" void tooie_bk_billboard_entry(uint8_t*,recomp_context*);
 // DE498 DE8C8: key = the invocation's local-cursor slot (sp+0xCC, as root_begin receives it);
 // sp+0xB8 is the segment-1 command pointer (stored DE8AC, reloaded DE8B8).
 extern "C" void baseline_bk_skin_segment(uint8_t* rdram,recomp_context* ctx) {
@@ -18,10 +19,13 @@ extern "C" void baseline_bk_skin_segment(uint8_t* rdram,recomp_context* ctx) {
     clone.r5=(gpr)(int32_t)MEM_W(0xB8,ctx->r29);
     tooie_bk_skin_segment(rdram,&clone);
 }
-// BK culling_patches GeoCmdD: both original bbox handlers retain their call side effects.
-// At these exact post-call branches, v0 alone decides child traversal. No guest reads/writes.
-extern "C" void baseline_bk_bbox_visible(uint8_t*, recomp_context* ctx) {
-    ctx->r2 = 1;
+// BK culling_patches GeoCmdD and transform_tagging's geo-wide frustum disable: the original bbox and
+// in-graph sphere predicates retain their call side effects. At these exact post-call branches v0 alone
+// decides child traversal; the guest decides it (tooie_bk_bbox_visible).
+extern "C" void baseline_bk_bbox_visible(uint8_t* rdram, recomp_context* ctx) {
+    recomp_context clone;camera_clone_context(clone,*ctx);
+    tooie_bk_bbox_visible(rdram,&clone);
+    ctx->r2=clone.r2;
 }
 namespace bk_pipeline {
 // Buffers sp+0xF8, key sp+0xCC, effective model sp+0x10C (camera_clone_de498_args).
@@ -40,10 +44,11 @@ extern "C" void baseline_bk_root_join(uint8_t* rdram,recomp_context* ctx) {
 #endif
     tooie_bk_root_join(rdram,&clone);
 }
-// Billboard entry (all three tables): BK func_803384A8 increments the traversal offset first.
+// Billboard entry (all three tables): BK func_803384A8 increments the traversal offset first
+// (tooie_bk_billboard_entry).
 extern "C" void baseline_bk_billboard_entry(uint8_t* rdram,recomp_context* ctx) {
-    (void)ctx;
-    MEM_W(TOOIE_BK_OFFSET_WORD_OFFSET,bk_pipeline::state)=MEM_W(TOOIE_BK_OFFSET_WORD_OFFSET,bk_pipeline::state)+1;
+    recomp_context clone;camera_clone_context(clone,*ctx);
+    tooie_bk_billboard_entry(rdram,&clone);
 }
 // After the original push and Mtx advance: buffers s0, node s1, the handler's own SP as key.
 extern "C" void baseline_bk_billboard_begin(uint8_t* rdram,recomp_context* ctx) {

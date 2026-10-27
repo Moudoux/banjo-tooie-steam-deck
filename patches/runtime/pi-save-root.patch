@@ -1,0 +1,5 @@
+--- a/pi.cpp
++++ b/pi.cpp
+@@ -111,1 +111,1 @@
+-    std::filesystem::path save_folder_path = config_path / save_folder;
++    std::filesystem::path save_folder_path = tooie::runtime_save_folder(config_path);

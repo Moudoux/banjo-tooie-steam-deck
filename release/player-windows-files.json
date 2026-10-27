@@ -1,14 +1,14 @@
 {
   "schema": 1,
   "product": "Banjo-Tooie: Scurvy Dog Port",
-  "version": "0.1.0-alpha.4.4",
-  "tag": "v0.1.0-alpha.4.4",
-  "archive": "BanjoTooieScurvyDogPort-Alpha4.4-Windows-x64.zip",
+  "version": "0.1.0-alpha.4.5",
+  "tag": "v0.1.0-alpha.4.5",
+  "archive": "BanjoTooieScurvyDogPort-Alpha4.5-Windows-x64.zip",
   "executable": "BanjoTooieScurvyDogPort.exe",
   "reviewRule": "Package exactly these paths plus package-manifest.json. Build rows come from the gated build directory; source rows must be tracked files of the clean release commit. Keep every existing third-party notice; never prune attribution.",
   "guest": {
-    "sha256": "263e1d27d21ebd9d1604f7096cf6f97466b1b74041dbd745cce278980b21b3d8",
-    "bytes": 1830544
+    "sha256": "6845c8ced20a737a46324e7d388cf9c73e07d6f32d8dda8a71467bb8661f5bc8",
+    "bytes": 1769616
   },
   "rawFunctionCount": 416,
   "build": {
@@ -40,7 +40,6 @@
       "TOOIE_BASELINE_HEAP_PATCH",
       "TOOIE_BASELINE_HOST",
       "TOOIE_BASELINE_NPC665",
-      "TOOIE_BASELINE_PLAYER_BOUNDARY",
       "TOOIE_BASELINE_RENDERER_CANDIDATE_OUTPUT",
       "TOOIE_BASELINE_RENDER_BRIDGE",
       "TOOIE_BASELINE_RT64_GENERIC_FIXES",
@@ -66,7 +65,8 @@
       "TOOIE_BASELINE_SAVE_DRAIN_FIXTURE",
       "TOOIE_BASELINE_SILO_ACQUISITION_OBSERVER",
       "TOOIE_BASELINE_SILO_FAMILY_OBSERVER",
-      "TOOIE_BASELINE_SUCCESS_TRACE"
+      "TOOIE_BASELINE_SUCCESS_TRACE",
+      "TOOIE_BASELINE_PLAYER_BOUNDARY"
     ],
     "exact": {
       "CMAKE_BUILD_TYPE": "RelWithDebInfo",

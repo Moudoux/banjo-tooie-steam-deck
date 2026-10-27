@@ -8,12 +8,26 @@
  * exactly as before and gives RT64 the matrix change that binds the new group.
  * mode bit1: the list's vertices are rewritten by the CPU during traversal (F070/leaf
  * callback), after the root's float rerun, so any enclosing float segments are suspended.
+ * @tooie bit0 is dropped inside a header-bit40 root (bk_list_keeps_stack).
  * Returns the flags list_end needs. */
 #define TOOIE_BK_LIST_PUSH 1u
 #define TOOIE_BK_LIST_CPU_WRITTEN 2u
+/* @tooie The innermost recorded root is a header-bit40 draw. Its original root issues no modelview
+ * matrix (bk_pipeline.c root envelope), and its type3 lists own the modelview stack across siblings:
+ * a list may LOAD/PUSH a matrix that later sibling lists draw under and a later list pops (save-select
+ * actors 80C/80D/80E: list0 push, selector-branch vertices, list69 pop). BK's lists are stack-neutral
+ * (its bones push at graph level, func_803387F8), so its per-list PUSH/pop would here drop that matrix
+ * at list0's end. These lists take identity MUL/NOPUSH and a group-only close instead, which leaves
+ * every stack value and depth as the original. A nested non-bit40 root is its own innermost frame and
+ * keeps BK's bracket; an overflow root records no frame and keeps it too. */
+SI u32 bk_list_keeps_stack(void) {
+    return BK.root_depth && BK.root_depth <= TOOIE_BK_ROOT_DEPTH &&
+        BK.roots[BK.root_depth - 1u].pushed_group == TOOIE_BK_ROOT_BIT40;
+}
 BK_HELPER u32 tooie_bk_list_begin(Gfx** gfx, u32 node, u32 mode) {
     GfxCommand* cursor;
     u32 flags = 0;
+    if (bk_list_keeps_stack()) mode &= ~TOOIE_BK_LIST_PUSH;
     if ((mode & TOOIE_BK_LIST_CPU_WRITTEN) && BK.root_depth && BK.root_depth <= TOOIE_BK_ROOT_DEPTH &&
         bk_segments_effective((s32)BK.root_depth - 1)) {
         *gfx = (Gfx*)bk_segments_off((GfxCommand*)*gfx);
@@ -54,11 +68,20 @@ BK_HELPER void tooie_bk_list_end(Gfx** gfx, u32 flags) {
 /* Billboards DC634/DC740/DC84C, at DC6F8/DC804/DC910 after the original LOAD/PUSH and output
  * Mtx advance (buffers s0, node s1). BK func_803384A8 skips rotation interpolation when the
  * camera skips: skip_all_interpolation carries this root's view cut. The offset advance is
- * done natively at handler entry, as BK does at function entry. */
+ * made at handler entry (tooie_bk_billboard_entry), as BK does at function entry. */
 BK_HELPER void tooie_bk_handler_begin(u32 buffers, u32 node, u32 handler_sp) {
-    u32 depth = BK.handler_depth, opened;
+    u32 depth = BK.handler_depth, opened, offset;
     if (depth >= TOOIE_BK_HANDLER_DEPTH) { bk_count(&BK.diagnostics.root_overflow); return; }
-    opened = tooie_bk_set_model_matrix_group((Gfx**)&((SiloBuffers*)buffers)->gfx, node, BK.skip_all_interpolation);
+    if (!node) {
+        /* @tooie L14-VR01b: no graph node = an owner component draw (the option-box sprite; BK func_803164B0's
+         * fixed portrait ID). Its group is exactly the owner's component ID: ordinal 0 for this group only, and
+         * the traversal offset is left as it was. Billboards always pass their graph node. */
+        offset = BK.cur_model_transform_id_offset;
+        BK.cur_model_transform_id_offset = 0;
+        opened = tooie_bk_set_model_matrix_group((Gfx**)&((SiloBuffers*)buffers)->gfx, node, BK.skip_all_interpolation);
+        BK.cur_model_transform_id_offset = offset;
+    }
+    else opened = tooie_bk_set_model_matrix_group((Gfx**)&((SiloBuffers*)buffers)->gfx, node, BK.skip_all_interpolation);
     BK.handlers[depth].sp = handler_sp;
     BK.handlers[depth].opened = opened;
     BK.handler_depth = depth + 1u;

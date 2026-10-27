@@ -20,7 +20,7 @@ def main(tools):
         assert names[('func_80093F30', 0x80093F30)] == 'baseline_bk_player_lod_initial'
     # Graph LOD seams unchanged; exactly one player-tier seam per function.
     assert sum(1 for f, _, _ in hooks.HOOKS if f == 'func_80094070') == 1
-    assert [pc for f, pc, _ in hooks.HOOKS if f.startswith('func_800DD')] == [0x800DD294, 0x800DD328, 0x800DD3BC]
+    assert [pc for f, pc, n in hooks.HOOKS if n == 'baseline_bk_lod_distance'] == [0x800DD294, 0x800DD328, 0x800DD3BC]
 
     # add_hooks composes after the maintained hooks and inserts the new PCs once.
     existing = [dict(func='func_800A7840', before_vram=pc, text=text) for pc, text in hooks.COMPOSED.items()]
@@ -49,6 +49,16 @@ def main(tools):
         assert names[('func_80093FD4',0x80094040)] == 'baseline_bk_player_lod_initial_end'
         after['func_80093FD4'] = after['func_80093FD4'].replace('// 0x80094038: original',
             '// 0x80094038: jal         0x80093F30\n    // 0x8009403C: tier load\n    ctx->r4 = MEM_H(ctx->r25, 0X2);\n    func_80093F30(rdram, ctx);')
+    for f, pc, target, delay in hooks.PREDICATE_SEAMS:
+        marker = '    baseline_bk_bbox_visible(rdram, ctx);\n    // 0x%08X: original\n' % pc
+        segment = ('    // 0x%08X: jal         0x%08X\n' % (pc-8, target) +
+                   '    // 0x%08X: synthetic delay\n' % (pc-4) +
+                   ('    ' + delay + '\n' if delay else '') +
+                   '    func_%08X(rdram, ctx);\n' % target +
+                   '    baseline_bk_bbox_visible(rdram, ctx);\n    // 0x%08X: beql        $v0, $zero, L_80000000\n' % pc)
+        after[f] = after[f].replace(marker, segment)
+    after['func_800DE498'] = after['func_800DE498'].replace('// 0x800DE498: original',
+        '// 0x800DE498: original\n    ctx->r29 = ADD32(ctx->r29, -0XF8);')
     stripped = hooks.strip_and_verify(dict(after), True)
     for func, pc, name in hooks.HOOKS:
         assert name + '(rdram, ctx);' not in stripped[func]

@@ -318,6 +318,95 @@ void check_music_volume(Fixture& fixture) {
         settings::get_int(key, -1) == 100, "music request could not return to its default");
 }
 
+// Player-only SDL owner publication and persistence. devices.cpp is not linked
+// here; its queue_samples applies the helper checked by check_master_gain.
+void check_master_volume(Fixture& fixture) {
+    namespace settings = tooie::frontend::settings;
+    constexpr const char* key = "tooie_master_volume_percent";
+    constexpr const char* music_key = "tooie_music_volume_percent";
+    const int music_saved = settings::get_int(music_key, -1);
+    require(settings::get_int(key, -1) == -1 && host::requested_master_volume() == 100 &&
+        fixture.snapshot()->preferences.master_volume == 100,
+        "missing master preference did not default to 100 percent");
+    const auto request = [](host::Preference preference, int value) {
+        host::Request change{};
+        change.kind = host::RequestKind::Preference;
+        change.preference = preference;
+        change.value = value;
+        require(host::enqueue(change), "volume preference queue failed");
+        host::tick(false);
+    };
+    const auto reload = [&] {
+        require(settings::flush(), "master preference flush failed");
+        host::shutdown();
+        require(host::requested_master_volume() == 100, "shutdown retained requested master gain");
+        host::initialize(fixture.window, fixture.profile, true);
+        host::publish_ready(true);
+        fixture.focus();
+        tooie::input::host().set_menu_open(true);
+        host::tick(false);
+    };
+    // The retired old-engine main_volume key is never adopted.
+    settings::set_number("main_volume", 0.0);
+    reload();
+    require(host::requested_master_volume() == 100 && settings::get_int(key, -1) == -1,
+        "legacy main_volume changed the master preference");
+    request(host::Preference::MasterVolume, 40);
+    require(host::requested_master_volume() == 40 && fixture.snapshot()->preferences.master_volume == 40 &&
+        settings::get_int(key, -1) == 40 && host::latched_preferences().master_volume == 100,
+        "master request was not published/persisted or changed startup state");
+    require(host::requested_music_volume() == 100 && settings::get_int(music_key, -1) == music_saved,
+        "master request changed music volume");
+    request(host::Preference::MusicVolume, 70);
+    require(host::requested_master_volume() == 40 && host::requested_music_volume() == 70 &&
+        settings::get_int(key, -1) == 40, "music request changed master volume");
+    request(host::Preference::MasterVolume, -1);
+    request(host::Preference::MasterVolume, 101);
+    require(host::requested_master_volume() == 40 && fixture.snapshot()->preferences.master_volume == 40 &&
+        settings::get_int(key, -1) == 40, "invalid master request changed requested or saved gain");
+    reload();
+    require(host::requested_master_volume() == 40 && host::latched_preferences().master_volume == 40 &&
+        host::requested_music_volume() == 70, "master and music did not survive reload independently");
+    settings::set_int(key, -20);
+    reload();
+    require(host::requested_master_volume() == 0 && settings::get_int(key, 0) == -20,
+        "negative saved master preference did not clamp to zero without rewriting");
+    settings::set_int(key, 120);
+    reload();
+    require(host::requested_master_volume() == 100 && settings::get_int(key, 0) == 120,
+        "high saved master preference did not clamp to 100 without rewriting");
+    settings::set_string(key, "invalid");
+    reload();
+    require(host::requested_master_volume() == 100 && fixture.snapshot()->preferences.master_volume == 100,
+        "nonnumeric saved master preference did not use the default");
+    request(host::Preference::MasterVolume, 0);
+    require(host::requested_master_volume() == 0 && settings::get_int(key, -1) == 0 &&
+        host::requested_music_volume() == 70, "zero-percent master request was refused or changed music");
+    request(host::Preference::MasterVolume, 100);
+    request(host::Preference::MusicVolume, 100);
+    require(host::requested_master_volume() == 100 && settings::get_int(key, -1) == 100 &&
+        host::requested_music_volume() == 100, "volume requests could not return to their defaults");
+}
+
+// The exact helper queue_samples applies after channel ordering.
+void check_master_gain() {
+    using Samples = std::array<int16_t, 8>;
+    constexpr int16_t lo = std::numeric_limits<int16_t>::min(), hi = std::numeric_limits<int16_t>::max();
+    const Samples source{{lo, -32767, -3, -1, 0, 1, 3, hi}};
+    const auto scaled = [&](int percent) {
+        Samples samples = source;
+        host::apply_master_volume(samples.data(), samples.size(), percent);
+        return samples;
+    };
+    require(scaled(100) == source && scaled(101) == source, "default master gain changed samples");
+    require(scaled(50) == Samples{{-16384, -16383, -1, 0, 0, 0, 1, 16383}},
+        "half master gain did not truncate toward zero");
+    require(scaled(99) == Samples{{-32440, -32439, -2, 0, 0, 0, 2, 32439}},
+        "near-default master gain overflowed or rounded away from zero");
+    require(scaled(0) == Samples{} && scaled(-5) == Samples{},
+        "zero master gain did not produce silence");
+}
+
 // Exercises the actual mapper/SDL calls. Guest/runtime callback and tape admission
 // live in devices.cpp and are not linked by this existing host fixture.
 void check_rumble(Fixture& fixture) {
@@ -1645,7 +1734,7 @@ void check_settings_numeric_bounds(Fixture& fixture) {
     {
         std::ofstream file(root / "tooie_imgui.json", std::ios::binary);
         file << R"({"baseline_resolution": 4294967298, "tooie_game_widescreen": -4294967295,)"
-            R"( "tooie_music_volume_percent": 1e300, "tooie_controller_auto": 4294967296,)"
+            R"( "tooie_music_volume_percent": 1e300, "tooie_master_volume_percent": -1e300, "tooie_controller_auto": 4294967296,)"
             R"( "baseline_texture_filter": 1, "tooie_cutscene_aspect": 1.0, "rumble_strength": 37.5})";
         file.close();
         require(bool(file), "numeric settings fixture write failed");
@@ -1656,6 +1745,7 @@ void check_settings_numeric_bounds(Fixture& fixture) {
     require(host::requested_resolution() == 1 && startup.wide == -1,
         "an out-of-range stored integer wrapped into a valid preference");
     require(host::requested_music_volume() == 100, "an out-of-range stored float did not use the default");
+    require(host::requested_master_volume() == 100, "an out-of-range stored master float did not use the default");
     require(tooie::frontend::settings::get_bool("tooie_controller_auto", false),
         "a large nonzero stored integer read as false");
     require(host::requested_texture_filter() == 1 && host::requested_cutscene_aspect() == 1 &&
@@ -1780,6 +1870,8 @@ int main() {
         check_legacy_input_bounds(fixture);
         check_legacy_guid_bounds(fixture);
         check_music_volume(fixture);
+        check_master_volume(fixture);
+        check_master_gain();
         check_rumble(fixture);
         check_settings_string_roundtrip(fixture);
         check_clear_and_profile_roundtrip(fixture);
@@ -2268,6 +2360,8 @@ int main() {
             tooie::frontend::settings::get_int("baseline_texture_filter",-1)==1 &&
             tooie::frontend::settings::get_int("baseline_output_filter",-1)==2,
             "invalid filtering request changed policy or live request mutated startup");
+        preference(host::Preference::MasterVolume,40);
+        preference(host::Preference::MusicVolume,70);
         host::render::fixture_publication = 0x00010003;
         fixture.f4();
         const auto live_log = fixture.log();
@@ -2283,11 +2377,14 @@ int main() {
             live_marker.find(" requested_trot_toggle=1 ") != std::string::npos &&
             live_marker.find(" requested_texture_filter=1 ") != std::string::npos &&
             live_marker.find(" requested_output_filter=2 ") != std::string::npos &&
+            live_marker.find(" requested_master_volume=40 requested_music_volume=70 ") != std::string::npos &&
             live_marker.find(" published_aspect_bits=0x00000008 ") != std::string::npos &&
             live_marker.find(" guest_publication=0x00010003") != std::string::npos &&
             live_marker.find(" wide=") == std::string::npos &&
             live_marker.find(" live_aspect=") == std::string::npos,
             "F4 marker confused startup, requested or published values");
+        preference(host::Preference::MasterVolume,100);
+        preference(host::Preference::MusicVolume,100);
         preference(host::Preference::NativeAspect,0);
         preference(host::Preference::TalonTrotToggle,0);
         require(tooie::frontend::settings::flush(), "live preferences did not persist");

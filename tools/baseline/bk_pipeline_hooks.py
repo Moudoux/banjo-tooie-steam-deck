@@ -22,6 +22,8 @@ HOOKS = [
     ('func_800A7840', 0x800A78E8, 'baseline_bk_submit_register'),
     # A7840 first instruction after 1A270 returns; also the 789C suppression destination.
     ('func_800A7840', 0x800A78F0, 'baseline_bk_submit_wait'),
+    # DE498 first instruction, before its prologue: the F4 caller witness reads only a1 and the caller's sp.
+    ('func_800DE498', 0x800DE498, 'baseline_bk_de498_entry'),
     # DE498 after the original root LOAD/PUSH (DF080-DF0AC), before transform-context setup.
     ('func_800DE498', 0x800DF0B0, 'baseline_bk_root_begin'),
     # DE498 after the original root pop's word0 store (DF230), before the DF238 tail join.
@@ -29,6 +31,13 @@ HOOKS = [
     # BK GeoCmdD: preserve the original bbox call and zero-child guard, then visit child.
     ('func_800DDC28', 0x800DDCEC, 'baseline_bk_bbox_visible'),
     ('func_800DDD14', 0x800DDD98, 'baseline_bk_bbox_visible'),
+    # BK transform_tagging disables every frustum check for the whole geo list (demos included), so its
+    # in-graph sphere test passes. Same seam: after the original E3E8C call and its delay slot, at the
+    # zero-result branch; each handler's separate child-offset null guard still runs.
+    ('func_800DDDC4', 0x800DDE38, 'baseline_bk_bbox_visible'),
+    ('func_800DDDC4', 0x800DDEE0, 'baseline_bk_bbox_visible'),
+    ('func_800DDF14', 0x800DDF6C, 'baseline_bk_bbox_visible'),
+    ('func_800DDFA0', 0x800DE008, 'baseline_bk_bbox_visible'),
     # BK lod_patches GeoCmd8 fixes distance at50; Tooie compares squared distance.
     # These post-distance-return seams preserve null children and DD214 ordinal override.
     ('func_800DD214', 0x800DD294, 'baseline_bk_lod_distance'),
@@ -46,6 +55,18 @@ HOOKS = [
 # Maintained hooks the BK call composes after (execution-facts47 B1/B2 bindings).
 COMPOSED = {0x800A7888: 'baseline_render_construction_begin(rdram, ctx);\n    baseline_camera_construction_begin(rdram, ctx);',
             0x800A78E8: 'baseline_first_graphics_submit(rdram, ctx);'}
+# Original visibility-predicate seams: (function, result-branch PC, predicate, exact delay statement or None).
+# The JAL is at PC-8 and its delay slot at PC-4, so the original call and its side effects complete before
+# the hook; only v0 at the branch changes. None: the delay statement text is not pinned, only its slot.
+PREDICATE_SEAMS = [
+    ('func_800DDC28', 0x800DDCEC, 0x800E3D0C, 'MEM_W(0X4C, ctx->r29) = ctx->r6;'),
+    ('func_800DDD14', 0x800DDD98, 0x800E3D0C, 'ctx->r5 = ADD32(ctx->r29, 0X28);'),
+    ('func_800DDDC4', 0x800DDE38, 0x800E3E8C, None),
+    ('func_800DDDC4', 0x800DDEE0, 0x800E3E8C, None),
+    ('func_800DDF14', 0x800DDF6C, 0x800E3E8C, None),
+    ('func_800DDFA0', 0x800DE008, 0x800E3E8C, None),
+]
+assert [(f, pc) for f, pc, _, _ in PREDICATE_SEAMS] == [(f, pc) for f, pc, n in HOOKS if n == 'baseline_bk_bbox_visible']
 
 
 def add_hooks(hooks, selected):
@@ -73,21 +94,25 @@ def add_hooks(hooks, selected):
             hooks.append(dict(func=func, before_vram=pc, text=call))
 
 
+def verify_predicate_seam(body, func, pc, target, delay):
+    """The hook follows the original predicate call and its delay slot, directly before the result branch."""
+    start = body.index('    // 0x%08X:' % (pc - 8))
+    end = body.index('    // 0x%08X:' % pc, start)
+    segment, call, hook = body[start:end], 'func_%08X(rdram, ctx);' % target, 'baseline_bk_bbox_visible(rdram, ctx);'
+    assert segment.startswith('    // 0x%08X: jal         0x%08X\n' % (pc - 8, target)) and segment.count(call) == 1, (func, hex(pc), 'predicate target')
+    slot = segment.index('    // 0x%08X:' % (pc - 4))
+    assert slot < segment.index(call) and (delay is None or slot < segment.index(delay) < segment.index(call)), (func, hex(pc), 'completed delay')
+    assert segment.count(hook) == 1 and segment.index(call) < segment.index(hook), (func, hex(pc), 'post-call seam')
+    assert re.search(r'^    // 0x%08X: (?:(?:beq|bne)l?\s+\$v0, \$zero|(?:beqz|bnez)l?\s+\$v0),' % pc, body, re.M), (func, hex(pc), 'v0/zero branch')
+    assert not re.search(r'^\s*L_%08X:' % pc, body, re.M), (func, hex(pc), 'post-return seam')
+
+
 def strip_and_verify(after, selected):
-    """Exact inverse: each call once, at its PC (only later composed calls between), then removed."""
+    """Exact inverse: each call once per registered PC (only later composed calls between), then removed."""
     assert type(selected) is bool
     if selected:
-        for func, pc, delay in [
-            ('func_800DDC28', 0x800DDCEC, 'MEM_W(0X4C, ctx->r29) = ctx->r6;'),
-            ('func_800DDD14', 0x800DDD98, 'ctx->r5 = ADD32(ctx->r29, 0X28);'),
-        ]:
-            body = after[func]
-            start = body.index('    // 0x%08X:' % (pc - 8))
-            end = body.index('    // 0x%08X:' % pc, start)
-            segment = body[start:end]
-            assert 'jal         0x800E3D0C' in segment and segment.count('func_800E3D0C(rdram, ctx);') == 1, (func, 'bbox target')
-            assert delay in segment and segment.index(delay) < segment.index('func_800E3D0C(rdram, ctx);'), (func, 'completed delay')
-            assert not re.search(r'^\s*L_%08X:' % pc, body, re.M), (func, 'post-return seam')
+        for func, pc, target, delay in PREDICATE_SEAMS:
+            verify_predicate_seam(after[func], func, pc, target, delay)
     if selected:
         body = after['func_80093FD4']
         segment = body[body.index('    // 0x80094038:'):body.index('    // 0x80094040:')]
@@ -106,10 +131,24 @@ def strip_and_verify(after, selected):
             assert ('MEM_W(0X10, ctx->r29) = ctx->r%d;'%reg) in segment,(func,'original model delay store')
             assert ('ctx->r%d ='%reg) not in segment,(func,'model must precede delay slot')
             assert not re.search(r'^[ \t]*L_%08X:'%(pc+8),body,re.M),(func,'return-only end')
-    for func, pc, name in HOOKS:
+    if selected:
+        # DE498 entry: the hook precedes the first instruction (a1 and the caller's sp intact), and the native
+        # caller witness subtracts exactly this prologue frame (issue_evidence_guest.hpp de498_frame).
+        body = after['func_800DE498']
+        assert body.index('    // 0x800DE498:') == body.index('    // 0x'), 'DE498 entry hook must precede its first instruction'
+        frames = re.findall(r'ctx->r29 = ADD32\(ctx->r29, -0X([0-9A-F]+)\);', body)
+        assert frames and int(frames[0], 16) == 0xF8, ('DE498 prologue frame', frames)
+    return strip_calls(after, HOOKS, selected)
+
+
+def strip_calls(after, hooks, selected):
+    """Each (function, hook) call occurs once per registered PC, directly before it; all are then removed."""
+    for func, name in dict.fromkeys((f, n) for f, _, n in hooks):
         call = '    ' + name + '(rdram, ctx);\n'
-        assert after[func].count(call) == int(selected), (func, name)
+        pcs = [p for f, p, n in hooks if (f, n) == (func, name)]
+        assert after[func].count(call) == len(pcs) * int(selected), (func, name)
         if selected:
-            assert re.search(re.escape(call) + r'(?:    \w+\(rdram, ctx\);\n)*' + re.escape('    // 0x%08X:' % pc), after[func]), (func, hex(pc))
+            for pc in pcs:
+                assert re.search(re.escape(call) + r'(?:    \w+\(rdram, ctx\);\n)*' + re.escape('    // 0x%08X:' % pc), after[func]), (func, hex(pc))
             after[func] = after[func].replace(call, '')
     return after

@@ -44,7 +44,15 @@ BK_HELPERS += ['tooie_bk_attachment_begin', 'tooie_bk_attachment_end']
 # Shadow producer owner scope (bk_shadow_attach.inc, last): route, light event, begin, end, then the DEFB0
 # projected-body decision called by shadow_projection.c tooie_shadow_de498.
 BK_HELPERS += ['tooie_bk_shadow_route', 'tooie_bk_shadow_light_event', 'tooie_bk_shadow_begin', 'tooie_bk_shadow_end', 'tooie_bk_shadow_project']
-assert len(BK_HELPERS) == len(set(BK_HELPERS)) == 29
+# Native-seam policy (bk_pipeline.c tail, L01/L02): LOD distance/tier, bbox visibility, billboard and one-sided
+# sort advances, the A78E8 branch submission and the transition projection role.
+BK_HELPERS += ['tooie_bk_lod_distance', 'tooie_bk_player_lod_distance', 'tooie_bk_player_lod_tier',
+               'tooie_bk_bbox_visible', 'tooie_bk_billboard_entry', 'tooie_bk_sort_onesided',
+               'tooie_bk_branch_submitted', 'tooie_bk_transition_role_begin', 'tooie_bk_transition_role_end']
+# Option-box text owner (bk_text.inc, L14-VR03, last): scope, free, push, traversal, record, glyph mark/convert, close.
+BK_HELPERS += ['tooie_bk_text_scope', 'tooie_bk_text_freed', 'tooie_bk_text_pushed', 'tooie_bk_text_enter',
+               'tooie_bk_text_record', 'tooie_bk_text_mark', 'tooie_bk_text_glyph', 'tooie_bk_text_close']
+assert len(BK_HELPERS) == len(set(BK_HELPERS)) == 46
 BK_IMPORTS = {'func_800A89F8', 'func_800EB854', 'func_800DE2A4', 'D_80132ED0', 'D_80135450', 'D_8012C948',
               'D_8012C964', 'D_8012C968', 'D_8012C978', 'D_8012C838', 'D_8012CA11', 'D_8012CF8C',
               'D_80127674', 'D_8012D500', 'D_8012D558', 'tooie_render_bridge_state', 'tooie_camera_state'}
@@ -65,6 +73,9 @@ BK_RETIRED = {
 }
 BK_SHADOW_BYTES = 1144
 BK_SHADOW_INITIAL = bytes.fromhex('424b533100000002')+bytes(BK_SHADOW_BYTES-8)
+# L14-VR03 option-box text owner (bk_text.inc layout1): 'BKT1', layout 1, 64 owners and the traversal words.
+BK_TEXT_BYTES = 1872
+BK_TEXT_INITIAL = bytes.fromhex('424b543100000001')+bytes(BK_TEXT_BYTES-8)
 HELPERS = [HELPER] + PLAYER_HELPERS + ACTOR_HELPERS
 GENERATED_FUNCTIONS = FUNCTIONS[:5] + PLAYER_HELPERS + ACTOR_HELPERS + FUNCTIONS[5:6] + [HELPER] + FUNCTIONS[6:8] + SETTERS + LEAF_FUNCTIONS + LIFECYCLE_FUNCTIONS
 EXTRA_FUNCTIONS = {'func_80104248', 'func_800A89F8', 'func_800EB854', 'func_80100368', 'func_800AE080','func_80104148','func_80104200'}
@@ -88,13 +99,15 @@ def relocations(elf):
             and sec.name in {'.rel.recomp_patch', '.rel.text.silo_preflight', '.rel.silo_helper', '.rel.text.player_boundary', '.rel.player_helper', '.rel.text.actor_palette', '.rel.actor_helper'} for r in sec.iter_relocations()]
 
 
-def compile_objects(root, output, run, cpu_root=False, cpu625=False, lifecycle_only=False, npc665=False, shared=False, backpack621=False, hand862=False, talon_trot_toggle=False, honey_reference=HONEY_REFERENCE, required_stop=False, player_secondary=False, secondary_admit=False, bk_pipeline=False):
+def compile_objects(root, output, run, cpu_root=False, cpu625=False, lifecycle_only=False, npc665=False, shared=False, backpack621=False, hand862=False, talon_trot_toggle=False, honey_reference=HONEY_REFERENCE, required_stop=False, player_secondary=False, secondary_admit=False, bk_pipeline=False, bridge_only=False):
     assert all(type(x) is bool for x in (cpu_root,cpu625,lifecycle_only,npc665,shared,backpack621,hand862,talon_trot_toggle,player_secondary,secondary_admit,bk_pipeline))
     assert (shared or not player_secondary) and (player_secondary or not secondary_admit), 'the secondary owner needs the partitioned MAIN extent; admission needs the owner'
-    assert not bk_pipeline or player_secondary, 'BK pipeline joins only the current player composition'
+    # L06b-5: BK joins the shared player composition and labels the split player itself (no secondary owner).
+    assert not bk_pipeline or (shared and not player_secondary), 'BK pipeline joins only the current player composition'
     assert type(required_stop) is bool and (not required_stop or (shared and cpu_root))
     assert not hand862 or (cpu_root and backpack621), 'Hand862 is compiled only into the selected actor-palette 621 composition'
     assert honey_reference is None or type(honey_reference) is str
+    assert type(bridge_only) is bool and not (bridge_only and (cpu_root or shared or lifecycle_only)), 'the Honey comparison object is the standalone bridge alone'
     source = root/'tools/baseline/guest/silo-candidate'
     compiler = root/'deps/LLVM-19.1.3-Windows-X64/bin/clang.exe'
     assert sha(compiler) == '6ac72dac3eb54eb7f807b0c4428c8a61cf73fe77d00be8aec8bc07ab94cdcf23'
@@ -119,8 +132,12 @@ def compile_objects(root, output, run, cpu_root=False, cpu625=False, lifecycle_o
         owners={name:owners[name] for name in ('actor','pair')}
     if shared:owners.pop('bridge')
     if cpu_root:
-        owners['actor']=('actor_palette.c',ACTOR_HELPERS[:1]+['tooie_actor_cpu_root_begin','tooie_actor_feather_leaf_id']+ACTOR_HELPERS[1:])
+        # L06b-7: the BK image builds no actor CPU root (its DEFA0 transport is BK-off only).
+        # L06b-8: nor the feather helper; BK's DD024 takes the BK list node instead.
+        owners['actor']=('actor_palette.c',ACTOR_HELPERS[:1]+([] if bk_pipeline else ['tooie_actor_cpu_root_begin','tooie_actor_feather_leaf_id'])+ACTOR_HELPERS[1:])
     if lifecycle_only:owners={'lifecycle':owners['lifecycle']}
+    # Camera Honey containment compares only the standalone render_bridge.c object.
+    if bridge_only:owners={'bridge':owners['bridge']}
     receipt = {}
     state={'tooie_render_bridge_state'}
     owner_data={'D_80132ED0','D_80135450','D_80136EE0'}
@@ -133,22 +150,24 @@ def compile_objects(root, output, run, cpu_root=False, cpu625=False, lifecycle_o
                           'D_8012C838','D_8012C968','D_8012CF8C','D_8007BCD0',
                           'D_8007BEDA','D_8007BCE8','D_8007BCF0'}|state,
                       'leaf': LEAF_CALLEES|{'D_8012C960','D_8012CEC4','tooie_player_leaf_begin','tooie_player_leaf_end'},
-                      'lifecycle': LIFECYCLE_CALLEES|state|({'tooie_cpu625_retire'} if cpu625 else set()),
+                      'lifecycle': LIFECYCLE_CALLEES|state|({'tooie_cpu625_retire'} if cpu625 and not bk_pipeline else set()),
                       'actor': set('D_8007BCD0 D_8007BCD8 D_8007BCE8 D_8007BCF0 D_8007BEDA D_80124740 D_8012C820 D_8012C824 D_8012C838 D_8012C840 D_8012C850 D_8012C948 D_8012C968 D_8012CA18 D_8012CE58 D_8012CEC4 D_8012CF8C D_80132ED0 D_80135450 D_80136E70 D_80136EE0 func_800AE080 func_80100368 func_80104148 func_80104200'.split())|state}
-    if cpu_root:expected_imports['actor'].add('D_8012C960')
+    if cpu_root and not bk_pipeline:expected_imports['actor'].add('D_8012C960')  # L06b-8: feather helper only
     if cpu_root and npc665:
         expected_imports['pair'].add('func_80100368')
-        expected_imports['actor']|={'func_80100094','func_800A89F8','func_800EB854'}
+        if not bk_pipeline:expected_imports['actor']|={'func_80100094','func_800A89F8','func_800EB854'}  # title53 CPU-root route only
     if required_stop:expected_imports['actor'].add('tooie_bridge_required_stop')
     if npc665:
-        for name in ('pair','bone','silo','actor'):expected_imports[name].add('tooie_npc665_state')
-        expected_imports['pair'].add('baseline_npc665_end_checked')
+        # L06c-1/L06c-2: the BK image links no sidecar or checked END, so no BK object may name either.
+        for name in (() if bk_pipeline else ('pair','bone','silo','actor')):expected_imports[name].add('tooie_npc665_state')
+        if not bk_pipeline:expected_imports['pair'].add('baseline_npc665_end_checked')
         expected_imports['bone']|={'tooie_npc665_bone_push','tooie_npc665_bone_pop'}
         expected_imports['leaf']|={'tooie_render_bridge_state','tooie_npc665_leaf_begin','tooie_npc665_leaf_end'}
-    if backpack621:
+    if backpack621 and not bk_pipeline:
+        # L06c-3: the BK image links no 621 state or helper, so no BK object may name them (L06b-2/L06b-6).
         expected_imports['bone']|={'tooie_backpack621_state','tooie_backpack621_bone_push','tooie_backpack621_bone_pop'}
         expected_imports['leaf']|={'tooie_backpack621_state','tooie_backpack621_leaf_begin','tooie_backpack621_leaf_end'}
-        expected_imports['lifecycle'].add('tooie_backpack621_retire')
+        expected_imports['lifecycle'].add('tooie_backpack621_retire')  # L06b-6
     if talon_trot_toggle:expected_imports['lifecycle'].add('tooie_trot_toggle_retire')
     if player_secondary:
         expected_imports['pair'].add('tooie_player_secondary_begin')
@@ -157,6 +176,8 @@ def compile_objects(root, output, run, cpu_root=False, cpu625=False, lifecycle_o
         # Bone and pair call the BK helpers; bone also advances the BK traversal words directly.
         expected_imports['bone']|={'tooie_bk_state','tooie_bk_set_model_matrix_group','tooie_bk_pop_model_matrix_group'}
         expected_imports['pair']|={'tooie_bk_actor_draw_begin','tooie_bk_scope_end','tooie_bk_de448_begin','tooie_bk_de448_end'}
+        # L07a: palette begin reads the current BK owner (open_group 2 when it matches).
+        expected_imports['actor'].add('tooie_bk_state')
         expected_imports['bk']=set(BK_IMPORTS)
         # The leaf's BK list node supersedes the row leaf labels in this path.
         expected_imports['leaf']=LEAF_CALLEES|{'D_8012C960','D_8012CEC4','tooie_bk_list_begin','tooie_bk_list_end'}
@@ -177,10 +198,10 @@ def compile_objects(root, output, run, cpu_root=False, cpu625=False, lifecycle_o
                 assert imports <= expected_imports[name] and not imports & retired_calls and \
                     expected_imports[name] - imports <= retired_calls | retired_data, ('B4 closed imports', name, imports, expected_imports[name])
             elif name in expected_imports: assert imports==expected_imports[name], ('closed imports',name,imports,expected_imports[name])
-            if name == 'silo': assert imports <= {'tooie_render_bridge_state','D_80135450'}|({'tooie_npc665_state'} if npc665 else set()), imports
+            if name == 'silo': assert imports <= {'tooie_render_bridge_state','D_80135450'}|({'tooie_npc665_state'} if npc665 and not bk_pipeline else set()), imports
             for sec in elf.iter_sections():
                 assert not (sec['sh_flags']&2 and sec['sh_size'] and sec.name not in
-                            {'.recomp_patch','.tooie_render_bridge_state','.reginfo','.MIPS.abiflags'} | ({'.text.silo_preflight'} if name == 'bone' else {'.text.player_boundary'} if name in ('player','secondary') else {'.text.player_boundary','.tooie_bk_state','.tooie_bk_float','.tooie_bk_cut','.tooie_bk_shadow'} if name == 'bk' else {'.text.actor_palette'} if name == 'actor' else set())), (name,sec.name)
+                            {'.recomp_patch','.tooie_render_bridge_state','.reginfo','.MIPS.abiflags'} | ({'.text.silo_preflight'} if name == 'bone' else {'.text.player_boundary'} if name in ('player','secondary') else {'.text.player_boundary','.tooie_bk_state','.tooie_bk_float','.tooie_bk_cut','.tooie_bk_shadow','.tooie_bk_text'} if name == 'bk' else {'.text.actor_palette'} if name == 'actor' else set())), (name,sec.name)
             text = elf.get_section_by_name('.text.player_boundary' if name in ('player','secondary','bk') else '.text.actor_palette' if name == 'actor' else '.recomp_patch').data()
             for sec in elf.iter_sections():
                 if not (sec['sh_flags'] & 4 and sec['sh_size']): continue
@@ -198,6 +219,8 @@ def compile_objects(root, output, run, cpu_root=False, cpu625=False, lifecycle_o
                 assert cut['sh_type']=='SHT_PROGBITS' and cut.data()==BK_CUT_INITIAL, 'BK cut adapter layout1 initializer'
                 shadow = elf.get_section_by_name('.tooie_bk_shadow')
                 assert shadow['sh_type']=='SHT_PROGBITS' and shadow.data()==BK_SHADOW_INITIAL, 'BK shadow state layout2 initializer'
+                bk_text_section = elf.get_section_by_name('.tooie_bk_text')
+                assert bk_text_section['sh_type']=='SHT_PROGBITS' and bk_text_section.data()==BK_TEXT_INITIAL, 'L14-VR03 BK option-text owner layout1 initializer'
                 # R_MIPS_26 encodes both named JAL calls and assembler-local J branches.
                 # A section-symbol J is accepted only within its exact originating function.
                 for relsec in elf.iter_sections():
@@ -344,7 +367,9 @@ def main():
     if not __debug__:  # also false when PYTHONOPTIMIZE is set
         raise SystemExit('prepare_silo_bridge.py: required validation uses assert; run without -O and with PYTHONOPTIMIZE unset')
     parser=argparse.ArgumentParser();parser.add_argument('--root',type=Path,required=True);parser.add_argument('--raw',action='store_true');parser.add_argument('--image',action='store_true');parser.add_argument('--objects',action='store_true')
+    parser.add_argument('--bridge-object',action='store_true',help='Only the standalone bridge.o that camera Honey containment compares; no other owner object, no image')
     parser.add_argument('--no-prior-honey',action='store_true',help='Maintained recipe: no historical draw-boundaries image; the camera image pin binds the result');args=parser.parse_args()
+    if args.bridge_object and (args.image or args.objects):parser.error('--bridge-object excludes --image and --objects')
     root=args.root.resolve();output=root/'build/windows-dev/baseline/render-bridge-silo-candidate';output.mkdir(exist_ok=True)
     assert sha(root/'deps/N64Recomp-codegen/build/N64Recomp')=='34958d6ae8c047adb772090c75fdcc051036646a1db58595694f814c3a4a09b6'
     def run(command,label):
@@ -355,6 +380,7 @@ def main():
     honey_reference=None if args.no_prior_honey else HONEY_REFERENCE
     if args.image:image(root,output,run,honey_reference);print('image',sha(output/'receipt.json'))
     elif args.objects:compile_objects(root,output,run,honey_reference=honey_reference);print('objects',sha(output/'OBJECT_BINDING.json'))
+    elif args.bridge_object:compile_objects(root,output,run,honey_reference=honey_reference,bridge_only=True);print('bridge object',sha(output/'bridge.o'))
 
 
 if __name__=='__main__':main()

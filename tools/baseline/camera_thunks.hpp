@@ -21,10 +21,16 @@ extern "C" void tooie_bridge_required_stop(uint8_t*, recomp_context* ctx) {
 #if TOOIE_BASELINE_CAMERA_RUNTIME_OBSERVER
 #include "shadow_witness.hpp"
 #endif
-#if TOOIE_ACTOR_PALETTE_SELECTED
+#if TOOIE_ACTOR_PALETTE_SELECTED && !TOOIE_BK_PIPELINE_SELECTED  // L06b-7
 extern "C" void tooie_camera_cpu_root_begin(uint8_t*, recomp_context*);
 #endif
+#if !TOOIE_SHADOW_SELECTED
+// Only the shadow-less DEFB0 transport below calls this leaf.
 extern "C" void tooie_camera_de498_ignore(uint8_t*, recomp_context*);
+#endif
+#if TOOIE_BK_PIPELINE_SELECTED && !TOOIE_SHADOW_SELECTED
+#error "L06b-1a: the BK image builds no DEFB0 ignore leaf; the shadow owner must own DEFB0"
+#endif
 extern "C" void tooie_camera_construction_begin(uint8_t*, recomp_context*);
 extern "C" void tooie_camera_construction_end(uint8_t*, recomp_context*);
 #if TOOIE_SHADOW_SELECTED
@@ -75,7 +81,7 @@ extern "C" void baseline_camera_de498_ignore(uint8_t* rdram, recomp_context* ctx
     tooie_camera_de498_ignore(rdram, &clone);
 #endif
 }
-#if TOOIE_ACTOR_PALETTE_SELECTED
+#if TOOIE_ACTOR_PALETTE_SELECTED && !TOOIE_BK_PIPELINE_SELECTED  // L06b-7: DEFA0 hook is BK-off only
 extern "C" void baseline_actor_cpu_root_begin(uint8_t* rdram, recomp_context* ctx) {
     recomp_context clone;
     camera_clone_de498_args(rdram, clone, *ctx);

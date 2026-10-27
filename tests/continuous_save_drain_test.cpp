@@ -6,6 +6,7 @@
 #endif
 #include TOOIE_SAVE_RUNTIME_SOURCE
 #include "runtime_lifecycle.hpp"
+#include "runtime_save_root.hpp"
 #include <atomic>
 #include <array>
 #include <chrono>
@@ -24,12 +25,27 @@ int main(int argc, char** argv) {
         if (argc != 3) throw std::runtime_error("usage: MODE NEW_OUTPUT_PATH");
         const std::string mode = argv[1];
         const bool owned = mode == "owned-admitted" || mode == "owned-refused" || mode == "startup-held" || mode == "owned-failure";
-        if (!owned && mode != "final-write" && mode != "wait-producer" && mode != "disabled" && mode != "empty" && mode != "write-failure")
+        const bool path_mode = mode == "save-path-config" || mode == "save-path-profile";
+        if (!owned && !path_mode && mode != "final-write" && mode != "wait-producer" && mode != "disabled" && mode != "empty" && mode != "write-failure")
             throw std::runtime_error("unknown mode");
         const std::filesystem::path output = argv[2];
         if (std::filesystem::exists(output)) throw std::runtime_error("test output must be new");
         if (mode != "write-failure") std::filesystem::create_directories(output.parent_path());
         else if (std::filesystem::exists(output.parent_path())) throw std::runtime_error("failure fixture parent must be absent");
+        if (path_mode) {
+            // Startup save-path derivation only: no saver thread, file or lifecycle use.
+            // config: the selected player's runtime config_path/saves contract, ignoring a
+            // registered override. profile: the legacy engine's registered save root.
+            const auto root = output.parent_path();
+            recomp::register_config_path(root / "config");
+            tooie::register_save_root(root / "profile" / "saves");
+            set_save_file_path(u8"", u8"bt.n64.us.1.0");
+            const auto folder = mode == "save-path-config" ? root / "config" / "saves" : root / "profile" / "saves";
+            if (ultramodern::get_save_file_path() != folder / "bt.n64.us.1.0.bin")
+                throw std::runtime_error("save path derivation differs from the selected runtime contract");
+            std::cout << "PASS continuous save drain " << mode << '\n';
+            return 0;
+        }
         if (mode != "disabled") tooie::lifecycle::enable();
         if (owned) tooie::lifecycle::own_final_drain();
         save_context.save_file_path = output;

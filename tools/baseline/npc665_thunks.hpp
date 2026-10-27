@@ -2,11 +2,23 @@
 #if !defined(TOOIE_NPC665_SELECTED) || (TOOIE_NPC665_SELECTED != 0 && TOOIE_NPC665_SELECTED != 1)
 #error Explicit boolean TOOIE_NPC665_SELECTED required
 #endif
+#if !defined(TOOIE_BK_PIPELINE_SELECTED) || (TOOIE_BK_PIPELINE_SELECTED != 0 && TOOIE_BK_PIPELINE_SELECTED != 1)
+#error Explicit boolean TOOIE_BK_PIPELINE_SELECTED required
+#endif
+#if !defined(TOOIE_NPC665_SECTION_PRESENT) || TOOIE_NPC665_SECTION_PRESENT!=(TOOIE_NPC665_SELECTED && !TOOIE_BK_PIPELINE_SELECTED)
+#error L06c-2 NPC665 section-presence contract
+#endif
 #if TOOIE_NPC665_SELECTED
+#if TOOIE_NPC665_SECTION_PRESENT
+// L06c-2: END exists, and is declared, only where its section is linked.
+extern "C" void tooie_npc665_end(uint8_t*,recomp_context*);
+#endif
+#if !TOOIE_BK_PIPELINE_SELECTED
+// L06b-3: these three transports are installed only with BK off (npc665_hooks gate in
+// prepare_camera_bridge.prepare_raw), and the BK image builds none of their guest bodies.
 extern "C" void tooie_npc665_capture(uint8_t*,recomp_context*);
 extern "C" void tooie_npc665_retire(uint8_t*,recomp_context*);
 extern "C" void tooie_npc665_admit(uint8_t*,recomp_context*);
-extern "C" void tooie_npc665_end(uint8_t*,recomp_context*);
 // 8010108C before 801010E8: s0 holds the actor; v0 is func_80100368's return.
 // SP+0x34 is the saved incoming a1 (store 80101098, reload 801010F0).
 // Read ctx's frame: camera_clone_context gives clone a separate outgoing area.
@@ -40,10 +52,14 @@ extern "C" void baseline_npc665_admit(uint8_t* rdram,recomp_context* ctx) {
     baseline::issue_evidence::record(draw);
 #endif
 }
-// Absolute import called by the guest pair; sole caller of the guest end. Use the real
-// context: normal return must equal the compiled guest body's complete output context.
+#endif
+#if !TOOIE_BK_PIPELINE_SELECTED
+// Absolute import (0x8F000034) called by the BK-OFF guest pair; sole caller of the guest end. Use the real
+// context: normal return must equal the compiled guest body's complete output context. Under BK no guest
+// object imports it (prepare_silo_bridge.py BK_RETIRED['pair']), so its native body is not built (L06b-1b).
 extern "C" void baseline_npc665_end_checked(uint8_t* rdram,recomp_context* ctx) {
     tooie_npc665_end(rdram,ctx);
     if(ctx->r2)rejected_body("NPC665 guest paid-close ownership tripwire");
 }
+#endif
 #endif

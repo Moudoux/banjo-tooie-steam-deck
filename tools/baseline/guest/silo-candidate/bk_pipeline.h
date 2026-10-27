@@ -58,12 +58,17 @@ typedef uint32_t TooieBkWord;
 #define TOOIE_BK_OWNER_ACTOR 1u
 #define TOOIE_BK_OWNER_PLAYER 2u
 #define TOOIE_BK_OWNER_SHADOW 3u              /* bk_shadow_attach.inc: shadow producer draws */
-#define TOOIE_BK_OWNER_MENU 4u                /* tooie_bk_menu_model_begin: menu models and transition masks */
+#define TOOIE_BK_OWNER_MENU 4u                /* tooie_bk_menu_model_begin: menu models, transition masks, UI models */
 /* menu_scope.hpp model/sprite blocks [START, END); the five transition mask windows follow at END. The DEFB0
  * projection of a menu bit40 model is its model ID + OFFSET (shadow_projection.c), past the transition IDs. */
 #define TOOIE_BK_MENU_ID_START 0x30000000u
 #define TOOIE_BK_MENU_ID_END 0x30060000u
 #define TOOIE_BK_MENU_PROJECTION_OFFSET 0x00080000u
+/* @tooie Unowned core DF944 UI models (ui_scope.hpp): 8 models x 8 draw ordinals of model/sprite pairs, 512
+ * apart, owned through the same menu owner scope and projected at ID + MENU_PROJECTION_OFFSET, past the menu
+ * projection mirror. */
+#define TOOIE_BK_UI_ID_START 0x30100000u
+#define TOOIE_BK_UI_ID_END 0x30108000u
 
 struct TooieBkOwner {
     /* birth: an actor's creation generation; a player's drawing roster slot + 1 (0: no player identity). */
@@ -115,13 +120,13 @@ struct TooieBkState {
      * owned projected-shadow root; select_declined counts such roots kept on the original numbering.
      * Selector frames live in handlers[] (sp = the selector activation's SP, opened = its base ordinal). */
     TooieBkWord select_roots, select_declined;
-    /* @tooie Visible-branch continuity. branch_commits and branches[].committed* are written natively at
-     * the A78E8 submission seam only (tooie_bk_branch_commit); guest helpers own the rest. */
+    /* @tooie Visible-branch continuity. branch_commits and branches[].committed* are written at the A78E8
+     * submission seam only (tooie_bk_branch_submitted, with tooie_bk_branch_commit); guest helpers own all of it. */
     TooieBkWord branch_cuts, branch_declined, branch_latch_overflow, branch_commits;
     struct TooieBkBranchLatch branch_latches[TOOIE_BK_BRANCH_LATCHES];
     struct TooieBkBranch branches[TOOIE_BK_BRANCH_ENTRIES];
     /* @tooie Projected-shadow branch continuity (bk_shadow_attach.inc tooie_bk_shadow_project, DEFB0): its own
-     * table keyed by shadow body sample IDs, never the player's, committed natively at A78E8 with branches[].
+     * table keyed by shadow body sample IDs, never the player's, committed at A78E8 with branches[].
      * shadow_body_id: the current A6250 activation's tagged body sample; shadow_body_snap: its DEFB0
      * decision, followed by that activation's attachment. shadow_projected: the open shadow scope is an
      * A6250 body or attachment (not the blob), whose root takes the type-12 reservation above. */
@@ -191,6 +196,11 @@ TOOIE_BK_ASSERT(TOOIE_BK_PLAYER_ID_END <= 0x40000000u && TOOIE_BK_PLAYER_SLOT_ID
     (unsigned long long)TOOIE_BK_ACTOR_ID_START +
     (unsigned long long)TOOIE_BK_ACTOR_GENERATIONS * TOOIE_BK_ACTOR_OWNER_STRIDE <= TOOIE_BK_ACTOR_ID_END,
     "BK owner domains disjoint from live Tooie domains");
+TOOIE_BK_ASSERT(TOOIE_BK_UI_ID_START >= TOOIE_BK_MENU_ID_END + TOOIE_BK_MENU_PROJECTION_OFFSET &&
+    TOOIE_BK_UI_ID_START + TOOIE_BK_MENU_PROJECTION_OFFSET >= TOOIE_BK_UI_ID_END &&
+    TOOIE_BK_UI_ID_END + TOOIE_BK_MENU_PROJECTION_OFFSET <= 0x40000000u &&
+    !(TOOIE_BK_UI_ID_START % (2u * TOOIE_BK_TRANSFORM_ID_COUNT)),
+    "UI models and their projections follow the menu projection mirror, below the product labels");
 TOOIE_BK_ASSERT(__builtin_offsetof(struct TooieBkShadow, body_frame) == 24 &&
     __builtin_offsetof(struct TooieBkShadow, projection) == 28 &&
     __builtin_offsetof(struct TooieBkShadow, projection_open) == 32 &&
@@ -340,6 +350,9 @@ static inline TooieBkWord tooie_bk_shadow_branch(volatile struct TooieBkBranch* 
 /* A78E8, construction `frame` submitted: each sample's committed baseline becomes exactly what this
  * workload drew, or unknown when it drew the sample unsupported, inconsistently, or not at all. A
  * suppressed construction never reaches here, so it never commits. */
+#if defined(TOOIE_BRIDGE_GUEST)
+__attribute__((always_inline))
+#endif
 static inline void tooie_bk_branch_commit(volatile struct TooieBkBranch* table, TooieBkWord frame) {
     TooieBkWord i;
     for (i = 0; i < TOOIE_BK_BRANCH_ENTRIES; i++) {
@@ -352,6 +365,42 @@ static inline void tooie_bk_branch_commit(volatile struct TooieBkBranch* table, 
         else e->committed_valid = 0;
     }
 }
+
+/* ---- Native-seam policy (L01): pure rules shared by the guest helpers (bk_pipeline.c tail) and host
+ * tests. Floats cross the native seam as IEEE-754 bits in v0, so the guest object needs no FP constants. */
+#define TOOIE_BK_LOD_DISTANCE_BITS 0x451C4000u          /* 2500.0f: BK GeoCmd8 distance 50, squared */
+#define TOOIE_BK_PLAYER_LOD_DISTANCE_BITS 0x42480000u   /* 50.0f: BK lod_patches fixed distance, linear */
+#define TOOIE_BK_LOD_ALIAS_SELECTOR 0x607               /* body primary selector, s16 +0x0C */
+/* D_80117DD0's resources: ordinary 62A/62B and Dragon 838/839 (tier0/tier1). */
+#if defined(TOOIE_BRIDGE_GUEST)
+__attribute__((always_inline))
+#endif
+static inline TooieBkWord tooie_bk_lod_table_resource(TooieBkWord resource) {
+    return resource == 0x62Au || resource == 0x62Bu || resource == 0x838u || resource == 0x839u;
+}
+/* 94070 940B8: a body with the alias selector and an installed table resource (+0x10C) takes BK's
+ * fixed linear distance; every other body keeps EEAD4's distance. */
+#if defined(TOOIE_BRIDGE_GUEST)
+__attribute__((always_inline))
+#endif
+static inline TooieBkWord tooie_bk_player_lod_distance_rule(int selector, TooieBkWord resource, TooieBkWord distance) {
+    return selector == TOOIE_BK_LOD_ALIAS_SELECTOR && tooie_bk_lod_table_resource(resource) ?
+        TOOIE_BK_PLAYER_LOD_DISTANCE_BITS : distance;
+}
+/* 93F30 in the authenticated 94038 call: map-table tier 1 becomes tier 0 for the alias selector; the form
+ * column and the original install path are unchanged. */
+#if defined(TOOIE_BRIDGE_GUEST)
+__attribute__((always_inline))
+#endif
+static inline TooieBkWord tooie_bk_player_lod_tier_rule(int selector, TooieBkWord tier) {
+    return tier == 1u && selector == TOOIE_BK_LOD_ALIAS_SELECTOR ? 0u : tier;
+}
+/* BK func_803385BC: a sorted node whose byte +0x21 has bit0 set is one-sided: one advance before its
+ * single original child, and no stable-order construction. */
+#if defined(TOOIE_BRIDGE_GUEST)
+__attribute__((always_inline))
+#endif
+static inline TooieBkWord tooie_bk_sort_one_sided(TooieBkWord flags) { return flags & 1u; }
 
 #ifdef TOOIE_BRIDGE_GUEST
 extern volatile struct TooieBkState tooie_bk_state;

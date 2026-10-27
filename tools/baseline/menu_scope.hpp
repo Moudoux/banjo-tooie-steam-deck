@@ -17,8 +17,10 @@ enum Component : uint32_t { model, sprite };
 struct Slot { uint32_t owner, frame, draws, fresh, emitted; };
 struct Context { uint32_t valid, slot, owner, gfx, invocation, box, role, cut; };
 struct State { Slot entries[slots]{}; Context active{}; };
-/* Original option init5/free7 are the only lifecycle authority. An unavailable
- * slot stays unregistered; never evict a still-live option to tag a later one. */
+/* Identity is the drawn option address (entry1 a0). init5 registers early and marks a reused address fresh,
+ * free7 retires; they are not the only lifetime: post-4.4 captures draw and free option addresses init5 never
+ * saw. enter admits those and restarts history after a skipped construction. This is not BK parity: a moved
+ * option costs a cut, and only a move hook (none bound) could carry its history. A recent drawer is never evicted. */
 inline bool initialize(State& s, uint32_t owner, uint32_t frame) {
     if (!owner || !frame) return false;
     for (auto& e : s.entries) if (e.owner == owner) { e.fresh=1; e.emitted=0; return true; }
@@ -28,19 +30,33 @@ inline bool initialize(State& s, uint32_t owner, uint32_t frame) {
 inline void retire(State& s, uint32_t owner) {
     for (auto& e : s.entries) if (e.owner == owner) { e.owner=0; e.emitted=0; }
 }
+/* @tooie An owner with no slot is admitted at its draw: a free slot, else one whose owner drew in neither this
+ * nor the previous construction. It starts fresh (cut). BK keys identity by the drawn element alone. */
+inline bool admit(State& s, uint32_t owner, uint32_t frame) {
+    for (auto& e : s.entries) if (!e.owner && e.frame!=frame) { e={owner,frame,0,1,0}; return true; }
+    for (auto& e : s.entries) if (e.owner && frame>e.frame && frame-e.frame>1u) { e={owner,frame,0,1,0}; return true; }
+    return false;
+}
 /* Every caller saves/restores Context, INCLUDING a refused invocation. Otherwise
  * an unsupported nested menu could accidentally inherit the outer owner's IDs. */
 inline Context enter(State& s, uint32_t owner, uint32_t gfx, uint32_t frame) {
     Context previous = s.active;
     s.active = {};
     if (!owner || !gfx || !frame) return previous;
-    for (uint32_t i=0; i<slots; ++i) {
-        auto& e=s.entries[i];
-        if (e.owner != owner) continue;
-        if (e.frame != frame) { e.frame=frame; e.draws=0; e.emitted=0; }
-        if (e.draws >= invocations) return previous;
-        s.active={1,i,owner,gfx,e.draws++,0,0,e.fresh};
-        return previous;
+    for (uint32_t pass=0; pass<2u; ++pass) {
+        for (uint32_t i=0; i<slots; ++i) {
+            auto& e=s.entries[i];
+            if (e.owner != owner) continue;
+            if (e.frame != frame) {
+                // BK history continues only from the previous construction.
+                if (frame>e.frame && frame-e.frame>1u) e.fresh=1;
+                e.frame=frame; e.draws=0; e.emitted=0;
+            }
+            if (e.draws >= invocations) return previous;
+            s.active={1,i,owner,gfx,e.draws++,0,0,e.fresh};
+            return previous;
+        }
+        if (pass || !admit(s, owner, frame)) return previous;
     }
     return previous;
 }

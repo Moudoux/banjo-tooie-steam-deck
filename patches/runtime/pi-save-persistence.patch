@@ -5,9 +5,6 @@
 +#include "runtime_save_root.hpp"
 +#include "save_persistence.hpp"
  #include <memory>
-@@ -108,1 +111,1 @@
--    std::filesystem::path save_folder_path = config_path / save_folder;
-+    std::filesystem::path save_folder_path = tooie::runtime_save_folder(config_path);
 @@ -115,2 +118,3 @@
  void update_save_file() {
      bool saving_failed = false;

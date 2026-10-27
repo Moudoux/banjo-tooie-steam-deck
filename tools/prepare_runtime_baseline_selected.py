@@ -24,6 +24,7 @@ PATCHES = {
     'events-q-vi-lock': ('a2cee8eafb01f4e6a5779174e6d9faa2e471fa855f621552c05c73f53b05321b', 'events.cpp', 3),
     'timer-guest-clock': ('3f1db54412c4df52048c0607c47ac49a725629a1b55e156bceceaa06e4641cbb', 'timer.cpp', 8),
     'events-guest-clock': ('594a6c424ac803ed54feb31c4c53e7fc5db8d4db97434324a8a552874fb4bd22', 'events.cpp', 3),
+    'events-startup-join': ('b1489cc546d8357630ae354a411f80901005221049dad15358582eb5632c979b', 'events.cpp', 1),
     'events-sp-exception': ('73511703d287ce3fcf76eecafe16d97c8806a0dc448dca7f86529627dde2614f', 'events.cpp', 2),
     'events-next-framebuffer': ('6e17ed72a30d942af19ed4242c9e8a3f8f947bad9d709cc264498b1084b5ab27', 'events.cpp', 1),
     'events-dp-freeze': ('7f287aec255a5dcb9eaa2ae53082403ff9a4eaa67c22b0f56d65e4f5d5864cdf', 'events.cpp', 3),
@@ -31,11 +32,11 @@ PATCHES = {
     'producer-quiescent-cleanup': ('9b4261af055d9677c061065c1d7588e79fcec74f679dac6cf12d3c069e2319fb', 'ultramodern/src/threads.cpp', 1),
     'threadqueue-removal': ('713659775b22eeac5c1e6f23322af35f68d66eec580819e6c0e41ee5a67b56da', 'ultramodern/src/threadqueue.cpp', 2),
     'dp-freeze': ('4006e77ef9591ac7584e84ad348eb237b09799b56962b0ed70d45100d53cfa23', 'dp.cpp', 2),
-    'recomp-terminal-fence': ('eb157ab9876972d73b610edc5280cfd6475930591d119b3eb3877429cd12aae2', 'recomp.cpp', 4),
+    'recomp-terminal-fence': ('969f01d17e35cbf9be5eafb98bc5414c5e75e09431c96cbfbc186fea90278304', 'recomp.cpp', 5),
     'mesgqueue-required-admission': ('912b8c1c6cd7e658ab63bcfbb6d4320c536c9104008e5512633abdd0919bf644', 'mesgqueue.cpp', 4),
 }
 EXPECTED = {
-    'baseline/guest-clock/events.cpp': '720195ce6c8d2a77dc6c6b256e4ec10f0f6d744337d3dfe8fbb1221ce100298c',
+    'baseline/guest-clock/events.cpp': 'b706c8ba3c63f89879e6d9839fe5b833da2b09b7987a42d0d85ff26ba63a7059',
     'baseline/guest-clock/timer.cpp': '910d020a22203cc6d0c91f2c7aed0c0856835ab8bed2c6dffd948e35483de37c',
     'baseline/lifecycle/events.cpp': 'c680d7ba54a66010eabaad23dfa26d1c7dea35030ed0ae75cec4e5306470e9b0',
     'baseline/scheduler-event/events.cpp': '7ad9ad3def0f061125db69ed608078558141aecfa1ed715588b807fdcdf5dee2',
@@ -46,12 +47,12 @@ EXPECTED = {
     'baseline/controller-cycle/threadqueue.cpp': '67f48b19bc92f2cd8abba882b53209d5bbba1d297c0ad0c159108eb4faa8e621',
     'baseline/lifecycle/mesgqueue.cpp': '0889f02f33c2da072eebdccaccc81bcdeba09993eb7ea3e020200feaeabfcf8d',
     'baseline/dp-freeze/dp.cpp': 'ac866e51f0cb90c07ee330bfd7579ef4ead8c9c30bfc0cb285d09e515c3df4e4',
-    'baseline/lifecycle/recomp.cpp': '53f3f6480924483fcc3e19a7f90632abf2e6b3997bb6b85c6614ad66501bcc89',
-    'runtime-continuous/pi.cpp': 'e44d154c455cbd1d4d9a1cf61dc9d4c2ca74274b1515f6c0f23e735ce7a868ba',
+    'baseline/lifecycle/recomp.cpp': '7edb9c7969f6d9c7ced86889675c565aed813dd450e18b456e873c8ed2e6a2e3',
+    'runtime-continuous/pi.cpp': '80e1960727eda5d26a6fcef6795190c22f51791184b2fe252e9afcaf7fab0a5e',
 }
 RECIPES = {
     'owned_timer.py': '16566e4fdf843d5094eab27e05e72a98e5d4a06f9d9971a149bd40a40b3a6545',
-    'prepare_runtime_continuous.py': '404e24fe8646359715145f6ba81ab7d71e61317db80918a273f30ecffb80f7fb',
+    'prepare_runtime_continuous.py': '20ea45e1d86d663f7a2e14525389456321c1e7a1794c731a358373dac5f2b1f2',
     'prepare_runtime_threadqueue.py': 'ffcdb4d858342572348608f7fd2114f729637b4686d3c14d3e3a6171174f7143',
 }
 
@@ -137,8 +138,10 @@ def materialize(root, runtime, build):
     emit('baseline/dp-freeze/events.cpp', events)
     events = patch(events, 'events-sp-exception')
     emit('baseline/lifecycle/events.cpp', events)
-    # F6 player arm: the consumed SP-exception child plus only the guest-clock VI hunks.
-    emit('baseline/guest-clock/events.cpp', patch(events, 'events-guest-clock'))
+    # F6 player arm: the consumed SP-exception child plus the guest-clock VI hunks and
+    # the startup-failure VI join guard.
+    emit('baseline/guest-clock/events.cpp',
+        patch(patch(events, 'events-guest-clock'), 'events-startup-join'))
     # F6 player child of the unchanged copied 1x timer (baseline_timer + ordinary).
     emit('baseline/guest-clock/timer.cpp',
         patch(continuous.baseline_timer(originals['ultramodern/src/timer.cpp']), 'timer-guest-clock'))
@@ -153,7 +156,8 @@ def materialize(root, runtime, build):
         patch(continuous.messages(originals['ultramodern/src/mesgqueue.cpp']), 'mesgqueue-required-admission'))
     emit('baseline/dp-freeze/dp.cpp', patch(originals['librecomp/src/dp.cpp'], 'dp-freeze'))
     emit('baseline/lifecycle/recomp.cpp', patch(originals['librecomp/src/recomp.cpp'], 'recomp-terminal-fence'))
-    emit('runtime-continuous/pi.cpp', continuous.saving(originals['librecomp/src/pi.cpp']))
+    # Player: upstream config_path/saves; the legacy-only profile save-root hunk is omitted.
+    emit('runtime-continuous/pi.cpp', continuous.saving(originals['librecomp/src/pi.cpp'], save_root=False))
     require(len(outputs) == len(EXPECTED), 'Incomplete fixed output set')
     manifest = dict(scope='Fixed selected baseline runtime sources; timer separate; F6 player guest-clock timer/VI children; no historical raw acquisition', runtime_pin=PIN,
         inputs=[dict(path=str(p), sha256=sha(data)) for p, data in sorted(inputs.items())],

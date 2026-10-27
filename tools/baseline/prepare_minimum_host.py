@@ -25,7 +25,7 @@ MUSIC_ORIGINAL_ELF_SHA256='331fe74764f14ef480688da128bb0c75ee388c416e6af7de38bef
 # Unqualified: root must install independently inspected object frames/image evidence.
 MUSIC_FRAMES={'func_80025ED0':56,'func_800123BC':48}
 # Pre-Q15/Q16/Q30 selected image was 7917a5cdbdc6abb2a9b6eafa96265e3a729501b4e7f4cad32d5c15ef012a8592.
-MUSIC_SELECTED_IMAGE_SHA256='263e1d27d21ebd9d1604f7096cf6f97466b1b74041dbd745cce278980b21b3d8'
+MUSIC_SELECTED_IMAGE_SHA256='6845c8ced20a737a46324e7d388cf9c73e07d6f32d8dda8a71467bb8661f5bc8'
 NATIVE_IMPORTS={'tooie_get_latched_widescreen_settings':0x8F000020,
                 'tooie_baseline_presentation_settings':0x8F000024,
                 'tooie_baseline_presentation_publish':0x8F000028,

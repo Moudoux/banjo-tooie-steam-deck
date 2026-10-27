@@ -1,6 +1,6 @@
 # Banjo-Tooie: Scurvy Dog Port player guide
 
-For the local, unreleased Windows x64 Alpha 4.4-dev candidate. Scurvy Dog Port
+For Alpha 4.5 on Windows x64. Scurvy Dog Port
 is unofficial and the game is not included.
 
 ## Install and first launch
@@ -111,19 +111,33 @@ settings**. **Resume** returns to the game and **Quit** exits.
 - Default (Original) uses the game's original output rate. This label replaces
   Current; it does not change an existing output-rate choice.
 
-- **Audio:** **Mute Talon Trot movement sound** is off by default. Changes apply
+- **Audio:** **Master volume** controls all game audio; **Music volume** separately controls music. Both default to 100% and are saved with your settings. Setting Master volume to 0 silences audio without pausing playback.
+  **Mute Talon Trot movement sound** is off by default. Changes apply
   on the next movement sound, without restarting. Long-legged and stilt movement
   sounds are unchanged.
 
-### Texture packs (experimental, Alpha 4.3)
+### Texture packs (experimental, untested)
 
 - Place RT64 `.rtz` texture packs in
   `%LOCALAPPDATA%\BanjoTooieScurvyDogPort\mods`, then restart the game. There is
   no pack menu yet.
 - This experimental support loads texture replacements only. Code mods, ROM
   patches and modified ROMs are unsupported.
-- Pack loading passed startup checks; in-game replacement appearance has not
-  yet been verified.
+- Packs load when the game starts. To stop using a pack, close the game, move
+  its file out of the `mods` folder, then start the game again.
+- Where two packs replace the same texture, the pack listed first in
+  `mod_order` in `mods.json` (in the profile folder) wins. The game writes that
+  file after it starts, placing a newly added pack ahead of packs it has
+  already seen.
+- A pack with its own HD texture setting loads only when that setting is on.
+  There is no pack menu, so the pack's saved or default setting applies.
+- If a pack file cannot be opened, the game uses the original textures for
+  every pack, and `player.log` records this.
+- If a mod stops the game from starting, the closing message names it and the
+  folder to move it out of. Move it, then start the game again. The same
+  message, with the folder, is written to `player.log`.
+- Texture pack support is untested in this release; in-game replacement has
+  not been checked.
 
 ## Default controls
 
@@ -139,8 +153,10 @@ settings**. **Resume** returns to the game and **Quit** exits.
 
 ## Known issues
 
-- Backpack shadows and shadows while sliding on slopes can render incorrectly.
-- The latest menu and transition-edge corrections need broader player testing.
+- The backpack shadow can appear detached in some situations.
+- The warp menu can jitter while it opens.
+- Deferred: a shadow issue on the tent slope and the Clockwork view.
+- Texture packs are untested.
 - F6 fast-forward is not available in this player.
 - The full game has not been verified start to finish.
 
@@ -154,6 +170,7 @@ settings**. **Resume** returns to the game and **Quit** exits.
 | Profile folder refused | Move the unrelated files out of `%LOCALAPPDATA%\BanjoTooieScurvyDogPort`. |
 | Alpha 3 progress missing | The save is only offered while the Scurvy Dog Port profile has no save. Your Alpha 3 file is still in its original folder. |
 | Alpha 4 progress missing | It is copied only while `%LOCALAPPDATA%\BanjoTooieScurvyDogPort` does not exist. Your `BanjoTooieEncore` folder is unchanged. |
+| Game closes with a mod message | Move the named mod out of `%LOCALAPPDATA%\BanjoTooieScurvyDogPort\mods`, then start again. If no message appears, check `player.log`. |
 
 ## Reporting a problem
 

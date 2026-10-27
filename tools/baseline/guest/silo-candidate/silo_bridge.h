@@ -63,7 +63,9 @@ SI void silo_epoch(void) {
 }
 SI void silo_retire(volatile struct TooieSiloSlot* e) {
     if (e->block_and_valid & TOOIE_BRIDGE_BLOCK_VALID) {
-#if TOOIE_NPC665
+#if TOOIE_NPC665 && !(defined(TOOIE_BK_PIPELINE) && TOOIE_BK_PIPELINE)
+        /* @tooie L06c-1: BK builds no NPC665 admission (L06b-3), so SC.admitted is never
+           TOOIE_NPC665_ADMITTED there and this hop could only read the sidecar. */
         if(e->flags==TOOIE_NPC665_ROUTE || e->flags==TOOIE_SKELETAL_ROUTE)
             npc665_invalidated(((u32)e-(u32)SS.silo)/72u);
 #endif

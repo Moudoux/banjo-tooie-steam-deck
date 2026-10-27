@@ -6,6 +6,7 @@ from pathlib import Path
 import toml
 import prepare_render_bridge as accepted
 import prepare_silo_bridge as held
+import prepare_boot_heap as boot_owner
 import prepare_cpu625 as cpu_owner
 import prepare_minimum_host as host_owner
 import minimum_host_hooks as host_hooks
@@ -56,11 +57,18 @@ SHADOW_MV_TAIL=44
 # BK selection: the generic BK shadow scope owns the producer's draws; these camera helpers remain
 # (DEFB0 projection policy, compositor full frame, texture-LUT mode scope, completion check).
 SHADOW_BK_HELPERS=['tooie_shadow_reset','tooie_shadow_de498','tooie_shadow_rectangle_args','tooie_shadow_mode_begin','tooie_shadow_mode_end','tooie_shadow_complete']
+# L06b-1a: BK always selects the shadow owner, which owns DEFB0, so the DEFB0 ignore leaf is not built there.
+BK_RETIRED_CAMERA_HELPERS={'tooie_camera_de498_ignore'}
+# L08b: under BK the selected raw keeps the original Honey body, so this hook-contract provider is raw-only
+# there: the image builds no replacement and registers no provider row for it.
+BK_RAW_ONLY_PROVIDERS={'func_80800380_chhoneycarrier'}
 # Shadow-fix hooks whose seams the BK shadow scope owns (bk_shadow_attach_hooks).
 SHADOW_BK_RETIRED_HOOKS={'baseline_shadow_source_local','baseline_shadow_source_fallback','baseline_shadow_prepare','baseline_shadow_mv_end'}
 CPU_ROOT_HELPERS=['tooie_actor_cpu_root_begin','tooie_camera_cpu_root_begin']
 FEATHER_LEAF_HELPER='tooie_actor_feather_leaf_id'
 FEATHER_LEAF_PATCH='func_800DD024'
+# L06c-3: the five shared output sections whose measured tuples the registry checks (ELF indices 1,2,3,4,8).
+SHARED_ELF_SECTIONS=['.recomp_patch','.silo_helper','.player_helper','.tooie_camera_helpers','.actor_helper']
 # Batch06 standalone-reference migration (reviewed option B): the current bridge-state ABI, and the
 # unregenerated legacy standalone image it migrates from (an explicit, fixed premise).
 BRIDGE_STATE_BYTES=23036
@@ -78,17 +86,19 @@ CORE2_BRIDGE_RESTORED=['func_800EBED4','func_800DCF48','func_80101808','func_800
 # PC[8] secondary admission (S-B) is a separate acceptance; S-A integrates route provenance only.
 SECONDARY_ADMIT=True
 CORE2_TROT_RESTORED=['bs_setState','bainput_update','func_800F86D8']
+# Native ROM-PIO provider (adapters.cpp rom_read_word; raw-condition ignored), restored at its selected.syms row.
+ROM_PIO_PROVIDER='rom_read_word'
 
 def write_if_changed(path,text):
     data=text.encode('utf-8')
     if not path.exists() or path.read_bytes()!=data:path.write_bytes(data)
 
-def prepare_honey_containment(root, output, run, npc665=False, backpack621=False, talon_trot_toggle=False, required_stop=False):
+def prepare_honey_containment(root, output, run, npc665=False, backpack621=False, talon_trot_toggle=False, required_stop=False, bk_pipeline=False):
     """Compile maintained Honey C with camera containment enabled; other bridge builds leave it off."""
     from elftools.elf.elffile import ELFFile
     from elftools.elf.relocation import RelocationSection
     source=root/'tools/baseline/guest/silo-candidate/render_bridge.c'
-    assert sha(source)=='64ad728e576e9db60fc69378d224c8e432f4031acca2a0b9dec6a2e208f8fee3'
+    assert sha(source)=='589c03e667381cecadfd38e517fcedeec18614747955a8c30012a628efa4ac37'
     assert sha(root/'tools/baseline/guest/render_bridge.c')==sha(source)
     # The existing replay span diagnostic defines the exact 0x101/raw order.
     replay=(root/SOURCE/'camera_replay.c').read_text()
@@ -100,7 +110,7 @@ def prepare_honey_containment(root, output, run, npc665=False, backpack621=False
     compiler=root/'deps/LLVM-19.1.3-Windows-X64/bin/clang.exe'
     includes=[root/'tools/baseline/guest/silo-candidate',root/'tools/baseline/guest',root/'deps/banjo-tooie/include',root/'deps/banjo-tooie/lib/ultralib/include',root/'deps/rt64/include']
     flags=[compiler,'-target','mips','-EB','-mips2','-mabi=32','-O2','-G0','-mno-abicalls','-mno-odd-spreg','-nostdinc','-D_LANGUAGE_C','-DMIPS','-fno-builtin']+['-I'+win(p) for p in includes]+['-I'+win(root/SOURCE)]
-    flags+=['-DTOOIE_NPC665='+str(int(npc665)),'-DTOOIE_BACKPACK621='+str(int(backpack621)),'-DTOOIE_TROT_TOGGLE='+str(int(talon_trot_toggle)),'-DTOOIE_CAMERA_HONEY=1','-DTOOIE_BRIDGE_REQUIRED_STOP='+str(int(required_stop))]
+    flags+=['-DTOOIE_NPC665='+str(int(npc665)),'-DTOOIE_BACKPACK621='+str(int(backpack621)),'-DTOOIE_TROT_TOGGLE='+str(int(talon_trot_toggle)),'-DTOOIE_CAMERA_HONEY=1','-DTOOIE_BRIDGE_REQUIRED_STOP='+str(int(required_stop)),'-DTOOIE_BK_PIPELINE='+str(int(bool(bk_pipeline)))]
     object_path=output/'camera_honey_bridge.o'
     run(flags+['-c',win(staged),'-o',win(object_path)],'camera-honey-compile.log')
     prior=root/'build/windows-dev/baseline/render-bridge-silo-candidate/bridge.o'
@@ -116,10 +126,17 @@ def prepare_honey_containment(root, output, run, npc665=False, backpack621=False
                             relocs.append((rel['r_offset']-begin,rel['r_info_type'],linked.get_symbol(rel['r_info_sym']).name,rel.entry.get('r_addend',None)))
             return dict(definitions=[s.name for s in table.iter_symbols() if s['st_info']['type']=='STT_FUNC' and s['st_shndx']!='SHN_UNDEF'],imports={s.name for s in table.iter_symbols() if s.name and s['st_shndx']=='SHN_UNDEF'},ebed4=section.data()[begin:end].hex(),ebed4_relocations=relocs,state=elf.get_section_by_name('.tooie_render_bridge_state').data().hex())
     before,after=facts(prior),facts(object_path)
-    assert after['definitions']==before['definitions']==['func_800EBED4','func_80800380_chhoneycarrier']
-    assert after['imports']==before['imports']|{'tooie_camera_state','tooie_camera_main'}|({'tooie_bridge_required_stop'} if required_stop else set())
+    assert before['definitions']==['func_800EBED4','func_80800380_chhoneycarrier']
+    # L08b: the BK image builds no Honey replacement; the selected raw keeps the original body.
+    assert after['definitions']==before['definitions'][:1 if bk_pipeline else 2]
+    if bk_pipeline:
+        # EBED4 alone: the prior bridge object minus every Honey-only import (envelope reads, draw, show).
+        honey_only={'D_8007BCD0','D_8007BCE8','D_8007BEDA','func_800A7180','func_800A89F8','func_800EB854','func_80101870','func_80103110'}
+        assert honey_only<=before['imports'] and after['imports']==before['imports']-honey_only, 'BK EBED4-only bridge imports'
+    else:
+        assert after['imports']==before['imports']|{'tooie_camera_state','tooie_camera_main'}|({'tooie_bridge_required_stop'} if required_stop else set())
     for name in ('ebed4','ebed4_relocations','state'):assert after[name]==before[name],('Honey preserved object fact',name)
-    record=dict(source=str(source.relative_to(root)),source_sha256=sha(source),staged_source_sha256=sha(staged),compile_define='TOOIE_CAMERA_HONEY=1',required_stop=required_stop,object_sha256=sha(object_path),prior_object_sha256=sha(prior),definitions=after['definitions'],imports=sorted(after['imports']),ebed4_bytes_relocations_equal=True,bridge_state_equal=True,explicit_suffix_upper_bound=True)
+    record=dict(source=str(source.relative_to(root)),source_sha256=sha(source),staged_source_sha256=sha(staged),compile_define='TOOIE_CAMERA_HONEY=1',bk_pipeline_define='TOOIE_BK_PIPELINE=%d'%int(bool(bk_pipeline)),required_stop=required_stop,object_sha256=sha(object_path),prior_object_sha256=sha(prior),definitions=after['definitions'],imports=sorted(after['imports']),ebed4_bytes_relocations_equal=True,bridge_state_equal=True,explicit_suffix_upper_bound=True)
     (output/'HONEY_CONTAINMENT_BINDING.json').write_text(json.dumps(record,indent=2)+'\n')
     return object_path
 
@@ -132,10 +149,12 @@ def roster(root):
 def prepare_raw(root,output,run,shadow_observer=False,demo_timing=False,shadow_fix=False,pre_background=False,actor_palette=False,cpu625=False,minimum_host=False,npc665=False,backpack621=False,quiet_talon_trot=False,talon_trot_toggle=False,first_person_aim=False,flap_flip_landing=False,ckpack_copy_storage=False,bk_pipeline=False):
     assert type(flap_flip_landing) is bool and (not flap_flip_landing or first_person_aim), 'Landing image qualified for the current player composition'
     assert type(ckpack_copy_storage) is bool and (not ckpack_copy_storage or (cpu625 and flap_flip_landing)), 'ckpack copy storage joins only the current player composition'
-    # PC[8] secondary route (implementation-s2) joins only the current player composition.
-    player_secondary=bool(cpu625 and flap_flip_landing)
+    # PC[8] secondary route (implementation-s2) joins only the current player composition with BK off.
+    # L06b-5: BK labels the split player itself (bk_pipeline.c 92224 route, attachment base 8) and installs
+    # none of the six route hooks, so the BK composition selects no secondary owner.
+    player_secondary=bool(cpu625 and flap_flip_landing and not bk_pipeline)
     # BK joins only the current player composition and retires the P04b redirect there.
-    assert type(bk_pipeline) is bool and (not bk_pipeline or player_secondary) and not (bk_pipeline and ckpack_copy_storage), 'BK pipeline selection'
+    assert type(bk_pipeline) is bool and (not bk_pipeline or (cpu625 and flap_flip_landing)) and not (bk_pipeline and ckpack_copy_storage), 'BK pipeline selection'
     assert type(quiet_talon_trot) is bool and (not quiet_talon_trot or (backpack621 and minimum_host))
     assert type(talon_trot_toggle) is bool and (not talon_trot_toggle or (backpack621 and minimum_host))
     assert type(backpack621) is bool and (not backpack621 or cpu625), "621 requires existing selected CPU625 transports"
@@ -161,6 +180,12 @@ def prepare_raw(root,output,run,shadow_observer=False,demo_timing=False,shadow_f
     allocation=[e for e in edits if e.get('func')=='func_8001A3A0']
     assert allocation==[dict(func='func_8001A3A0',vram=pc,value=0x34048FC0) for pc in (0x8001A3BC,0x8001A3CC)]
     patches['instruction']=[e for e in edits if e not in allocation]
+    if bk_pipeline:
+        # L08b: the BK raw keeps the original Honey body; :271/:273 then prove it present and unchanged.
+        honey=accepted.BRIDGE_FUNCTIONS[1]
+        assert BK_RAW_ONLY_PROVIDERS=={honey}, 'L08b raw-only provider is the accepted Honey body'
+        assert honey in functions and honey in omitted and honey in patches['ignored']
+        functions.remove(honey);omitted.remove(honey);patches['ignored'].remove(honey)
     assert not any(e.get('func') in omitted for kind in ('hook','instruction') for e in patches.get(kind,[])), 'omitted camera body already has hook/instruction'
     for pc,name in [(0x800A78B0,'baseline_first_sync_returned'),(0x800A78E8,'baseline_first_graphics_submit')]:
         assert [h['text'] for h in hooks if h['func']=='func_800A7840' and h.get('before_vram')==pc]==[name+'(rdram, ctx);']
@@ -306,13 +331,63 @@ def prepare_raw(root,output,run,shadow_observer=False,demo_timing=False,shadow_f
     receipt['bk_menu_hook_pcs']=[hex(pc) for _,pc,_ in bk_menu_hooks.HOOKS] if bk_pipeline else []
     receipt['bk_attach_hook_pcs']=[hex(pc) for _,pc,_ in bk_attach_hooks.HOOKS] if bk_pipeline else []
     # The selection fields above still name the composition; these row hooks were not installed.
-    receipt['bk_retired_row_transports']=[name for name,selected in (('actor_cpu_root',actor_palette),('cpu625',cpu625),('npc665',npc665),('player_secondary',player_secondary)) if selected] if bk_pipeline else []
+    receipt['bk_retired_row_transports']=[name for name,selected in (('actor_cpu_root',actor_palette),('cpu625',cpu625),('npc665',npc665),('player_secondary',cpu625 and flap_flip_landing)) if selected] if bk_pipeline else []
     receipt['bk_shadow_attach_hook_pcs']=[hex(pc) for _,pc,_ in bk_shadow_attach_hooks.HOOKS] if bk_pipeline else []
     return receipt
 
-def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,host=None,npc=None,backpack=None,quiet_talon_trot=False,talon_trot_toggle=False,trot=None,modern_fps=None,flap_flip_landing=False,ckcopy=None,player_secondary=False,secondary_admit=False,bk=None):
+def overlay_id_tokens(path):
+    """config/overlay-ids.txt as N64Recomp's read_list_file reads it (`input_file >> entry`): ASCII
+    whitespace-separated tokens, so a blank line or stray whitespace cannot shift an overlay ID."""
+    return [token.decode('utf-8') for token in Path(path).read_bytes().split()]
+
+def restoration_lines(sections,overlay_ids,bk=False):
+    """L11 generated restoration rows from the same selected.syms rows as the core2 aliases.
+
+    Providers keep their maintained owners' names: prepare_boot_heap.FUNCTIONS (whose boot row is
+    boot_osInitialize), the native ROM-PIO provider, the Honey body and the two bsbtrot bodies. Each row
+    keeps the native selection guard under which adapters.cpp restores it."""
+    def restored(name):
+        matches=[(sec,fn) for sec in sections.values() for fn in sec.get('functions',[]) if fn['name']==name]
+        assert len(matches)==1, ('restored original',name,matches)
+        sec,fn=matches[0];offset=fn['vram']-sec['vram']
+        assert 0<=offset and offset+fn['size']<=sec['size'], ('restored original extent',name)
+        return sec,offset,fn['size']
+    def guarded(guard,row):
+        return ([guard] if guard else [])+[row]+(['#endif'] if guard else [])
+    def base_row(guard,name,provider):
+        sec,offset,extent=restored(name)
+        return guarded(guard,'    {%s,0x%Xu,0x%Xu,0x%Xu,0x%Xu,0x%Xu},'%(provider,sec['rom'],sec['vram'],sec['size'],offset,extent))
+    def overlay_row(guard,name):
+        sec,offset,extent=restored(name)
+        assert overlay_ids.count(sec['name'])==1, ('restored overlay ID',sec['name'])
+        return guarded(guard,'    {baseline_boot_patch_registry::%s,%du,0x%Xu,0x%Xu,0x%Xu,0x%Xu,0x%Xu,%du},'%(
+            name,overlay_ids.index(sec['name']),sec['rom'],sec['vram'],sec['size'],offset,extent,len(sec['functions'])))
+    boot_initializer,core1_initializer,heap=boot_owner.FUNCTIONS
+    honey=accepted.BRIDGE_FUNCTIONS[1];assert honey=='func_80800380_chhoneycarrier'
+    trot_overlay=[name for name in trot_owner.BODIES if name not in CORE2_TROT_RESTORED]
+    assert len(trot_overlay)==1, trot_overlay
+    lines=['#define TOOIE_REGISTRY_GENERATED_RESTORATIONS 1','static CameraAlias camera_base_restored[] = {']
+    lines+=base_row(None,boot_initializer,'baseline_boot_patch_registry::'+boot_initializer)
+    lines+=base_row(None,core1_initializer,'baseline_boot_patch_registry::'+core1_initializer)
+    lines+=base_row('#ifdef BASELINE_ROM_PIO_BRIDGE',ROM_PIO_PROVIDER,'::'+ROM_PIO_PROVIDER)
+    lines+=base_row('#if BASELINE_HEAP_PATCH',heap,'baseline_boot_patch_registry::'+heap)
+    lines+=['};','static CameraOverlayAlias camera_overlay_restored[] = {']
+    # L08b: the BK raw keeps the original Honey body in its own overlay table; no restoration row.
+    if not bk:lines+=overlay_row('#if BASELINE_HONEY_PATCH || BASELINE_RENDER_BRIDGE',honey)
+    lines+=overlay_row('#if BASELINE_QUIET_TROT',quiet_owner.BODY)
+    lines+=overlay_row('#if BASELINE_TROT_TOGGLE',trot_overlay[0])
+    return lines
+
+def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,host=None,npc=None,backpack=None,quiet_talon_trot=False,talon_trot_toggle=False,trot=None,modern_fps=None,flap_flip_landing=False,ckcopy=None,player_secondary=False,secondary_admit=False,bk=None,npc_selected=None,backpack_selected=None,cpu_selected=None):
     assert type(actor_palette) is bool, 'Explicit registry actor selection'
     assert type(player_secondary) is bool and (not player_secondary or bool(npc) or bool(backpack)), 'Secondary helpers join section2 only under measured shared-section tuples'
+    # L06c-2: npc is the linked NPC665 section (None when absent); npc_selected is the unchanged selection.
+    assert type(npc_selected) is bool and bool(npc)==(npc_selected and not bk), 'NPC665 section presence follows selection and BK'
+    # L06c-3: backpack is the linked 621 section (None when absent); backpack_selected is the unchanged selection,
+    # which alone decides the rate body's alias/provider rows and the section0 body count.
+    assert type(backpack_selected) is bool and bool(backpack)==(backpack_selected and not bk), 'Backpack621 section presence follows selection and BK'
+    # L06c-4: cpu is the linked CPU625 section (None when absent); cpu_selected is the unchanged selection.
+    assert type(cpu_selected) is bool and bool(cpu)==(cpu_selected and not bk), 'CPU625 section presence follows selection and BK'
     rows=roster(root)
     rows=[row for row in rows if row['name']!='func_800DE498']
     assert len(rows)==25
@@ -328,7 +403,7 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
             assert len(matches)==1, ('HOST original owner',name)
             sec,fn=matches[0]
             rows.append(dict(name=name,section=sec['name'],vram=hex(fn['vram']),section_offset=hex(fn['vram']-sec['vram']),extent=hex(fn['size'])))
-    if backpack:
+    if backpack_selected:  # L06c-3: the rate body follows the 621 selection, not its section
         matches=[(sec,fn) for sec in sections.values() for fn in sec.get('functions',[]) if fn['name']==rate_owner.BODY]
         assert len(matches)==1
         sec,fn=matches[0];rows.append(dict(name=fn['name'],section=sec['name'],vram=hex(fn['vram']),section_offset=hex(fn['vram']-sec['vram']),extent=hex(fn['size'])))
@@ -343,16 +418,19 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
         assert len(matches)==1, 'Flap Flip original owner'
         sec,fn=matches[0]
         rows.append(dict(name=flip_owner.BODY,section=sec['name'],vram=hex(fn['vram']),section_offset=hex(fn['vram']-sec['vram']),extent=hex(fn['size'])))
-    assert len(rows)==27+int(flap_flip_landing)+3*int(bool(host))+int(bool(backpack))+len(modern_owner.BODIES)*int(bool(modern_fps)) and len({r['name'] for r in rows})==len(rows)
+    assert len(rows)==27+int(flap_flip_landing)+3*int(bool(host))+int(backpack_selected)+len(modern_owner.BODIES)*int(bool(modern_fps)) and len({r['name'] for r in rows})==len(rows)
     assert len({r['section'] for r in rows})==3+int(bool(modern_fps))+int(flap_flip_landing), 'Exact original alias section membership'
     contract=json.loads((root/SOURCE/'camera_hook_contract.json').read_text())['branches']['hook']
     base_functions=list(held.GENERATED_FUNCTIONS)
-    if actor_palette:base_functions.insert(base_functions.index('tooie_actor_palette_end'),CPU_ROOT_HELPERS[0]);base_functions.insert(base_functions.index('tooie_actor_palette_end'),FEATHER_LEAF_HELPER)
+    if bk:base_functions.remove(accepted.BRIDGE_FUNCTIONS[1])  # L08b: no BK Honey provider row
+    if actor_palette and not bk:  # L06b-7/L06b-8: the BK image builds neither actor helper
+        base_functions.insert(base_functions.index('tooie_actor_palette_end'),CPU_ROOT_HELPERS[0])
+        base_functions.insert(base_functions.index('tooie_actor_palette_end'),FEATHER_LEAF_HELPER)
     helpers={held.HELPER:1,'tooie_player_begin':2,'tooie_player_end':2,'tooie_player_bone_push':2,'tooie_player_bone_pop':2,'tooie_player_leaf_begin':2,'tooie_player_leaf_end':2,'tooie_camera_construction_begin':3,'tooie_camera_construction_end':3,'tooie_camera_de498_ignore':3,'tooie_actor_palette_begin':4,'tooie_actor_palette_end':4}
     if actor_palette:helpers.update({CPU_ROOT_HELPERS[0]:4,CPU_ROOT_HELPERS[1]:3,FEATHER_LEAF_HELPER:4})
     if player_secondary:assert len(set(held.SECONDARY_HELPERS))==5 and not set(held.SECONDARY_HELPERS)&set(helpers);helpers.update({name:2 for name in held.SECONDARY_HELPERS})
     # BK pipeline packet1 helpers also join the player helper section (registry section2).
-    if bk:assert player_secondary and len(set(held.BK_HELPERS))==len(held.BK_HELPERS)==29 and not set(held.BK_HELPERS)&set(helpers);helpers.update({name:2 for name in held.BK_HELPERS})
+    if bk:assert not player_secondary and bool(pre) and len(set(held.BK_HELPERS))==len(held.BK_HELPERS) and not set(held.BK_HELPERS)&set(helpers);helpers.update({name:2 for name in held.BK_HELPERS})
     lines=['// Generated from the exact frozen camera roster and selected section identities.',
            'static constexpr uint32_t camera_actor_palette_selected = %du;'%int(actor_palette)]
     lines+=['static CameraAlias camera_aliases[] = {']
@@ -376,9 +454,10 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
     lines+=['static CameraAlias camera_core2_aliases[] = {']+[core2_row(n) for n in CORE2_BRIDGE_RESTORED]
     lines+=['#if BASELINE_RENDER_SILO']+[core2_row(n) for n in silo]+['#endif']
     lines+=[core2_row(n) for n in trot_core]
+    lines+=['};']+restoration_lines(sections,overlay_id_tokens(root/'config/overlay-ids.txt'),bool(bk))
     lines+=['};','static CameraPatchExpected camera_expected_patches[] = {']
-    expected_names=base_functions+contract['providers']+([CPU_ROOT_HELPERS[1],FEATHER_LEAF_PATCH] if actor_palette else [])+(DEMO_HELPERS if demo else [])+((SHADOW_BK_HELPERS if bk else SHADOW_HELPERS+[SHADOW_MV_HELPER]*shadow['mv']) if shadow else [])+(PRE_HELPERS if pre else [])+(cpu_owner.helpers(bool(ckcopy)) if cpu else [])+(([host_owner.PROJECTION]+host_owner.HELPERS+host_owner.MUSIC_BODIES) if host else [])+(npc_owner.HELPERS if npc else [])
-    expected_names+=(backpack_owner.HELPERS+[rate_owner.BODY]) if backpack else []
+    expected_names=base_functions+[n for n in contract['providers'] if not (bk and n in (BK_RETIRED_CAMERA_HELPERS|BK_RAW_ONLY_PROVIDERS))]+(([FEATHER_LEAF_PATCH] if bk else [CPU_ROOT_HELPERS[1],FEATHER_LEAF_PATCH]) if actor_palette else [])+(DEMO_HELPERS if demo else [])+((SHADOW_BK_HELPERS if bk else SHADOW_HELPERS+[SHADOW_MV_HELPER]*shadow['mv']) if shadow else [])+(PRE_HELPERS if pre else [])+(cpu_owner.helpers(bool(ckcopy),bool(bk)) if cpu else [])+(([host_owner.PROJECTION]+host_owner.HELPERS+host_owner.MUSIC_BODIES) if host else [])+(npc_owner.helpers(bool(bk)) if npc else [])
+    expected_names+=(backpack_owner.helpers(bool(bk)) if backpack else [])+([rate_owner.BODY] if backpack_selected else [])  # L06c-3
     expected_names+=[quiet_owner.BODY] if quiet_talon_trot else []
     expected_names+=trot_owner.BODIES+trot_owner.HELPERS if talon_trot_toggle else []
     expected_names+=modern_owner.BODIES+modern_owner.HELPERS if modern_fps else []
@@ -412,24 +491,30 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
         for rom,ram,size,funcs,relocs,index in rows:
             f=re.search(r'static FuncEntry '+funcs+r'\[\] = \{(.*?)\n\};',overlay,re.S);q=re.search(r'static RelocEntry '+relocs+r'\[\] = \{(.*?)\n\};',overlay,re.S);assert f and q
             tuples.append((int(rom,16),int(ram,16),int(size,16),int(index),f[1].count('.func'),q[1].count('.offset')))
-        first=tuples[0];assert (first[0],first[1],first[3],first[4])==(0,0x80801000,1,(39 if actor_palette else 38)+3*int(bool(host))+int(bool(backpack))+int(quiet_talon_trot)+len(trot_owner.BODIES)*int(talon_trot_toggle)+len(modern_owner.BODIES)*int(bool(modern_fps))+int(flap_flip_landing))
+        first=tuples[0];assert (first[0],first[1],first[3],first[4])==(0,0x80801000,1,(39 if actor_palette else 38)-int(bool(bk))+3*int(bool(host))+int(backpack_selected)+int(quiet_talon_trot)+len(trot_owner.BODIES)*int(talon_trot_toggle)+len(modern_owner.BODIES)*int(bool(modern_fps))+int(flap_flip_landing))
         shift=first[2]-0x96C8
         fixed=[(0x96C8,0x8080A6C8,0x2E38,2,1,2),(0xC500,0x8080D500,0x15FC,3,6,3),(0xDAFC,0x8080EAFC,0xD10 if actor_palette else 0x68C,4,4 if actor_palette else 3,0),(0xE820 if actor_palette else 0xE19C,0x8080F820 if actor_palette else 0x8080F19C,0x3DB4 if actor_palette else 0x20F0,8,4 if actor_palette else 2,6 if actor_palette else 4)]
-        if not npc and not backpack:assert all(actual==(old[0]+shift,old[1]+shift,*old[2:]) for actual,old in zip(tuples[1:5],fixed)), 'PRE fixed section identity and uniform shift'
+        if not npc and not backpack and not bk:assert all(actual==(old[0]+shift,old[1]+shift,*old[2:]) for actual,old in zip(tuples[1:5],fixed)), 'PRE fixed section identity and uniform shift'
         elif npc:
-            assert [x[3:5] for x in tuples[:5]]==[(1,39+3*int(bool(host))+int(bool(backpack))+int(quiet_talon_trot)+len(trot_owner.BODIES)*int(talon_trot_toggle)+len(modern_owner.BODIES)*int(bool(modern_fps))+int(flap_flip_landing)),(2,1),(3,6+5*int(player_secondary)+len(held.BK_HELPERS)*int(bool(bk))),(4,4),(8,4)], 'NPC changed shared sections preserve original memberships'
+            assert [x[3:5] for x in tuples[:5]]==[(1,39-int(bool(bk))+3*int(bool(host))+int(backpack_selected)+int(quiet_talon_trot)+len(trot_owner.BODIES)*int(talon_trot_toggle)+len(modern_owner.BODIES)*int(bool(modern_fps))+int(flap_flip_landing)),(2,1),(3,6+5*int(player_secondary)+len(held.BK_HELPERS)*int(bool(bk))),(4,4-2*int(bool(bk))),(8,4-2*int(bool(bk)))], 'NPC changed shared sections preserve original memberships'
             owned=[row for row in tuples if row[3]==npc['index']]
             assert len(owned)==1, 'Unique NPC helper section'
             row=owned[0]
-            assert row[:4]==(npc['rom'],npc['ram'],npc['size'],npc['index']) and row[4]==8
+            assert row[:4]==(npc['rom'],npc['ram'],npc['size'],npc['index']) and row[4]==len(npc_owner.helpers(bool(bk)))
             npc['sections']=tuples[:5];npc['relocs']=row[5]
         if backpack:
-            assert [x[3:5] for x in tuples[:5]]==[(1,39+3*int(bool(host))+int(bool(backpack))+int(quiet_talon_trot)+len(trot_owner.BODIES)*int(talon_trot_toggle)+len(modern_owner.BODIES)*int(bool(modern_fps))+int(flap_flip_landing)),(2,1),(3,6+5*int(player_secondary)+len(held.BK_HELPERS)*int(bool(bk))),(4,4),(8,4)]
+            assert [x[3:5] for x in tuples[:5]]==[(1,39-int(bool(bk))+3*int(bool(host))+int(backpack_selected)+int(quiet_talon_trot)+len(trot_owner.BODIES)*int(talon_trot_toggle)+len(modern_owner.BODIES)*int(bool(modern_fps))+int(flap_flip_landing)),(2,1),(3,6+5*int(player_secondary)+len(held.BK_HELPERS)*int(bool(bk))),(4,4-2*int(bool(bk))),(8,4-2*int(bool(bk)))]
             owned=[row for row in tuples if row[3]==backpack['index']]
             assert len(owned)==1, 'Unique backpack helper section'
             row=owned[0]
-            assert row[:4]==(backpack['rom'],backpack['ram'],backpack['size'],backpack['index']) and row[4]==8
+            assert row[:4]==(backpack['rom'],backpack['ram'],backpack['size'],backpack['index']) and row[4]==len(backpack_owner.helpers(bool(bk)))
             backpack['sections']=tuples[:5];backpack['relocs']=row[5]
+        if bk and not npc and not backpack:
+            # L06c-3: with no owner section linked, BK keeps the five shared tuples it extends (section2 holds its
+            # helpers): the overlay table N64Recomp emitted for this image, equal to the linked ELF sections.
+            assert [x[3:5] for x in tuples[:5]]==[(1,39-int(bool(bk))+3*int(bool(host))+int(backpack_selected)+int(quiet_talon_trot)+len(trot_owner.BODIES)*int(talon_trot_toggle)+len(modern_owner.BODIES)*int(bool(modern_fps))+int(flap_flip_landing)),(2,1),(3,6+5*int(player_secondary)+len(held.BK_HELPERS)*int(bool(bk))),(4,4-2*int(bool(bk))),(8,4-2*int(bool(bk)))], 'BK changed shared sections preserve original memberships'
+            assert [list(x[:4]) for x in tuples[:5]]==bk['shared_elf'], ('L06c-3: BK shared tuples equal the linked ELF sections',tuples[:5],bk['shared_elf'])
+            bk['sections']=tuples[:5]
         tail=int(bool(ckcopy))
         if trot:
             row=tuples[-2-tail] if modern_fps else tuples[-1-tail]
@@ -445,7 +530,7 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
             assert row[4]==len(ckcopy_owner.HELPERS) and row[5]==ckcopy['relocs'], 'Exact appended ckpack copy-storage helper section'
         layout+='#define TOOIE_PRE_TEXT_SIZE 0x%Xu\n#define TOOIE_PRE_TEXT_RELOCS %du\n#define TOOIE_PRE_SHIFT 0x%Xu\n'%(first[2],first[5],shift)
     write_if_changed(output/'pre_background_layout.h',layout)
-    layout='#pragma once\n#define TOOIE_CPU625_SELECTED %du\n'%int(bool(cpu))
+    layout='#pragma once\n#define TOOIE_CPU625_SELECTED %du\n#define TOOIE_CPU625_SECTION_PRESENT %du\n'%(int(cpu_selected),int(bool(cpu)))  # L06c-4
     if cpu:
         for key,value in cpu.items():layout+='#define TOOIE_CPU625_%s 0x%Xu\n'%(key.upper(),value)
         layout+='#define TOOIE_CPU625_SECTION %du\n'%(5+int(bool(demo))+int(bool(shadow))+int(bool(pre)))
@@ -455,7 +540,7 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
         for key,value in host.items():layout+='#define TOOIE_MINIMUM_HOST_%s 0x%Xu\n'%(key.upper(),value)
         layout+='#define TOOIE_MINIMUM_HOST_SECTION %du\n'%(5+int(bool(demo))+int(bool(shadow))+int(bool(pre))+int(bool(cpu)))
     write_if_changed(output/'minimum_host_selection_layout.h',layout)
-    layout='#pragma once\n#define TOOIE_NPC665_SELECTED %du\n'%int(bool(npc))
+    layout='#pragma once\n#define TOOIE_NPC665_SELECTED %du\n#define TOOIE_NPC665_SECTION_PRESENT %du\n'%(int(npc_selected),int(bool(npc)))
     if npc:
         for key in ('rom','ram','size','index','state','state_bytes','end','prior_end','relocs'):
             layout+='#define TOOIE_NPC665_%s 0x%Xu\n'%(key.upper(),npc[key])
@@ -464,7 +549,7 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
         lines+=['    {'+','.join('0x%Xu'%v for v in row)+'},' for row in npc['sections'][:5]]
         lines+=['};']
     write_if_changed(output/'npc665_selection_layout.h',layout)
-    layout='#pragma once\n#define TOOIE_BACKPACK621_SELECTED %du\n'%int(bool(backpack))
+    layout='#pragma once\n#define TOOIE_BACKPACK621_SELECTED %du\n#define TOOIE_BACKPACK621_SECTION_PRESENT %du\n'%(int(backpack_selected),int(bool(backpack)))  # L06c-3
     if backpack:
         for key in ('rom','ram','size','index','state','state_bytes','prior_end','relocs'):
             layout+='#define TOOIE_BACKPACK621_%s 0x%Xu\n'%(key.upper(),backpack[key])
@@ -496,9 +581,13 @@ def write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu=None,hos
     write_if_changed(output/'flap_flip_selection_layout.h','#pragma once\n#define TOOIE_FLAP_FLIP_SELECTED %du\n'%int(flap_flip_landing))
     assert type(player_secondary) is bool and type(secondary_admit) is bool and (player_secondary or not secondary_admit)
     write_if_changed(output/'secondary_selection_layout.h','#pragma once\n#define TOOIE_PLAYER_SECONDARY_SELECTED %du\n#define TOOIE_PLAYER_SECONDARY_ADMIT %du\n'%(int(player_secondary),int(secondary_admit)))
-    layout='#pragma once\n#define TOOIE_BK_PIPELINE_SELECTED %du\n#define TOOIE_BK_HELPERS %du\n'%(int(bool(bk)),len(held.BK_HELPERS))
+    layout='#pragma once\n#define TOOIE_BK_PIPELINE_SELECTED %du\n#define TOOIE_BK_HELPERS %du\n#define TOOIE_BK_SHARED_SECTIONS %du\n'%(int(bool(bk)),len(held.BK_HELPERS),int(bool(bk) and 'sections' in bk))
     if bk:layout+='#define TOOIE_BK_STATE 0x%Xu\n#define TOOIE_BK_STATE_LINKED_BYTES %du\n#define TOOIE_BK_FLOAT 0x%Xu\n#define TOOIE_BK_CUT 0x%Xu\n'%(bk['state'],bk['state_bytes'],bk['float'],bk['cut'])
     if bk:layout+='#define TOOIE_BK_SHADOW 0x%Xu\n'%bk['shadow']
+    if bk and 'sections' in bk:  # L06c-3: measured above, never constants
+        lines+=['static constexpr uint32_t bk_shared_sections[5][6] = {']
+        lines+=['    {'+','.join('0x%Xu'%v for v in row)+'},' for row in bk['sections']]
+        lines+=['};']
     write_if_changed(output/'bk_pipeline_selection_layout.h',layout)
     write_if_changed(output/'camera_registry_data.hpp','\n'.join(lines)+'\n')
 
@@ -507,15 +596,16 @@ def image_flags(root,pre_background,cpu625,npc665,backpack621,talon_trot_toggle=
     compiler=root/'deps/LLVM-19.1.3-Windows-X64/bin/clang.exe';flags=[compiler,'-target','mips','-EB','-mips2','-mabi=32','-O2','-G0','-mno-abicalls','-mno-odd-spreg','-nostdinc','-D_LANGUAGE_C','-DMIPS','-fno-builtin']+(['-DTOOIE_PRE_BACKGROUND=1'] if pre_background else [])+['-I'+win(p) for p in [root/SOURCE,root/'tools/baseline/guest',root/'deps/banjo-tooie/include',root/'deps/banjo-tooie/lib/ultralib/include',root/'deps/rt64/include']]
     return compiler,flags+['-DTOOIE_CPU625='+str(int(cpu625)),'-DTOOIE_NPC665='+str(int(npc665)),'-DTOOIE_BACKPACK621='+str(int(backpack621)),'-DTOOIE_TROT_TOGGLE='+str(int(talon_trot_toggle))]
 
-def compile_backpack621_carrier(root,output,run,actor_palette,pre_background,cpu625,npc665,ckpack_copy_storage=False):
+def compile_backpack621_carrier(root,output,run,actor_palette,pre_background,cpu625,npc665,ckpack_copy_storage=False,bk_pipeline=False):
     """Fresh same-selection 621OFF owner objects; prepare_image(backpack621=True) proves them unchanged."""
     assert cpu625 and actor_palette and pre_background, "621 existing transport/carrier prerequisite"
     assert type(ckpack_copy_storage) is bool, 'P04a: the carrier CPU625 object uses the image ckpack copy-storage selection'
+    assert type(bk_pipeline) is bool and not (bk_pipeline and ckpack_copy_storage), 'L06b-3: the carrier NPC665 object uses the image BK selection (BK retires P04b)'
     assert not any((output/(name+'.o')).exists() for name in ('player','cpu625','npc665')), "Never replace existing carrier custody"
     _,flags=image_flags(root,pre_background,cpu625,npc665,False)
     held.compile_objects(root,output,run,cpu_root=actor_palette,cpu625=cpu625,npc665=npc665,shared=True,backpack621=False)
-    cpu_owner.compile_owner(root,output,run,flags,win,ckpack_copy_storage)
-    if npc665:npc_owner.compile_owner(root,output,run,flags+['-DTOOIE_ACTOR_PALETTE=1'],win)
+    if cpu_owner.section_present(bk_pipeline):cpu_owner.compile_owner(root,output,run,flags,win,ckpack_copy_storage,bk_pipeline)  # L06c-4
+    if npc665 and npc_owner.section_present(bk_pipeline):npc_owner.compile_owner(root,output,run,flags+['-DTOOIE_ACTOR_PALETTE=1'],win,bk_pipeline)  # L06c-2
 
 def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_fix=False,pre_background=False,cpu625=False,minimum_host=False,npc665=False,backpack621=False,shadow_coefficients=False,quiet_talon_trot=False,talon_trot_toggle=False,first_person_aim=False,flap_flip_landing=False,ckpack_copy_storage=False,bk_pipeline=False):
     raw_binding=json.loads((output/"RAW_BINDING.json").read_text())
@@ -526,9 +616,10 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     assert type(ckpack_copy_storage) is bool and raw_binding.get('ckpack_copy_storage',False) is ckpack_copy_storage, 'ckpack copy-storage raw/image selection mismatch'
     assert not ckpack_copy_storage or (cpu625 and flap_flip_landing), 'ckpack copy storage joins only the current player composition'
     # Effective admission exists only where the secondary owner is selected; OFF compositions stay OFF.
-    player_secondary=bool(cpu625 and flap_flip_landing);secondary_admit=bool(player_secondary and SECONDARY_ADMIT)
+    # L06b-5: the BK composition selects no secondary owner (prepare_raw); raw and image derive it alike.
+    player_secondary=bool(cpu625 and flap_flip_landing and not bk_pipeline);secondary_admit=bool(player_secondary and SECONDARY_ADMIT)
     assert raw_binding.get('player_secondary',False) is player_secondary, 'secondary route raw/image selection mismatch'
-    assert type(bk_pipeline) is bool and (not bk_pipeline or player_secondary) and not (bk_pipeline and ckpack_copy_storage) and raw_binding.get('bk_pipeline',False) is bk_pipeline, 'BK pipeline raw/image selection mismatch'
+    assert type(bk_pipeline) is bool and (not bk_pipeline or (cpu625 and flap_flip_landing)) and not (bk_pipeline and ckpack_copy_storage) and raw_binding.get('bk_pipeline',False) is bk_pipeline, 'BK pipeline raw/image selection mismatch'
     assert raw_binding.get('music_gain',False) is minimum_host, 'Music raw/image HOST composition mismatch'
     raw_trot=raw_binding.get("talon_trot_toggle",False)
     assert type(raw_trot) is bool and raw_trot==talon_trot_toggle, "Raw/image Trot toggle selection mismatch"
@@ -542,7 +633,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     protected_before={}
     if backpack621:
         # Reuse current output custody; a fresh accepted OFF carrier precedes firstON.
-        for name in ('player','cpu625')+('npc665',)*int(npc665):
+        for name in ('player',)+('cpu625',)*int(cpu_owner.section_present(bk_pipeline))+('npc665',)*int(npc665 and npc_owner.section_present(bk_pipeline)):  # L06c-2/L06c-4
             obj=output/(name+'.o')
             assert obj.is_file(), "Generate same-selection current621OFF carrier before firstON"
             protected_before[name]=cpu_owner.facts(obj)
@@ -557,6 +648,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     assert not npc665 or (actor_palette and pre_background), "NPC665 requires accepted actor/PRE carrier"
     assert not cpu625 or (actor_palette and pre_background), "CPU625 requires accepted actor/PRE carrier"
     assert not pre_background or (demo_timing and shadow_fix), "PRE requires accepted demo+shadow"
+    assert not bk_pipeline or shadow_fix, 'L06b-1a: BK retires the DEFB0 ignore leaf, so the shadow owner must own DEFB0'
     assert not (shadow_fix and actor_palette) or pre_background, "Combined actor/shadow requires reviewed PRE condition"
     assert type(actor_palette) is bool, "Explicit actor selection must be boolean"
     assert not shadow_fix or demo_timing, "Shadow requires accepted demo"
@@ -608,11 +700,13 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
        assert imports==set(['heap_alloc', 'heap_free', 'func_8001A570', 'func_800A9800', 'func_8001A63C', 'func_800EA05C', 'func_800B5680', 'func_800EF410', 'func_800EEAA4', 'func_800EFA20', 'guMtxF2L', 'func_800EE7F8', 'D_8007BCD0', 'D_8007BCD4', 'D_8007BCD8', 'D_8007BCDC', 'D_8007BCE0', 'D_8007BCE4', 'D_8007BEDA', 'D_801282E0', 'D_8011A760', 'D_8011A7C0', 'tooie_camera_state', 'tooie_camera_main', 'tooie_camera_redirected'])
       elif name in ('camera_emitters','camera_hook_leaves'):
        prior_object=source/(name+'_object_contract.json')  # Frozen emitter-seven-object-04/hook-leaves-object-02 definitions/imports.
-       prior_record=json.loads(prior_object.read_text());assert set(defined)==set(prior_record['definitions'])|({CPU_ROOT_HELPERS[1],FEATHER_LEAF_PATCH} if name=='camera_hook_leaves' and actor_palette else set())
+       retired=BK_RETIRED_CAMERA_HELPERS if name=='camera_hook_leaves' and bk_pipeline else set();prior_record=json.loads(prior_object.read_text());assert set(defined)==(set(prior_record['definitions'])-retired)|(({FEATHER_LEAF_PATCH} if bk_pipeline else {CPU_ROOT_HELPERS[1],FEATHER_LEAF_PATCH}) if name=='camera_hook_leaves' and actor_palette else set())
        expected_imports=set(prior_record['imports'])|({'D_80127674','D_8012D500','D_8012D558','tooie_actor_palette_begin','tooie_actor_cpu_root_begin',FEATHER_LEAF_HELPER,'D_8012C960','D_8012CA18','osVirtualToPhysical'}|({'tooie_pre_background'} if pre_background else set()) if name=='camera_hook_leaves' and actor_palette else set())|({'tooie_pre_background','D_80128780','D_80127658'} if name=='camera_emitters' and pre_background else set())
        if name=='camera_hook_leaves' and bk_pipeline:
-        # DD024's BK list node supersedes the feather bracket in this path.
-        expected_imports=(expected_imports-{FEATHER_LEAF_HELPER,'D_8012CA18'})|{'tooie_bk_list_begin','tooie_bk_list_end'}
+        # DD024's BK list node supersedes the feather bracket in this path; the retired DEFB0 leaf was this
+        # object's only tooie_actor_palette_begin caller (L06b-1a).
+        # L06b-7: nor is the camera CPU-root leaf, the only remaining user of cam_actor_camera_id's reads.
+        expected_imports=(expected_imports-{FEATHER_LEAF_HELPER,'D_8012CA18','tooie_actor_palette_begin','tooie_actor_cpu_root_begin','D_80127674','D_8012D500','D_8012D558','D_8012D508','tooie_pre_background'})|{'tooie_bk_list_begin','tooie_bk_list_end'}
        if name=='camera_emitters' and minimum_host:
         # D_8012D470: original reticle compensation byte +0x23 read by HOST E42F0.
         expected_imports|={'func_800A8984','func_800A8A04','func_800A8AD4','func_800A8AF0','func_80015D14','tooie_get_latched_widescreen_settings','D_80127674','D_8012D470'}
@@ -640,7 +734,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
           owner=next(s for s in syms if s['st_shndx']==sec['sh_info'] and s['st_info']['type']=='STT_FUNC' and s['st_value']<=offset<s['st_value']+s['st_size'])
           destination=target['st_value']+((word&0x3FFFFFF)<<2)
           assert word>>26==2 and target['st_shndx']==sec['sh_info'] and owner['st_value']<=destination<owner['st_value']+owner['st_size'], 'Only same-function local J control flow permitted'
-       assert calls==(['tooie_bk_shadow_project'] if name=='shadow_projection' and bk_pipeline else [])+(['tooie_actor_palette_begin']+([CPU_ROOT_HELPERS[0]]+(['tooie_bk_list_begin','osVirtualToPhysical','tooie_bk_list_end'] if bk_pipeline else [FEATHER_LEAF_HELPER,'osVirtualToPhysical']) if name=='camera_hook_leaves' else []) if actor_palette else [])+(['tooie_bridge_required_stop']*(1+int(shadow_coefficients and not bk_pipeline)) if name=='shadow_projection' and required_stop else []), 'Exact separate actor begin JALs per selected owner'
+       assert calls==(['tooie_bk_shadow_project'] if name=='shadow_projection' and bk_pipeline else [])+(([] if name=='camera_hook_leaves' and bk_pipeline else ['tooie_actor_palette_begin'])+(([] if bk_pipeline else [CPU_ROOT_HELPERS[0]])+(['tooie_bk_list_begin','osVirtualToPhysical','tooie_bk_list_end'] if bk_pipeline else [FEATHER_LEAF_HELPER,'osVirtualToPhysical']) if name=='camera_hook_leaves' else []) if actor_palette else [])+(['tooie_bridge_required_stop']*(1+int(shadow_coefficients and not bk_pipeline)) if name=='shadow_projection' and required_stop else []), 'Exact separate actor begin JALs per selected owner'
       if name=='camera_state':
        for sec in ['.tooie_camera_state','.tooie_camera_pools']:assert elf.get_section_by_name(sec)['sh_type']=='SHT_PROGBITS'
       frames={}
@@ -666,24 +760,38 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
             fresh=cpu_owner.facts(out/(name+'.o'))
             old=cpu_owner.facts(root/'build/windows-dev/baseline/render-bridge-silo-candidate'/(name+'.o'))
             assert fresh['section_bytes']==old['section_bytes'] and fresh['relocations']==old['relocations'], ('NPC OFF exact shared object',name)
-    if npc665:
-        objects['npc665']=npc_owner.compile_owner(root,out,run,flags+['-DTOOIE_ACTOR_PALETTE=1'],win)
-        defs+=npc_owner.HELPERS
+    # L06c-2: NPC665 stays selected under BK (raw, guest flags, receipt npc665_selected); only the BK-OFF
+    # image links its section (END) and 16-byte sidecar. A fresh BK tree carries no stale NPC object.
+    npc_section=npc665 and npc_owner.section_present(bk_pipeline)
+    if npc665 and not npc_section:
+        assert not (out/'npc665.o').exists() and not (out/'NPC665_UNQUALIFIED_LINK.json').exists(), 'L06c-2: stale NPC665 object/link record in a BK tree'
+    if npc_section:
+        objects['npc665']=npc_owner.compile_owner(root,out,run,flags+['-DTOOIE_ACTOR_PALETTE=1'],win,bk_pipeline)
+        defs+=npc_owner.helpers(bk_pipeline)
     fresh_lifecycle=cpu_owner.facts(out/'lifecycle.o')
     fresh_lifecycle['compile_argv']=lifecycle['compile_argv']
     fresh_lifecycle['inputs']={str(root/'tools/baseline/guest/silo-candidate/player_lifecycle.c'):sha(root/'tools/baseline/guest/silo-candidate/player_lifecycle.c')}
+    # L06c-4: CPU625 stays selected under BK (raw, guest flags, BK/621/secondary prerequisites); only the BK-OFF
+    # image links its section (retire) and 464-byte state. A fresh BK tree carries no stale CPU625 object.
+    cpu_section=cpu625 and cpu_owner.section_present(bk_pipeline)
     if not cpu625:
         previous=cpu_owner.facts(root/'build/windows-dev/baseline/render-bridge-silo-candidate/lifecycle.o')
         assert fresh_lifecycle['section_bytes']['.recomp_patch']==previous['section_bytes']['.recomp_patch'] and fresh_lifecycle['relocations']==previous['relocations'], "OFF lifecycle exact text/relocations"
     else:
         calls=[x for x in fresh_lifecycle['relocations'] if x['target']=='tooie_cpu625_retire']
-        assert len(calls)==2 and all(x['kind']==4 for x in calls), "Exactly two lifecycle retire call relocations"
-        objects['cpu625']=cpu_owner.compile_owner(root,out,run,flags,win,ckpack_copy_storage);defs+=cpu_owner.helpers(ckpack_copy_storage)
+        # L06b-6: the BK lifecycle makes no CPU625 retirement call.
+        assert len(calls)==2*int(not bk_pipeline) and all(x['kind']==4 for x in calls), "Exact lifecycle retire call relocations"
+        if cpu_section:objects['cpu625']=cpu_owner.compile_owner(root,out,run,flags,win,ckpack_copy_storage,bk_pipeline);defs+=cpu_owner.helpers(ckpack_copy_storage,bk_pipeline)
+        else:assert not (out/'cpu625.o').exists(), 'L06c-4: stale CPU625 object in a BK tree'
     retire_calls=[row for row in fresh_lifecycle['relocations'] if row['target']=='tooie_trot_toggle_retire']
     assert len(retire_calls)==2*int(talon_trot_toggle) and all(row['kind']==4 for row in retire_calls), 'Exact Trot lifecycle retire calls'
-    b621_object=backpack_owner.compile_owner(root,out,run,flags,win,backpack621)
+    # L06c-3: backpack621 stays selected under BK (raw, guest flags, rate body, Hand862, Trot prerequisites);
+    # only the BK-OFF image links its section (retire) and 612-byte state. Under BK the owner compiles empty.
+    backpack_section=backpack621 and backpack_owner.section_present(bk_pipeline)
+    b621_object=backpack_owner.compile_owner(root,out,run,flags,win,backpack_section,bk_pipeline)
+    if backpack_section:
+        objects['backpack621']=b621_object;defs+=backpack_owner.helpers(bk_pipeline)
     if backpack621:
-        objects['backpack621']=b621_object;defs+=backpack_owner.HELPERS
         for name,before in protected_before.items():
             assert cpu_owner.facts(out/(name+'.o'))==before, ('621 unchanged existing owner object',name)
     if minimum_host:
@@ -705,10 +813,13 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     if ckpack_copy_storage:
         objects['ckcopy']=ckcopy_owner.compile_owner(root,out,run,flags,win);defs+=ckcopy_owner.HELPERS
     heap=r/'build/windows-dev/baseline/heap-patch';prior=r/'build/windows-dev/baseline/render-bridge-silo-candidate'
-    honey=prepare_honey_containment(root,output,run,npc665,backpack621,talon_trot_toggle,required_stop)
+    honey=prepare_honey_containment(root,output,run,npc665,backpack621,talon_trot_toggle,required_stop,bk_pipeline)
     selected_actor=selected_shared if actor_palette else None
     base_functions=list(held.GENERATED_FUNCTIONS)
-    if actor_palette:base_functions.insert(base_functions.index('tooie_actor_palette_end'),CPU_ROOT_HELPERS[0]);base_functions.insert(base_functions.index('tooie_actor_palette_end'),FEATHER_LEAF_HELPER)
+    if bk_pipeline:base_functions.remove(accepted.BRIDGE_FUNCTIONS[1])  # L08b: the BK raw keeps the original Honey
+    if actor_palette and not bk_pipeline:  # L06b-7/L06b-8: the BK image builds neither actor helper
+        base_functions.insert(base_functions.index('tooie_actor_palette_end'),CPU_ROOT_HELPERS[0])
+        base_functions.insert(base_functions.index('tooie_actor_palette_end'),FEATHER_LEAF_HELPER)
     if player_secondary:base_functions+=held.SECONDARY_HELPERS
     if bk_pipeline:base_functions+=held.BK_HELPERS
     inputs=[heap/'boot.o',heap/'core1.o',r/'generated/heap-patch-products/heap.o',honey]+[out/(n+'.o') for n in ['player']+(['secondary'] if player_secondary else [])+(['bk'] if bk_pipeline else [])+['actor','bone','pair','silo','leaf','lifecycle']]+[out/(n+'.o') for n in objects]
@@ -750,17 +861,21 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
        if item['r_info_type']==4:assert target['st_shndx']==elf.get_section_index('.tooie_pre_background_helpers')
        else:assert target.name in objects['camera_pre_background_slots']['imports']
       pre=dict(rom=section['sh_addr']-0x80801000,ram=section['sh_addr'],size=section['sh_size'],index=elf.get_section_index('.tooie_pre_background_helpers'),state=storage['sh_addr'])
-     if cpu625:cpu=cpu_owner.linked(elf)
+     if cpu_section:cpu=cpu_owner.linked(elf)
+     elif cpu625:cpu_owner.absent(elf)  # L06c-4: selected, no BK section/state/reference
      if minimum_host:
       prior_end=cpu['state']+464 if cpu else pre['state']+124
       host=host_owner.linked(elf,prior_end)
-     if npc665:
+     if npc_section:
       prior_end=host['image_end'] if host else cpu['state']+464 if cpu else pre['state']+124
       npc=npc_owner.linked(elf,prior_end);npc['prior_end']=prior_end
-     if backpack621:
+     elif npc665:npc_owner.absent(elf)  # L06c-2: selected, no BK section/sidecar/reference
+     if backpack_section:
       prior_end=npc['state']+16 if npc else host['image_end'] if host else cpu['state']+464
       backpack=backpack_owner.linked(elf,prior_end)
-      graphics_rate=rate_owner.linked(elf,backpack['image_end'])
+     elif backpack621:backpack_owner.absent(elf)  # L06c-3: selected, no BK section/state/reference
+     if backpack621:
+      graphics_rate=rate_owner.linked(elf,backpack['image_end'] if backpack else npc['state']+16 if npc else host['image_end'] if host else cpu['state']+464)
      if talon_trot_toggle:trot=trot_owner.linked(elf,graphics_rate['image_end'])
      if first_person_aim:modern_fps=modern_owner.linked(elf,trot['image_end'])
      if flap_flip_landing:
@@ -782,7 +897,13 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
       bk_shadow=elf.get_section_by_name('.tooie_bk_shadow')
       assert bk_shadow and bk_shadow['sh_type']=='SHT_PROGBITS' and bk_shadow.data()==held.BK_SHADOW_INITIAL and bk_shadow['sh_addr']%4==0
       assert symbols['tooie_bk_shadow']['st_value']==bk_shadow['sh_addr'] and symbols['tooie_bk_shadow']['st_size']==held.BK_SHADOW_BYTES
-      bk=dict(state=bk_section['sh_addr'],state_bytes=held.BK_STATE_BYTES,float=bk_float['sh_addr'],cut=bk_cut['sh_addr'],shadow=bk_shadow['sh_addr'])
+      # L14-VR03: the guest option-box text owner's state (bk_text.inc layout1).
+      bk_text=elf.get_section_by_name('.tooie_bk_text')
+      assert bk_text and bk_text['sh_type']=='SHT_PROGBITS' and bk_text.data()==held.BK_TEXT_INITIAL and bk_text['sh_addr']%4==0
+      assert symbols['tooie_bk_text']['st_value']==bk_text['sh_addr'] and symbols['tooie_bk_text']['st_size']==held.BK_TEXT_BYTES
+      bk=dict(state=bk_section['sh_addr'],state_bytes=held.BK_STATE_BYTES,float=bk_float['sh_addr'],cut=bk_cut['sh_addr'],shadow=bk_shadow['sh_addr'],text=bk_text['sh_addr'])
+      # L06c-3: the linked shared output sections (rom,ram,size,index) that the BK registry tuples must equal.
+      bk['shared_elf']=[[s['sh_addr']-0x80801000,s['sh_addr'],s['sh_size'],elf.get_section_index(n)] for n in SHARED_ELF_SECTIONS for s in (elf.get_section_by_name(n),)]
      expected=bytearray(1380)
      for offset,value in {1024:0x43414D32,1028:2,1064:0xA0000000,1068:1,1072:1,1076:1}.items():expected[offset:offset+4]=value.to_bytes(4,'big')
      assert state.data()==expected and state['sh_size']==1380
@@ -829,16 +950,16 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
         config['input']['recomp_include']+='\n#include \"minimum_host_imports.h\"'
     (out/'boot.toml').write_text(toml.dumps(config));run([r/'deps/N64Recomp-codegen/build/N64Recomp',out/'boot.toml'],'codegen.log')
     # Recompiler traversal order is not address order (same-image calls can emit a later body early).
-    # Authenticate every replacement against the ELF before ordering the runtime lookup table.
+    # Authenticate every replacement against the ELF; the generated lookup table keeps N64Recomp's order.
     patch_section=symbols['boot_osInitialize']['st_shndx']
     patch_names=[name for name in base_functions+defs if symbols[name]['st_shndx']==patch_section]
     patch_table=accepted.authenticate_function_table(out/'boot.elf',out/'recomp_overlays.inl','.recomp_patch',patch_names)
-    cpu_table=accepted.authenticate_function_table(out/'boot.elf',out/'recomp_overlays.inl','.tooie_cpu625_helpers',cpu_owner.helpers(ckpack_copy_storage)) if cpu else None
+    cpu_table=accepted.authenticate_function_table(out/'boot.elf',out/'recomp_overlays.inl','.tooie_cpu625_helpers',cpu_owner.helpers(ckpack_copy_storage,bk_pipeline)) if cpu else None
     host_table=accepted.authenticate_function_table(out/'boot.elf',out/'recomp_overlays.inl','.baseline_host_helpers',host_owner.HELPERS) if host else None
-    npc_table=accepted.authenticate_function_table(out/'boot.elf',out/'recomp_overlays.inl','.tooie_npc665_helpers',npc_owner.HELPERS) if npc else None
+    npc_table=accepted.authenticate_function_table(out/'boot.elf',out/'recomp_overlays.inl','.tooie_npc665_helpers',npc_owner.helpers(bk_pipeline)) if npc else None
     trot_table=accepted.authenticate_function_table(out/'boot.elf',out/'recomp_overlays.inl','.tooie_trot_helpers',trot_owner.HELPERS) if trot else None
     modern_fps_table=accepted.authenticate_function_table(out/'boot.elf',out/'recomp_overlays.inl','.tooie_modern_fps_helpers',modern_owner.HELPERS) if modern_fps else None
-    backpack_table=accepted.authenticate_function_table(out/'boot.elf',out/'recomp_overlays.inl','.tooie_backpack621_helpers',backpack_owner.HELPERS) if backpack else None
+    backpack_table=accepted.authenticate_function_table(out/'boot.elf',out/'recomp_overlays.inl','.tooie_backpack621_helpers',backpack_owner.helpers(bk_pipeline)) if backpack else None
     ckcopy_table=accepted.authenticate_function_table(out/'boot.elf',out/'recomp_overlays.inl','.tooie_ckcopy_helpers',ckcopy_owner.HELPERS) if ckcopy else None
     if demo:
      overlay=(out/'recomp_overlays.inl').read_text();match=re.search(r'static RelocEntry section_%d_tooie_demo_timing_helpers_relocs\[\] = \{(.*?)\n\};'%demo['index'],overlay,re.S);assert match
@@ -878,7 +999,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     text=(out/'boot.c').read_text()
     if required_stop:
         assert symbols['tooie_bridge_required_stop']['st_shndx']=='SHN_ABS' and symbols['tooie_bridge_required_stop']['st_value']==0x8F00003C
-        assert text.count('\n    tooie_bridge_required_stop(rdram, ctx);')==3+int(shadow_coefficients and not bk_pipeline)
+        assert text.count('\n    tooie_bridge_required_stop(rdram, ctx);')==3-int(bool(bk_pipeline))+int(shadow_coefficients and not bk_pipeline)
         assert 'RECOMP_FUNC void tooie_bridge_required_stop' not in text
         assert 'tooie_bridge_required_stop' not in (out/'funcs.h').read_text()
         assert 'tooie_bridge_required_stop' not in (out/'recomp_overlays.inl').read_text()
@@ -887,10 +1008,10 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
         assert 'RECOMP_FUNC void tooie_baseline_music_volume' not in text
         assert 'tooie_baseline_music_volume' not in (out/'funcs.h').read_text()
         assert 'tooie_baseline_music_volume' not in (out/'recomp_overlays.inl').read_text()
-    assert text.count('\n    tooie_actor_palette_begin(rdram, ctx);')==int(actor_palette)*(1+int(shadow_fix)), 'Exact compiled actor hook call selection'
+    assert text.count('\n    tooie_actor_palette_begin(rdram, ctx);')==int(actor_palette)*(int(not bk_pipeline)+int(shadow_fix)), 'Exact compiled actor hook call selection'
     expected_order=base_functions+defs
-    if cpu625:
-        # Codegen emits this same-image dependency at its first lifecycle use.
+    if cpu625 and not bk_pipeline:
+        # Codegen emits this same-image dependency at its first lifecycle use (none under BK, L06b-6).
         expected_order.remove('tooie_cpu625_retire')
         expected_order.insert(expected_order.index('func_80092898')+1,'tooie_cpu625_retire')
     if minimum_host:
@@ -909,8 +1030,17 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
         assert len(actual_order)==len(set(actual_order)) and set(actual_order)==set(expected_order)
         assert original_order==[n for n in expected_order if n not in new_helpers], 'Existing provider order preserved'
     else:assert len(actual_order)==len(set(actual_order)) and actual_order==expected_order, 'Exact ordered generated providers'
-    assert set(base_functions+defs)==set(base_functions)|set(json.loads((source/'camera_hook_contract.json').read_text())['branches']['hook']['providers'])|set(DEMO_HELPERS if demo_timing else [])|set(shadow_helpers if shadow_fix else [])|set(PRE_HELPERS if pre_background else [])|set(cpu_owner.helpers(ckpack_copy_storage) if cpu625 else [])|set(npc_owner.HELPERS if npc665 else [])|set(backpack_owner.HELPERS if backpack621 else [])|set(([host_owner.PROJECTION]+host_owner.HELPERS+host_owner.MUSIC_BODIES) if minimum_host else [])|set([rate_owner.BODY] if backpack621 else [])|set([quiet_owner.BODY] if quiet_talon_trot else [])|set(trot_owner.BODIES+trot_owner.HELPERS if talon_trot_toggle else [])|set([CPU_ROOT_HELPERS[1],FEATHER_LEAF_PATCH] if actor_palette else [])|set(modern_owner.BODIES+modern_owner.HELPERS if first_person_aim else [])|set([flip_owner.BODY] if flap_flip_landing else [])|set(ckcopy_owner.HELPERS if ckpack_copy_storage else [])
+    assert set(base_functions+defs)==set(base_functions)|set(json.loads((source/'camera_hook_contract.json').read_text())['branches']['hook']['providers'])-((BK_RETIRED_CAMERA_HELPERS|BK_RAW_ONLY_PROVIDERS) if bk_pipeline else set())|set(DEMO_HELPERS if demo_timing else [])|set(shadow_helpers if shadow_fix else [])|set(PRE_HELPERS if pre_background else [])|set(cpu_owner.helpers(ckpack_copy_storage,bk_pipeline) if cpu625 else [])|set(npc_owner.helpers(bk_pipeline) if npc665 else [])|set(backpack_owner.helpers(bk_pipeline) if backpack621 else [])|set(([host_owner.PROJECTION]+host_owner.HELPERS+host_owner.MUSIC_BODIES) if minimum_host else [])|set([rate_owner.BODY] if backpack621 else [])|set([quiet_owner.BODY] if quiet_talon_trot else [])|set(trot_owner.BODIES+trot_owner.HELPERS if talon_trot_toggle else [])|set(([FEATHER_LEAF_PATCH] if bk_pipeline else [CPU_ROOT_HELPERS[1],FEATHER_LEAF_PATCH]) if actor_palette else [])|set(modern_owner.BODIES+modern_owner.HELPERS if first_person_aim else [])|set([flip_owner.BODY] if flap_flip_landing else [])|set(ckcopy_owner.HELPERS if ckpack_copy_storage else [])
     npc_end=npc_owner.checked_end(out,out/'pair.o') if npc665 and not bk_pipeline else None
+    # L06b-1: the BK image neither builds the DEFB0 ignore leaf nor calls the 0x8F000034 import.
+    if bk_pipeline:assert 'RECOMP_FUNC void tooie_camera_de498_ignore(' not in text, 'L06b-1a: BK image builds no DEFB0 ignore leaf'
+    if npc665 and bk_pipeline:assert 'baseline_npc665_end_checked' not in text, 'L06b-1b: BK image must not call the retired 0x8F000034 import'
+    if backpack621 and bk_pipeline:assert not any(n in text for n in backpack_owner.BK_RETIRED), 'L06b-2/L06c-3: BK image neither builds nor calls any 621 helper, retire included'
+    if npc665 and bk_pipeline:assert not any(n in text for n in npc_owner.BK_RETIRED), 'L06b-3/L06c-2: BK image neither builds nor calls any NPC665 helper, END included'
+    if cpu625 and bk_pipeline:assert not any(n in text for n in cpu_owner.BK_RETIRED), 'L06b-4/L06c-4: BK image neither builds nor calls any CPU625 helper, retire included'
+    assert ('RECOMP_FUNC void func_80800380_chhoneycarrier(' in text)==(not bk_pipeline), 'L08b: Honey patch body exactly in the non-BK image'
+    if actor_palette and bk_pipeline:assert not any(n in text for n in CPU_ROOT_HELPERS), 'L06b-7: BK image neither builds nor calls the CPU-root pair'
+    if actor_palette and bk_pipeline:assert FEATHER_LEAF_HELPER not in text, 'L06b-8: BK image neither builds nor calls the feather helper'
     # Ordered generated providers were already proven above; no generated name changes.
     if minimum_host or npc665 or backpack621:expected_order=actual_order
     shared=r/'tests/extract_heap_realloc.py'
@@ -918,15 +1048,15 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     extractor=importlib.util.module_from_spec(spec);spec.loader.exec_module(extractor)
     (out/'candidate_camera_lifecycle_ncpod_slice.inc').write_text(''.join(extractor.extract(text,n,allowed=defs) for n in defs));write_if_changed(out/'camera_identity_layout.h','#pragma once\n#define TOOIE_CAMERA_STATE_VRAM 0x%08Xu\n#define TOOIE_CAMERA_MAIN_VRAM 0x%08Xu\n#define TOOIE_CAMERA_REDIRECTED_VRAM 0x%08Xu\n#define TOOIE_BRIDGE_STATE_VRAM 0x%08Xu\n'%(addresses['tooie_camera_state'],addresses['tooie_camera_main'],addresses['tooie_camera_redirected'],addresses['tooie_render_bridge_state']))
     write_if_changed(out/'render_bridge_layout.h','#pragma once\n#define TOOIE_BRIDGE_STATE_VRAM 0x%08Xu\n#define TOOIE_BRIDGE_IMAGE_BYTES %du\n#define TOOIE_BRIDGE_STATE_IMAGE_OFFSET %du\n'%(addresses['tooie_render_bridge_state'],len(binary),addresses['tooie_render_bridge_state']-0x80801000))
-    assert text.count("\n    tooie_cpu625_retire(rdram, ctx);")==2*int(cpu625), "Exact generated lifecycle call selection"
+    assert text.count("\n    tooie_cpu625_retire(rdram, ctx);")==2*int(cpu625 and not bk_pipeline), "Exact generated lifecycle call selection"
     if cpu:
         overlay=(out/'recomp_overlays.inl').read_text();match=re.search(r'static RelocEntry section_%d_tooie_cpu625_helpers_relocs\[\] = \{(.*?)\n\};'%cpu['index'],overlay,re.S);assert match
         cpu['relocs']=match[1].count('.offset')
     if host:
         overlay=(out/'recomp_overlays.inl').read_text();match=re.search(r'static RelocEntry section_%d_baseline_host_helpers_relocs\[\] = \{(.*?)\n\};'%host['index'],overlay,re.S);assert match
         host['relocs']=match[1].count('.offset')
-    assert text.count('\n    tooie_backpack621_retire(rdram, ctx);')==2*int(backpack621), 'Exact621 lifecycle call selection'
-    write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu,host,npc,backpack,quiet_talon_trot,talon_trot_toggle,trot,modern_fps,flap_flip_landing,ckcopy,player_secondary=player_secondary,secondary_admit=secondary_admit,bk=bk)
+    assert text.count('\n    tooie_backpack621_retire(rdram, ctx);')==2*int(backpack621 and not bk_pipeline), 'Exact621 lifecycle call selection'
+    write_registry_header(root,output,actor_palette,demo,shadow,pre,cpu,host,npc,backpack,quiet_talon_trot,talon_trot_toggle,trot,modern_fps,flap_flip_landing,ckcopy,player_secondary=player_secondary,secondary_admit=secondary_admit,bk=bk,npc_selected=npc665,backpack_selected=backpack621,cpu_selected=cpu625)
     if pre:
         if minimum_host:
             names=['boot.c','boot.bin','boot.elf','recomp_overlays.inl','funcs.h','camera_identity_layout.h','render_bridge_layout.h','camera_registry_data.hpp','pre_background_layout.h','cpu625_selection_layout.h','minimum_host_selection_layout.h']
@@ -935,12 +1065,13 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
         elif cpu625:
             candidate=dict(scope='UNQUALIFIED mechanically validated linked candidate; no native/readiness authority',image_sha256=sha(out/'boot.bin'),image_bytes=len(binary),cpu625=cpu,cpu625_table=cpu_table,lifecycle=fresh_lifecycle,addresses=addresses,shared_state_bytes=23036,camera_state_bytes=1380,pool_bytes=813824,raw_binding_sha256=sha(out/'RAW_BINDING.json'),generated={name:sha(out/name) for name in ['boot.c','boot.bin','boot.elf','recomp_overlays.inl','funcs.h','camera_identity_layout.h','render_bridge_layout.h','camera_registry_data.hpp','pre_background_layout.h','cpu625_selection_layout.h']})
             (out/'CPU625_UNQUALIFIED_LINK.json').write_text(json.dumps(candidate,indent=2)+'\n')
-        if npc665:
+        if npc:
             candidate=dict(scope='UNQUALIFIED linked NPC665 candidate; composed qualification still required',image_sha256=sha(out/'boot.bin'),npc665=npc,object=objects['npc665'],shared_objects=selected_shared,table=npc_table,end=npc_end,raw_binding_sha256=sha(out/'RAW_BINDING.json'))
             (out/'NPC665_UNQUALIFIED_LINK.json').write_text(json.dumps(candidate,indent=2)+'\n')
         if backpack:
             candidate=dict(scope='UNQUALIFIED linked621 candidate; original/public composed qualification still owed',image_sha256=sha(out/'boot.bin'),backpack621=backpack,object=b621_object,shared_objects=selected_shared,table=backpack_table,protected_owner_objects={name:row['sha256'] for name,row in protected_before.items()},raw_binding_sha256=sha(out/'RAW_BINDING.json'))
             (out/'BACKPACK621_UNQUALIFIED_LINK.json').write_text(json.dumps(candidate,indent=2)+'\n')
+        if graphics_rate:  # L06c-3: the rate record follows the 621 selection, not its section
             (out/'GRAPHICS_RATE_UNQUALIFIED_LINK.json').write_text(json.dumps(dict(scope='UNQUALIFIED exact public-rate replacement; stop before image pin acceptance',graphics_rate=graphics_rate,object=objects['graphics_rate'],image_sha256=sha(out/'boot.bin'),image_bytes=len(binary),raw_binding_sha256=sha(out/'RAW_BINDING.json')),indent=2)+'\n')
         if modern_fps:
             candidate=dict(scope='UNQUALIFIED five-body FPS; independent fixture/image acceptance required',
@@ -952,6 +1083,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     receipt['flap_flip_landing']=flap_flip_landing
     receipt['player_secondary']=player_secondary;receipt['player_secondary_admit']=secondary_admit
     receipt['bk_pipeline']=bk;receipt['helper_definitions']+=held.BK_HELPERS if bk else []
+    if bk:receipt['helper_definitions']=[n for n in receipt['helper_definitions'] if n not in BK_RETIRED_CAMERA_HELPERS]
     if flap_flip_landing:receipt['inputs'].update(objects['flap_flip_landing']['inputs'])
     receipt['first_person_aim']=first_person_aim
     receipt['legacy_standalone_reference']=dict(image_sha256=LEGACY_STANDALONE_IMAGE_SHA256,image_bytes=LEGACY_STANDALONE_IMAGE_BYTES,state_bytes=LEGACY_STANDALONE_STATE_BYTES,layout=LEGACY_STANDALONE_LAYOUT,regenerated=False,current_state_bytes=BRIDGE_STATE_BYTES,current_layout=BRIDGE_LAYOUT)
@@ -961,9 +1093,10 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     receipt['ckpack_copy_storage']=ckcopy;receipt['ckpack_copy_storage_table']=ckcopy_table
     if ckcopy:receipt['inputs'].update(objects['ckcopy']['inputs']);receipt['helper_definitions']+=ckcopy_owner.HELPERS
     receipt['backpack621']=backpack;receipt['backpack621_table']=backpack_table
+    assert bool(backpack)==backpack_section;receipt['backpack621_selected']=backpack621;receipt['backpack621_section_present']=bool(backpack)  # L06c-3
     receipt['backpack621_object']=b621_object;receipt['backpack621_protected_objects']={name:row['sha256'] for name,row in protected_before.items()}
     if backpack:
-        receipt['inputs'].update(b621_object['inputs']);receipt['helper_definitions']+=backpack_owner.HELPERS
+        receipt['inputs'].update(b621_object['inputs']);receipt['helper_definitions']+=backpack_owner.helpers(bk_pipeline)
     receipt['minimum_host']=host;receipt['host_table']=host_table
     if host:receipt['music_gain']=dict(state=host['music_state'],state_bytes=20,bodies=host_owner.MUSIC_BODIES,native_import=0x8F000040)
     if host:
@@ -972,8 +1105,10 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
         for path in (root/'tools/baseline/prepare_camera_bridge.py',source/'render_bridge.ld'):
             receipt['inputs'][str(path)]=h(path)
     receipt['npc665']=npc;receipt['npc665_table']=npc_table;receipt['npc665_end']=npc_end;receipt['shared_objects']=selected_shared
-    if npc:receipt['inputs'].update(objects['npc665']['inputs']);receipt['helper_definitions']+=npc_owner.HELPERS
+    assert bool(npc)==npc_section;receipt['npc665_selected']=npc665;receipt['npc665_section_present']=bool(npc)  # L06c-2
+    if npc:receipt['inputs'].update(objects['npc665']['inputs']);receipt['helper_definitions']+=npc_owner.helpers(bk_pipeline)
     receipt['cpu625']=cpu;receipt['lifecycle_object']=fresh_lifecycle
+    assert bool(cpu)==cpu_section;receipt['cpu625_selected']=cpu625;receipt['cpu625_section_present']=bool(cpu)  # L06c-4
     receipt['cpu625_table']=cpu_table
     receipt['talon_trot_toggle']=talon_trot_toggle
     receipt['trot_toggle']=trot;receipt['trot_toggle_table']=trot_table
@@ -992,7 +1127,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     receipt['actor_frames']=selected_shared['actor']['frames']
     receipt['inputs'].update(fresh_lifecycle['inputs'])
     if cpu:receipt['inputs'].update(objects['cpu625']['inputs'])
-    receipt['helper_definitions']+=cpu_owner.helpers(ckpack_copy_storage) if cpu else []
+    receipt['helper_definitions']+=cpu_owner.helpers(ckpack_copy_storage,bk_pipeline) if cpu else []
     receipt['helper_definitions']+=held.SECONDARY_HELPERS if player_secondary else []
     receipt['helper_definitions']+=modern_owner.HELPERS if modern_fps else []
     receipt['image_final_extent']=hex(0x80801000+len(binary));receipt['pool_final_extent']=hex(ranges[1][1])
@@ -1007,7 +1142,7 @@ def prepare_image(root,output,run,actor_palette=False,demo_timing=False,shadow_f
     if demo_timing:
         for name in ('demo_timing.c','demo_timing.h'):
             receipt['inputs'][str(source/name)]=h(source/name)
-    receipt['helper_definitions']+=CPU_ROOT_HELPERS+[FEATHER_LEAF_HELPER] if actor_palette else []
+    receipt['helper_definitions']+=([] if bk_pipeline else CPU_ROOT_HELPERS+[FEATHER_LEAF_HELPER]) if actor_palette else []  # L06b-7/L06b-8
     if selected_actor:receipt['actor_frames']=selected_actor['actor']['frames'];receipt['pair_frames']=selected_actor['pair']['frames'];receipt['actor_root_objects']=selected_actor
     receipt['actor_palette_enabled']=actor_palette;receipt['actor_palette_compile_define']='TOOIE_ACTOR_PALETTE='+str(int(actor_palette))
     # Exclude this receipt and the downstream PLAYER_GUEST receipt that hashes it.

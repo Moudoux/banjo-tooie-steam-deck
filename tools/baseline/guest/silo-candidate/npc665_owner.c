@@ -5,7 +5,10 @@
 #include "npc665_owner.h"
 #include "../camera-candidate/camera_actor_admission.h"
 #include "rt64_extended_gbi.h"
-#if TOOIE_NPC665
+#if !defined(TOOIE_BK_PIPELINE) || (TOOIE_BK_PIPELINE != 0 && TOOIE_BK_PIPELINE != 1)
+#error Explicit boolean TOOIE_BK_PIPELINE selection required
+#endif
+#if TOOIE_NPC665 && !TOOIE_BK_PIPELINE /* L06c-2: BK links no NPC665 helper, END or sidecar */
 #define NPC __attribute__((noinline,section(".tooie_npc665_helpers")))
 #define NC tooie_npc665_state
 #define AC SS.palette_context
@@ -34,6 +37,9 @@ extern u32 D_8012B800[],D_8012CA18,D_8012C820,D_8012C850[];
 extern void* D_80136E70;
 void* func_80104200(s16);
 
+#if !TOOIE_BK_PIPELINE
+/* L06b-3: BK installs none of the capture/retire/DEFA0 transports (npc665_hooks gate) and its bone/leaf
+ * bodies carry no NPC labels, so only END below is built under BK. */
 NPC void tooie_npc665_capture(u32 actor,u32 data,u32 event) {
     if(!(NC.control&TOOIE_NPC665_PENDING) || event!=0x1Fu || actor!=SC.actor ||
        SS.silo_depth!=1u || SC.epoch!=SS.epoch) return;
@@ -54,6 +60,7 @@ NPC void tooie_npc665_retire(u32 actor,u32 descriptor,u32 handle) {
        actor_binding(actor,descriptor,slot,e->birth,e->pair))
         silo_retire(&SS.silo[slot]);
 }
+#endif
 static inline __attribute__((always_inline)) int npc_cursor(SiloBuffers* b,u32 bytes) {
     if(!AC.open_group || AC.buffers!=(u32)b || AC.pool_index>=2u ||
        !silo_range((u32)b,8u,3u)) return 0;
@@ -341,6 +348,7 @@ static inline __attribute__((always_inline)) u32 skeletal_admit(SiloBuffers* b,u
     *local_cursor=(u32)(p+3); silo_count(&SS.silo_admissions);
     return 1;
 }
+#if !TOOIE_BK_PIPELINE
 NPC u32 tooie_npc665_admit(SiloBuffers* b,u32* local_cursor,u32 model) {
     u32 current,base,mtxbase,mtx,data,table,pose,controller,pool,entry,seen,renew,view_bit,camera;
     s32 count,index,offset,pose_handle,controller_handle,stride,capacity;
@@ -484,6 +492,9 @@ NPC void tooie_npc665_leaf_end(SiloBuffers* b) {
     if(!npc_cursor(b,8u)) { npc_failed(); return; }
     GfxCommand* p=(GfxCommand*)b->gfx; gEXPopMatrixGroup(p,G_MTX_MODELVIEW); b->gfx=(Gfx*)(p+1);
 }
+#endif
+/* END closes the BK-OFF NPC665 occurrence through the 0x8F000034 import (L06b-1b); under BK the whole
+ * owner, END and sidecar included, is not built (L06c-2, file gate above). */
 NPC u32 tooie_npc665_end(SiloBuffers* b) {
     u32 failed=(NC.control&TOOIE_NPC665_FAILED)!=0 || SS.poisoned ||
         NC.phase.admitted.current_bone_role!=INVALID_ROLE;

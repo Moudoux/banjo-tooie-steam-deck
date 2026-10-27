@@ -1,16 +1,31 @@
-"""Validate an F4 schema-1 or schema-2 report and summarize coverage; no gameplay verdict."""
+"""Validate an F4 schema-1, -2 or -3 report and summarize coverage; no gameplay verdict."""
 import argparse
 import json
 from pathlib import Path
 
 DOMAINS = {"frame", "draw", "host", "graphics", "publication", "audio"}
 MAX_BYTES = 8 * 1024 * 1024
-SCHEMAS = (1, 2)
+# The current serializer adds BK root and RT64 player domains under its raised cap (issue_evidence.hpp).
+EXTENDED_DOMAINS = DOMAINS | {"bk_draw", "player_transform", "player_projection"}
+EXTENDED_MAX_BYTES = 64 * 1024 * 1024
+SCHEMAS = (1, 2, 3)
+# Six-domain reports keep their 8 MiB cap; schema 3 is only written with the extended set.
+SCHEMA_DOMAINS = {1: (DOMAINS,), 2: (DOMAINS, EXTENDED_DOMAINS), 3: (EXTENDED_DOMAINS,)}
 # Schema 2 frame rows add these; each is null unless its validity bit is set.
 FRAME_FIELDS_2 = {"player_last_reason": 1, "bridge_next_block": 1, "cpu625_next_block": 4}
-FRAME_VALID_BITS = {1: {"layout": 1, "frame": 2}, 2: {"layout": 1, "frame": 2, "cpu625": 4}}
+# Schema 3 gates every legacy player word on legacy_player instead of layout.
+LEGACY_PLAYER_FIELDS = ("player_owner", "player_model", "player_asset", "player_admissions", "player_refusals")
+FRAME_FIELDS_3 = {"player_last_reason": 8, "bridge_next_block": 1, "cpu625_next_block": 4,
+                  **dict.fromkeys(LEGACY_PLAYER_FIELDS, 8)}
+# Schema 3 frame groups appear exactly when their bit is set.
+FRAME_GROUPS_3 = {"player_primary": (8, ("view", "ledger_bytes", "ledger_highwater")),
+                  "secondary_route": (16, ("opens", "faults", "seen_main", "seen_late", "unauthenticated",
+                                           "admissions", "ledger_bytes"))}
+FRAME_VALID_BITS = {1: {"layout": 1, "frame": 2}, 2: {"layout": 1, "frame": 2, "cpu625": 4},
+                    3: {"layout": 1, "frame": 2, "cpu625": 4, "legacy_player": 8, "secondary_route": 16}}
 DRAW_BITS_1 = {"layout": 1, "frame": 2, "root": 4, "projection": 8, "context": 16}
 DRAW_VALID_BITS = {1: DRAW_BITS_1, 2: {**DRAW_BITS_1, "player_join": 32, "player_slot": 64, "skeletal_join": 128}}
+DRAW_VALID_BITS[3] = DRAW_VALID_BITS[2]  # Schema 3 changes frame rows only.
 # Schema 2 draw join groups appear exactly when their bit is set.
 PLAYER_FIELDS = ("player_owner", "player_owner_slot", "player_table_match", "player_control_slot", "player_outcome")
 SKELETAL_FIELDS = ("skeletal_calls", "skeletal_admissions", "skeletal_refusals", "skeletal_reason")
@@ -50,17 +65,32 @@ def draw_fields(row, schema):
 
 
 def frame_fields(row, schema):
-    """Schema 1 rows predate the fields; schema 2 rows must carry all of them."""
+    """Schema 1 rows predate the fields; schema 2 rows must carry all of them; schema 3 also gates
+    the legacy player words and groups on their availability bits."""
     if schema == 1:
         if any(name in row for name in FRAME_FIELDS_2):
             raise ValueError("schema-1 frame row carries schema-2 fields")
         return
     valid = row.get("valid")
-    if type(valid) is not int or not 0 <= valid <= 7 or (valid & 4 and not valid & 1):
-        raise ValueError("invalid schema-2 frame validity bits")
-    for name, bit in FRAME_FIELDS_2.items():
+    if schema == 2:
+        if type(valid) is not int or not 0 <= valid <= 7 or (valid & 4 and not valid & 1):
+            raise ValueError("invalid schema-2 frame validity bits")
+        fields = FRAME_FIELDS_2
+    else:
+        if type(valid) is not int or not 0 <= valid <= 31 or (valid & 12 and not valid & 1) or \
+                (valid & 16 and not valid & 8):
+            raise ValueError("invalid schema-3 frame validity bits")
+        fields = FRAME_FIELDS_3
+        for name, (bit, members) in FRAME_GROUPS_3.items():
+            if (name in row) != bool(valid & bit):
+                raise ValueError("frame groups must appear exactly with their bit")
+            group = row.get(name)
+            if name in row and (not isinstance(group, dict) or set(group) != set(members) or
+                                not all(is_word(group[key]) for key in members)):
+                raise ValueError("invalid frame group words")
+    for name, bit in fields.items():
         if name not in row:
-            raise ValueError("missing schema-2 frame field")
+            raise ValueError("missing schema-%d frame field" % schema)
         value = row[name]
         if not valid & bit:
             if value is not None:
@@ -71,8 +101,8 @@ def frame_fields(row, schema):
 
 def inspect(path):
     with path.open("rb") as source:
-        raw = source.read(MAX_BYTES + 1)
-    if len(raw) > MAX_BYTES:
+        raw = source.read(EXTENDED_MAX_BYTES + 1)
+    if len(raw) > EXTENDED_MAX_BYTES:
         raise ValueError("report exceeds byte cap")
     rows = [json.loads(line) for line in raw.splitlines()]
     if not rows or any(not isinstance(row, dict) for row in rows):
@@ -91,10 +121,10 @@ def inspect(path):
             coverage = row
         elif kind == "domain":
             name = row.get("domain")
-            if name not in DOMAINS or name in domains:
+            if name not in EXTENDED_DOMAINS or name in domains:
                 raise ValueError("unknown or duplicate domain")
             domains[name], events[name] = row, []
-        elif kind in DOMAINS and kind in domains:
+        elif kind in EXTENDED_DOMAINS and kind in domains:
             sequence, timestamp = row.get("sequence"), row.get("time_us")
             if type(sequence) is not int or sequence < 1 or type(timestamp) is not int or timestamp < 0:
                 raise ValueError("invalid event sequence/time")
@@ -113,17 +143,19 @@ def inspect(path):
             events[kind].append((sequence, timestamp))
         else:
             raise ValueError("unknown or misplaced row")
-    if set(domains) != DOMAINS or coverage is None:
+    if set(domains) not in SCHEMA_DOMAINS[schema] or coverage is None:
         raise ValueError("missing domain or coverage declaration")
+    if set(domains) == DOMAINS and len(raw) > MAX_BYTES:
+        raise ValueError("report exceeds byte cap")
     for key in ("unavailable", "limits"):
         values = coverage.get(key)
         if not isinstance(values, list) or not values or any(not isinstance(value, str) or not value for value in values):
             raise ValueError("missing explicit coverage limits")
     bits = coverage.get("frame_valid_bits")
-    if (schema == 2 or bits is not None) and bits != FRAME_VALID_BITS[schema]:
+    if (schema >= 2 or bits is not None) and bits != FRAME_VALID_BITS[schema]:
         raise ValueError("frame validity bits differ from the report schema")
     bits = coverage.get("draw_valid_bits")
-    if (schema == 2 or bits is not None) and bits != DRAW_VALID_BITS[schema]:
+    if (schema >= 2 or bits is not None) and bits != DRAW_VALID_BITS[schema]:
         raise ValueError("draw validity bits differ from the report schema")
     for name, domain in domains.items():
         if len(events[name]) != domain.get("retained"):

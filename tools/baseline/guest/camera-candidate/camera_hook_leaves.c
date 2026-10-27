@@ -48,6 +48,10 @@ __attribute__((section(".tooie_camera_helpers"),noinline)) void tooie_camera_con
     c->active=0;c->role=0;CAM_STATE.owner_frame=0;
     if(!CAM_STATE.token.paid){CAM_STATE.token.slot_base=0;CAM_STATE.token.expected_main=0;CAM_STATE.token.epoch=0;}
 }
+#if !TOOIE_BK_PIPELINE
+/* DEFB0 leaf for compositions without the shadow owner. BK always selects shadow (BK -> CPU625 -> PRE ->
+   demo+shadow), so the DEFB0 transport calls tooie_shadow_de498 instead (camera_thunks.hpp) and this
+   leaf is not built there (L06b-1a). */
 __attribute__((section(".tooie_camera_helpers"),noinline)) void tooie_camera_de498_ignore(u32 graphics_buffers,u32 cursor_slot,u32 effective_model){
     struct TooieCameraControl* c=&CAM_STATE.control;u32 cursor,enabled=0,actor_id=0;
     if(!CAM_STATE.owner_frame || !c->active)return;
@@ -66,8 +70,11 @@ __attribute__((section(".tooie_camera_helpers"),noinline)) void tooie_camera_de4
     cursor=*(volatile u32*)cursor_slot;
     *(volatile u32*)cursor_slot=cam_projection_policy(cursor,actor_id,actor_id?CAM_POLICY_WORLD:CAM_POLICY_IGNORE);
 }
+#endif
 
 #if TOOIE_ACTOR_PALETTE
+#if !TOOIE_BK_PIPELINE
+/* L06b-7: reached only from the BK-off DEFA0 transport (baseline_actor_cpu_root_begin). */
 __attribute__((section(".tooie_camera_helpers"), noinline))
 void tooie_camera_cpu_root_begin(u32 buffers, u32 cursor_slot, u32 model) {
     if (!CAM_STATE.owner_frame || !CAM_STATE.control.active) return;
@@ -76,6 +83,7 @@ void tooie_camera_cpu_root_begin(u32 buffers, u32 cursor_slot, u32 model) {
         tooie_actor_cpu_root_begin((struct TooieRenderBuffers*)buffers,
             (u32*)cursor_slot, model, camera_id);
 }
+#endif
 
 /* Original type3 owns one DE. Its optional public bracket is lexical. */
 struct TooieRenderBuffers {
@@ -91,7 +99,9 @@ __attribute__((section(".recomp_patch"), noinline))
 void func_800DD024(struct TooieRenderBuffers* buffers, u8* node) {
 #if TOOIE_BK_PIPELINE
     /* @recomp BK func_80338904: identity MUL/PUSH and group before the original list call;
-       original-matrix pop and group pop after it. Supersedes the feather bracket here. */
+       original-matrix pop and group pop after it. Supersedes the feather bracket here.
+       @tooie Inside a header-bit40 root the helper keeps the original cross-list stack:
+       identity MUL/NOPUSH and group pop only (bk_graph.inc bk_list_keeps_stack). */
     u32 bkList = tooie_bk_list_begin((Gfx**)&buffers->gfx, (u32)node, 1u);
 #else
     u32 current = (u32)buffers->gfx;

@@ -165,7 +165,7 @@ struct BridgeProducerReceipt {
 #endif
 } bridge_producer_receipt;
 void validate_bridge_image(const char* bytes, size_t size) {
-#if BASELINE_CAMERA_IDENTITY && TOOIE_BACKPACK621_SELECTED
+#if BASELINE_CAMERA_IDENTITY && TOOIE_BACKPACK621_SECTION_PRESENT // L06c-3: state exists only with its section
     constexpr uint32_t b621_offset=TOOIE_BACKPACK621_STATE-0x80801000u;
     if(!TOOIE_CPU625_SELECTED || TOOIE_BACKPACK621_STATE_BYTES!=612u ||
        b621_offset>size || size-b621_offset<612u ||
@@ -182,12 +182,12 @@ void validate_bridge_image(const char* bytes, size_t size) {
 #if BASELINE_CAMERA_IDENTITY && TOOIE_MINIMUM_HOST_SELECTED
     constexpr uint32_t offset=TOOIE_MINIMUM_HOST_STATE-0x80801000u;
     if(TOOIE_MINIMUM_HOST_STATE_BYTES!=12u || offset>size || size-offset<12u || TOOIE_MINIMUM_HOST_STATE<TOOIE_PRE_STATE+124u)rejected_body("HOST state extent/overlap");
-#if TOOIE_CPU625_SELECTED
+#if TOOIE_CPU625_SECTION_PRESENT // L06c-4: the state exists only with its section
     if(TOOIE_MINIMUM_HOST_STATE<TOOIE_CPU625_STATE+464u)rejected_body("HOST/CPU state overlap");
 #endif
     for(uint32_t i=0;i<12u;++i)if(uint8_t(bytes[offset+i]))rejected_body("HOST zero initial state");
 #endif
-#if BASELINE_CAMERA_IDENTITY && TOOIE_NPC665_SELECTED
+#if BASELINE_CAMERA_IDENTITY && TOOIE_NPC665_SECTION_PRESENT // L06c-2: sidecar exists only with its section
     constexpr uint32_t npc_offset=TOOIE_NPC665_STATE-0x80801000u;
     constexpr uint32_t prior_end=TOOIE_NPC665_PRIOR_END;
     if(TOOIE_NPC665_STATE_BYTES!=16u || npc_offset>size || size-npc_offset<16u ||
@@ -199,7 +199,7 @@ void validate_bridge_image(const char* bytes, size_t size) {
         if(uint8_t(bytes[npc_offset+i])!=initial[i])rejected_body("NPC665 initialized sidecar");
     }
 #endif
-#if BASELINE_CAMERA_IDENTITY && TOOIE_CPU625_SELECTED
+#if BASELINE_CAMERA_IDENTITY && TOOIE_CPU625_SECTION_PRESENT // L06c-4
     constexpr uint32_t cpu_offset=TOOIE_CPU625_STATE-0x80801000u;
     if(TOOIE_CPU625_STATE_BYTES!=464u || cpu_offset>size || size-cpu_offset<464u ||
        uint64_t(TOOIE_CPU625_STATE)+464u>0x81000000ull ||
@@ -643,10 +643,14 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
     core1_section = &base[1]; following_section = &base[2];
 #endif
     static std::vector<FuncEntry> entries(base[0].funcs, base[0].funcs + base[0].num_funcs);
+#if BASELINE_CAMERA_IDENTITY && defined(TOOIE_REGISTRY_GENERATED_RESTORATIONS)
+    camera_restore_base(entries, base[0], baseline_boot_patch_registry::boot_osInitialize);
+#else
     constexpr uint32_t offset = 0x800016F0 - 0x80000400;
     if (std::any_of(entries.begin(), entries.end(), [](const auto& entry) { return entry.offset == offset; }))
         rejected_registration("original boot initializer was not excluded");
     entries.push_back({.func = boot_osInitialize, .offset = offset, .rom_size = 0x2A8});
+#endif
     std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) { return a.offset < b.offset; });
     base[0].funcs = entries.data(); base[0].num_funcs = entries.size();
 #ifdef BASELINE_CORE1_INIT
@@ -693,6 +697,20 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
     if (ARRLEN(baseline_boot_patch_registry::section_table) != 1)
         rejected_registration("selected guest initializer registry section count changed");
 #endif
+    // Providers are found by identity, never by row position: N64Recomp emits each table in its
+    // traversal order, and the runtime's lookups (func_map, section offset search) are order-independent.
+    const auto& initializer_section = baseline_boot_patch_registry::section_table[0];
+    const auto initializer_provider = [&initializer_section](recomp_func_t* func) -> const FuncEntry* {
+        const FuncEntry* found = nullptr;
+        for (size_t i = 0; i < initializer_section.num_funcs; ++i) {
+            if (initializer_section.funcs[i].func != func) continue;
+            if (found) return nullptr;   // duplicate provider
+            found = &initializer_section.funcs[i];
+        }
+        return found;
+    };
+    const FuncEntry* boot_provider = initializer_provider(boot_osInitialize);
+    const FuncEntry* core1_provider = initializer_provider(tooie_core1_osInitialize);
     if (
         baseline_boot_patch_registry::section_table[0].ram_addr != 0x80801000 ||
 #if BASELINE_CAMERA_IDENTITY && TOOIE_PRE_SELECTED
@@ -702,26 +720,36 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
 #else
         baseline_boot_patch_registry::section_table[0].num_funcs != (BASELINE_CAMERA_IDENTITY ? 38 : BASELINE_RENDER_BRIDGE ? (BASELINE_RENDER_SILO ? 13 : 8) : (BASELINE_HONEY_PATCH ? 4 : (BASELINE_HEAP_PATCH ? 3 : 2))) ||
 #endif
-        baseline_boot_patch_registry::section_table[0].funcs[0].func != boot_osInitialize ||
-        baseline_boot_patch_registry::section_table[0].funcs[0].offset != 0 ||
-        baseline_boot_patch_registry::section_table[0].funcs[1].func != tooie_core1_osInitialize ||
-        baseline_boot_patch_registry::section_table[0].funcs[1].offset < 1180)
+        !boot_provider || boot_provider->offset != 0 ||
+        !core1_provider || core1_provider->offset < 1180)
         rejected_registration("selected guest initializer registry changed");
     static std::vector<FuncEntry> core1_entries(base[1].funcs, base[1].funcs + base[1].num_funcs);
 #ifdef BASELINE_ROM_PIO_BRIDGE
+#if BASELINE_CAMERA_IDENTITY && defined(TOOIE_REGISTRY_GENERATED_RESTORATIONS)
+    camera_restore_base(core1_entries, base[1], rom_read_word);
+#else
     if (std::any_of(core1_entries.begin(), core1_entries.end(), [](const auto& entry) { return entry.offset == 0xC1E0; }))
         rejected_registration("original ROM-PIO body/address was not excluded");
     core1_entries.push_back({.func = rom_read_word, .offset = 0xC1E0, .rom_size = 0x8C});
 #endif
+#endif
 #if BASELINE_HEAP_PATCH
-    if (baseline_boot_patch_registry::section_table[0].funcs[2].func != heap_realloc ||
-        baseline_boot_patch_registry::section_table[0].funcs[2].offset < 2360 ||
+    const FuncEntry* heap_provider = initializer_provider(heap_realloc);
+#if BASELINE_CAMERA_IDENTITY && defined(TOOIE_REGISTRY_GENERATED_RESTORATIONS)
+    if (!heap_provider || heap_provider->offset < 2360)
+        rejected_registration("selected heap provider/original address was not excluded");
+    camera_restore_base(core1_entries, base[1], baseline_boot_patch_registry::heap_realloc);
+#else
+    if (!heap_provider || heap_provider->offset < 2360 ||
         std::any_of(core1_entries.begin(), core1_entries.end(), [](const auto& entry) { return entry.offset == 0x91D8; }))
         rejected_registration("selected heap provider/original address was not excluded");
     core1_entries.push_back({.func = heap_realloc, .offset = 0x91D8, .rom_size = 0x180});
 #endif
+#endif
 #if BASELINE_HONEY_PATCH || BASELINE_RENDER_BRIDGE
     const auto& patch_section = baseline_boot_patch_registry::section_table[0];
+#if !(BASELINE_CAMERA_IDENTITY && TOOIE_BK_PIPELINE_SELECTED)
+    // L08b: the BK camera image has no Honey provider; its raw keeps the original in the overlay table.
     const auto* honey_entry = std::find_if(patch_section.funcs, patch_section.funcs + patch_section.num_funcs,
         [](const auto& entry) { return entry.func == func_80800380_chhoneycarrier; });
     if (honey_entry == patch_section.funcs + patch_section.num_funcs)
@@ -730,6 +758,7 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
     if (honey.func != func_80800380_chhoneycarrier || honey.offset < 2760 ||
         uint64_t(honey.offset) + honey.rom_size > baseline_boot_patch_bin_size)
         rejected_registration("selected Honey patch provider/extent changed");
+#endif
 #endif
 #if BASELINE_QUIET_TROT
     const auto& quiet_section = baseline_boot_patch_registry::section_table[0];
@@ -850,7 +879,11 @@ void register_boot_patch(SectionTableEntry* base, size_t count) {
         rejected_registration("duplicate core2 original address offsets");
     base[2].funcs = core2_entries.data(); base[2].num_funcs = core2_entries.size();
 #endif
+#if BASELINE_CAMERA_IDENTITY && defined(TOOIE_REGISTRY_GENERATED_RESTORATIONS)
+    camera_restore_base(core1_entries, base[1], baseline_boot_patch_registry::tooie_core1_osInitialize);
+#else
     core1_entries.push_back({.func = tooie_core1_osInitialize, .offset = 0x8002D7B0 - 0x80012030, .rom_size = 0x2A8});
+#endif
     std::sort(core1_entries.begin(), core1_entries.end(), [](const auto& a, const auto& b) { return a.offset < b.offset; });
     base[1].funcs = core1_entries.data(); base[1].num_funcs = core1_entries.size();
 #endif
@@ -1594,6 +1627,9 @@ void register_overlay_metadata(std::span<SectionTableEntry> sections, std::span<
     }
     for (int ordinal : ids) if (ordinal < -1 || (ordinal >= 0 && size_t(ordinal) >= sections.size()))
         rejected_registration("overlay metadata ID admission");
+#if BASELINE_CAMERA_IDENTITY && defined(TOOIE_REGISTRY_GENERATED_RESTORATIONS)
+    camera_restore_overlays(sections, ids);
+#else
     if (sections.size() <= 433 || ids.size() <= 438 || ids[438] != 433)
         rejected_registration("Honey overlay module/section mapping changed");
     auto& honey = sections[433];
@@ -1637,6 +1673,7 @@ void register_overlay_metadata(std::span<SectionTableEntry> sections, std::span<
             [](const auto& a, const auto& b) { return a.offset == b.offset; }) != trot_entries.end())
         rejected_registration("bsbtrot restored overlay offsets are not unique");
     trot.funcs = trot_entries.data(); trot.num_funcs = trot_entries.size();
+#endif
 #endif
     overlay_sections = sections; overlay_ids = ids;
 }

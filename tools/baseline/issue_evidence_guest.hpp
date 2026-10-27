@@ -12,8 +12,15 @@
 #if !defined(TOOIE_BK_PIPELINE_SELECTED) || (TOOIE_BK_PIPELINE_SELECTED != 0 && TOOIE_BK_PIPELINE_SELECTED != 1)
 #error Explicit boolean TOOIE_BK_PIPELINE_SELECTED required
 #endif
+#if !defined(TOOIE_CPU625_SECTION_PRESENT) || TOOIE_CPU625_SECTION_PRESENT!=(TOOIE_CPU625_SELECTED && !TOOIE_BK_PIPELINE_SELECTED)
+#error L06c-4 CPU625 section-presence contract
+#endif
 #if TOOIE_BK_PIPELINE_SELECTED
 #include "guest/silo-candidate/bk_pipeline.h"
+#endif
+#include "secondary_selection_layout.h"
+#if !defined(TOOIE_PLAYER_SECONDARY_SELECTED) || (TOOIE_PLAYER_SECONDARY_SELECTED != 0 && TOOIE_PLAYER_SECONDARY_SELECTED != 1)
+#error Explicit boolean TOOIE_PLAYER_SECONDARY_SELECTED required
 #endif
 #include <bit>
 #include <type_traits>
@@ -79,7 +86,7 @@ inline bool layout(uint8_t* rdram) noexcept {
         bridge_word(rdram,offsetof(TooieRenderBridgeState,magic))==TOOIE_BRIDGE_MAGIC &&
         bridge_word(rdram,offsetof(TooieRenderBridgeState,layout))==TOOIE_BRIDGE_LAYOUT;
 }
-#if TOOIE_CPU625_SELECTED
+#if TOOIE_CPU625_SECTION_PRESENT
 // Leading words of guest cpu625_layout.h TooieCpu625State. That header is guest C
 // only, so the native read mirrors its header and authenticates its magic/layout.
 struct Cpu625Header { uint32_t magic, layout, next_block, epoch; };
@@ -185,26 +192,35 @@ inline FrameRecord read_frame(uint8_t* rdram, const recomp_context& ctx, uint32_
     out.camera_active=c.active;
     out.camera_latch=c.latch;
     out.bridge_poisoned=bridge_word(rdram,offsetof(TooieRenderBridgeState,poisoned));
-    const auto player=abi<TooiePlayerBoundary>(rdram,TOOIE_BRIDGE_STATE_VRAM+offsetof(TooieRenderBridgeState,player));
-    // Later aggregate metadata, never the outcome of a native player-begin event.
-    out.player_owner=player.owner;
-    out.player_model=player.model;
-    out.player_asset=player.effective_model_asset;
-    out.player_admissions=player.admissions;
-    out.player_refusals=player.refusals;
-    out.player_last_reason=player.last_reason;
-    out.player_view=player.view_phase&3u;
-    out.player_primary_bytes=bridge_word(rdram,offsetof(TooieRenderBridgeState,primary_bytes));
-    out.player_primary_highwater=bridge_word(rdram,offsetof(TooieRenderBridgeState,primary_highwater));
-    out.secondary_opens=bridge_word(rdram,offsetof(TooieRenderBridgeState,secondary_route)+offsetof(TooieSecondaryRoute,opens));
-    out.secondary_faults=bridge_word(rdram,offsetof(TooieRenderBridgeState,secondary_route)+offsetof(TooieSecondaryRoute,faults));
-    out.secondary_seen_main=bridge_word(rdram,offsetof(TooieRenderBridgeState,secondary_ledger)+offsetof(TooieSecondaryLedger,seen_main));
-    out.secondary_seen_late=bridge_word(rdram,offsetof(TooieRenderBridgeState,secondary_ledger)+offsetof(TooieSecondaryLedger,seen_late));
-    out.secondary_unauthenticated=bridge_word(rdram,offsetof(TooieRenderBridgeState,secondary_ledger)+offsetof(TooieSecondaryLedger,unauthenticated));
-    out.secondary_admissions=bridge_word(rdram,offsetof(TooieRenderBridgeState,secondary_ledger)+offsetof(TooieSecondaryLedger,admissions));
-    out.secondary_ledger_bytes=bridge_word(rdram,offsetof(TooieRenderBridgeState,secondary_ledger)+offsetof(TooieSecondaryLedger,bytes));
     out.bridge_next_block=bridge_word(rdram,offsetof(TooieRenderBridgeState,next_block));
-#if TOOIE_CPU625_SELECTED
+    const auto player=abi<TooiePlayerBoundary>(rdram,TOOIE_BRIDGE_STATE_VRAM+offsetof(TooieRenderBridgeState,player));
+    // The legacy player boundary (player_boundary.c) owns these words; BK state has no counterpart.
+    // They are observations only while its native enable (adapters.cpp) is exactly 1, else stay unset.
+    if(player.enabled==1u) {
+        out.valid|=FrameRecord::LegacyPlayer;
+        // Later aggregate metadata, never the outcome of a native player-begin event.
+        out.player_owner=player.owner;
+        out.player_model=player.model;
+        out.player_asset=player.effective_model_asset;
+        out.player_admissions=player.admissions;
+        out.player_refusals=player.refusals;
+        out.player_last_reason=player.last_reason;
+        out.player_view=player.view_phase&3u;
+        out.player_primary_bytes=bridge_word(rdram,offsetof(TooieRenderBridgeState,primary_bytes));
+        out.player_primary_highwater=bridge_word(rdram,offsetof(TooieRenderBridgeState,primary_highwater));
+#if TOOIE_PLAYER_SECONDARY_SELECTED && !TOOIE_BK_PIPELINE_SELECTED
+        // Installed only outside BK (prepare_camera_bridge.py add_secondary_hooks).
+        out.valid|=FrameRecord::SecondaryRoute;
+        out.secondary_opens=bridge_word(rdram,offsetof(TooieRenderBridgeState,secondary_route)+offsetof(TooieSecondaryRoute,opens));
+        out.secondary_faults=bridge_word(rdram,offsetof(TooieRenderBridgeState,secondary_route)+offsetof(TooieSecondaryRoute,faults));
+        out.secondary_seen_main=bridge_word(rdram,offsetof(TooieRenderBridgeState,secondary_ledger)+offsetof(TooieSecondaryLedger,seen_main));
+        out.secondary_seen_late=bridge_word(rdram,offsetof(TooieRenderBridgeState,secondary_ledger)+offsetof(TooieSecondaryLedger,seen_late));
+        out.secondary_unauthenticated=bridge_word(rdram,offsetof(TooieRenderBridgeState,secondary_ledger)+offsetof(TooieSecondaryLedger,unauthenticated));
+        out.secondary_admissions=bridge_word(rdram,offsetof(TooieRenderBridgeState,secondary_ledger)+offsetof(TooieSecondaryLedger,admissions));
+        out.secondary_ledger_bytes=bridge_word(rdram,offsetof(TooieRenderBridgeState,secondary_ledger)+offsetof(TooieSecondaryLedger,bytes));
+#endif
+    }
+#if TOOIE_CPU625_SECTION_PRESENT // L06c-4: BK links no state, so Cpu625 stays unset (serialized null)
     if(range(TOOIE_CPU625_STATE,TOOIE_CPU625_STATE_BYTES)) {
         const auto cpu=abi<Cpu625Header>(rdram,TOOIE_CPU625_STATE);
         if(cpu.magic==cpu625_magic && cpu.layout==cpu625_layout) {
@@ -232,6 +248,17 @@ inline FrameRecord read_frame(uint8_t* rdram, const recomp_context& ctx, uint32_
     return out;
 }
 
+// The original actor pool holds `actor` at `descriptor`'s pool index.
+inline bool pooled(uint8_t* rdram, uint32_t actor, uint32_t descriptor) noexcept {
+    const uint32_t pool=word(rdram,actor_pool_address);
+    if(pool<0x80000000u || pool>0x807FFFF0u || !range(pool,16u)) return false;
+    const uint32_t stride=word(rdram,pool), begin=word(rdram,pool+4u),
+        end=word(rdram,pool+8u), mem_end=word(rdram,pool+12u);
+    if(stride<0x9Cu || stride>0xFFFFu || begin<0x80000000u || begin>=0x80800000u ||
+        end<begin || end>=0x80800000u || mem_end<end || mem_end>=0x80800000u) return false;
+    const uint32_t index=half(rdram,descriptor+0x1Au)>>5;
+    return (index+1u)*stride<=end-begin && begin+index*stride==actor;
+}
 // Diagnostic clone of actor_binding's lifetime predicates. This does not invoke
 // the guest helper or establish any interpolation-route admission.
 inline bool binding(uint8_t* rdram, const TooieActorPaletteContext& a) noexcept {
@@ -242,14 +269,17 @@ inline bool binding(uint8_t* rdram, const TooieActorPaletteContext& a) noexcept 
         a.actor<0x80000000u || a.actor>0x807FFF64u || !range(a.actor,0x9Cu) ||
         word(rdram,a.actor)!=a.descriptor ||
         ((half(rdram,a.descriptor+0x14u)<<16)|half(rdram,a.descriptor+0x16u))!=a.pair) return false;
-    const uint32_t pool=word(rdram,actor_pool_address);
-    if(pool<0x80000000u || pool>0x807FFFF0u || !range(pool,16u)) return false;
-    const uint32_t stride=word(rdram,pool), begin=word(rdram,pool+4u),
-        end=word(rdram,pool+8u), mem_end=word(rdram,pool+12u);
-    if(stride<0x9Cu || stride>0xFFFFu || begin<0x80000000u || begin>=0x80800000u ||
-        end<begin || end>=0x80800000u || mem_end<end || mem_end>=0x80800000u) return false;
-    const uint32_t index=half(rdram,a.descriptor+0x1Au)>>5;
-    return (index+1u)*stride<=end-begin && begin+index*stride==a.actor;
+    return pooled(rdram,a.actor,a.descriptor);
+}
+// A live pooled actor's descriptor resource pair (80103140 publishes it at descriptor+0x14), else 0:
+// binding()'s descriptor, bitmap and pool predicates without a palette context. Names no owner.
+inline uint32_t actor_pair(uint8_t* rdram, uint32_t actor) noexcept {
+    if(actor<0x80000000u || actor>0x807FFF64u || !range(actor,0x9Cu)) return 0;
+    const uint32_t descriptor=word(rdram,actor), offset=descriptor-descriptor_address;
+    if(descriptor<descriptor_address || offset>=TOOIE_BRIDGE_SLOT_COUNT*descriptor_stride || offset%descriptor_stride) return 0;
+    const uint32_t slot=offset/descriptor_stride;
+    if(!(byte(rdram,actor_bitmap_address+(slot>>3))&(0x80u>>(slot&7u))) || !pooled(rdram,actor,descriptor)) return 0;
+    return (half(rdram,descriptor+0x14u)<<16)|half(rdram,descriptor+0x16u);
 }
 inline bool matrix(uint32_t p, uint32_t base) noexcept {
     return range(base,matrix_pool_bytes,8) && range(p,64u,8) && p>=base &&
@@ -428,6 +458,34 @@ inline void world_producer_join(uint8_t* rdram,BkDrawRecord& out) noexcept {
        p.frame!=out.bk_frame || out.depth!=p.root_depth+1u || out.draw_depth!=p.draw_depth+1u)return;
     out.producer_site=p.site;out.producer_model=p.model;p.consumed=true;
 }
+// F4 caller witness, top-level unowned roots only. DE498's first instruction (before its prologue) gives the
+// exact a1 (position; DE448's a0 when DE448 is the caller) and the caller's sp. Translated r31 is not caller
+// provenance (bk_pipeline_thunks.hpp) and is never read. An entry is keyed by the frame DE498 opens (entry
+// sp - de498_frame, asserted against the generated prologue by bk_pipeline_hooks.py); a later entry at that
+// frame supersedes it and a join consumes it, so a lost entry misses and never mismatches.
+inline constexpr uint32_t de498_frame=0xF8u;
+struct De498Entry { uint8_t* ram{}; uint32_t frame{},sp{},position{}; };
+inline std::array<De498Entry,8> de498_entries{};
+inline uint32_t de498_next=0;
+inline void de498_entry(uint8_t* rdram,uint32_t entry_sp,uint32_t position) noexcept {
+    const uint32_t sp=entry_sp-de498_frame;
+    for(auto& e:de498_entries) if(e.sp==sp) e={};
+    if(!bk_layout(rdram) || entry_sp<0x80000000u+de498_frame) return;
+    de498_entries[de498_next++%de498_entries.size()]={rdram,bk_diag(rdram,offsetof(TooieBkDiagnostics,frames)),sp,position};
+}
+// Position actor+4 (the BK direct-world relation, bk_pipeline.c) names that live actor and its descriptor
+// resource; any other position is exported alone. Never an owner, policy or guest write.
+inline void de498_caller_join(uint8_t* rdram,BkDrawRecord& out) noexcept {
+    for(auto& e:de498_entries) {
+        if(e.ram!=rdram || !e.sp || e.sp!=out.sp || e.frame!=out.bk_frame) continue;
+        out.caller_position=e.position; e={};
+        if(const uint32_t pair=actor_pair(rdram,out.caller_position-4u)) {
+            out.caller_actor=out.caller_position-4u; out.caller_pair=pair;
+        }
+        out.valid|=BkDrawRecord::Caller;
+        return;
+    }
+}
 // One pending begin per BK root frame, bounded by TOOIE_BK_ROOT_DEPTH.
 struct BkRoots {
     struct Pending { bool active; uint32_t sp, groups, offset_overflows; BkDrawRecord record; };
@@ -573,6 +631,7 @@ inline void bk_root_after(BkRoots& roots,uint8_t* rdram,uint32_t sp,uint32_t dep
         out.valid|=BkDrawRecord::ControlOwner;
     }
     world_producer_join(rdram,out);
+    if(owner.kind==TOOIE_BK_OWNER_NONE && depth==0u) de498_caller_join(rdram,out);
     roots.pending[depth]={true,sp,bk_diag(rdram,offsetof(TooieBkDiagnostics,groups)),
         bk_diag(rdram,offsetof(TooieBkDiagnostics,offset_overflow)),out};
 }

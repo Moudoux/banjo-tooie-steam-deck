@@ -1,6 +1,10 @@
 #pragma once
 #if BASELINE_CAMERA_IDENTITY
+#include <algorithm>
 #include <array>
+#include <span>
+#include <utility>
+#include <vector>
 #include "demo_timing_layout.h"
 #include "shadow_projection_layout.h"
 #include "pre_background_layout.h"
@@ -19,11 +23,22 @@ static_assert(TOOIE_MODERN_FPS_SELECTED==BASELINE_FIRST_PERSON_AIM,"Native/guest
 // The BK pipeline retires the P04b redirect in the current player composition.
 static_assert(TOOIE_CKCOPY_SELECTED==(TOOIE_CPU625_SELECTED && BASELINE_FLAP_FLIP && !TOOIE_BK_PIPELINE_SELECTED),"Native/guest ckpack copy-storage selection mismatch");
 #include "secondary_selection_layout.h"
-static_assert(TOOIE_PLAYER_SECONDARY_SELECTED==(TOOIE_CPU625_SELECTED && BASELINE_FLAP_FLIP),"Native/guest secondary route selection mismatch");
+// L06b-5: the BK composition labels the split player itself and selects no secondary route owner.
+static_assert(TOOIE_PLAYER_SECONDARY_SELECTED==(TOOIE_CPU625_SELECTED && BASELINE_FLAP_FLIP && !TOOIE_BK_PIPELINE_SELECTED),"Native/guest secondary route selection mismatch");
 static_assert(TOOIE_PLAYER_SECONDARY_ADMIT==0u || TOOIE_PLAYER_SECONDARY_SELECTED==1u,"Secondary admission requires the secondary route selection");
 #include "bk_pipeline_selection_layout.h"
-// BK pipeline packet1 joins the current player composition; its 9 helpers join section2 like the secondary helpers.
-static_assert((!TOOIE_BK_PIPELINE_SELECTED || TOOIE_PLAYER_SECONDARY_SELECTED) && TOOIE_BK_HELPERS==29u,"Native/guest BK pipeline selection mismatch");
+// The BK pipeline joins the current player composition; its helpers (prepare_silo_bridge.BK_HELPERS) join
+// section2 and are counted by the generated registry table below, so they need measured shared sections.
+static_assert(!TOOIE_BK_PIPELINE_SELECTED || (TOOIE_CPU625_SELECTED && BASELINE_FLAP_FLIP &&
+    (TOOIE_NPC665_SECTION_PRESENT || TOOIE_BACKPACK621_SECTION_PRESENT || TOOIE_BK_SHARED_SECTIONS)),"Native/guest BK pipeline selection mismatch");
+// L06c-2: NPC665 stays selected under BK, but only the BK-OFF image links its section and sidecar.
+static_assert(TOOIE_NPC665_SECTION_PRESENT==(TOOIE_NPC665_SELECTED && !TOOIE_BK_PIPELINE_SELECTED),"NPC665 section presence contract");
+// L06c-3: likewise backpack621 (section and 612-byte state). With no owner section linked, the BK image's own
+// measured shared-section tuples (bk_shared_sections) take the owners' place.
+static_assert(TOOIE_BACKPACK621_SECTION_PRESENT==(TOOIE_BACKPACK621_SELECTED && !TOOIE_BK_PIPELINE_SELECTED),"Backpack621 section presence contract");
+static_assert(TOOIE_BK_SHARED_SECTIONS==(TOOIE_BK_PIPELINE_SELECTED && !TOOIE_NPC665_SECTION_PRESENT && !TOOIE_BACKPACK621_SECTION_PRESENT),"BK shared-section measurement contract");
+// L06c-4: CPU625 stays selected under BK (it gates BK itself, above), but only the BK-OFF image links its section and state.
+static_assert(TOOIE_CPU625_SECTION_PRESENT==(TOOIE_CPU625_SELECTED && !TOOIE_BK_PIPELINE_SELECTED),"CPU625 section presence contract");
 // The fixed-section fallbacks below hard-code section2's six primary helpers; the five secondary helpers join section2 only with measured shared-section tuples.
 static_assert(!TOOIE_PLAYER_SECONDARY_SELECTED || TOOIE_NPC665_SELECTED || TOOIE_BACKPACK621_SELECTED,"Secondary section2 growth needs measured shared sections");
 constexpr size_t camera_alias_section_count=3+BASELINE_FIRST_PERSON_AIM+BASELINE_FLAP_FLIP;
@@ -41,15 +56,18 @@ constexpr size_t camera_shadow_helper_count=8u+TOOIE_SHADOW_MV;
 #else
 constexpr size_t camera_shadow_helper_count=0u;
 #endif
-// CKCOPY adds its 4 helpers and, in the CPU625 section, the 2 N3 attachment helpers; the secondary route adds its 5 helpers to section2.
-constexpr size_t camera_patch_count = (TOOIE_SHADOW_SELECTED ? 53+camera_shadow_helper_count : TOOIE_DEMO_TIMING_SELECTED ? 53 : 50)+(TOOIE_PRE_SELECTED?3:0)+(TOOIE_ACTOR_PALETTE_SELECTED?4:0)+(TOOIE_CPU625_SELECTED?4:0)+(TOOIE_MINIMUM_HOST_SELECTED?7:0)+(TOOIE_NPC665_SELECTED?8:0)+(TOOIE_BACKPACK621_SELECTED?9:0)+BASELINE_QUIET_TROT+(TOOIE_TROT_BODIES+TOOIE_TROT_HELPERS)*BASELINE_TROT_TOGGLE+(TOOIE_MODERN_FPS_BODIES+TOOIE_MODERN_FPS_HELPERS)*BASELINE_FIRST_PERSON_AIM+BASELINE_FLAP_FLIP+(TOOIE_CKCOPY_SELECTED?6:0)+(TOOIE_PLAYER_SECONDARY_SELECTED?5:0)+(TOOIE_BK_PIPELINE_SELECTED?TOOIE_BK_HELPERS:0);
 #if TOOIE_PRE_SELECTED
 // Independent selected-body expectation, never derived from the table being checked.
 constexpr size_t camera_pre_replacement_count =
     (TOOIE_ACTOR_PALETTE_SELECTED ? 39u : 38u) +
     3u * TOOIE_MINIMUM_HOST_SELECTED + TOOIE_BACKPACK621_SELECTED + BASELINE_QUIET_TROT +
     TOOIE_TROT_BODIES * BASELINE_TROT_TOGGLE +
-    TOOIE_MODERN_FPS_BODIES * BASELINE_FIRST_PERSON_AIM + BASELINE_FLAP_FLIP;
+    TOOIE_MODERN_FPS_BODIES * BASELINE_FIRST_PERSON_AIM + BASELINE_FLAP_FLIP -
+    TOOIE_BK_PIPELINE_SELECTED; // L08b: the BK image builds no Honey replacement (the raw keeps the original).
+#endif
+#ifdef BASELINE_ROM_PIO_BRIDGE
+// Native ROM-PIO provider (adapters.cpp); the generated base row restores it at its original address.
+extern "C" void rom_read_word(uint8_t*, recomp_context*);
 #endif
 // Registry identity only. Guest leaves retain all camera semantic policy.
 namespace {
@@ -57,27 +75,99 @@ struct CameraAlias {
     recomp_func_t* func;
     uint32_t rom,ram,section_size,offset,extent;
 };
+// L11: an overlay restoration also names its overlay ID and the section's selected.syms function count.
+struct CameraOverlayAlias {
+    recomp_func_t* func;
+    uint32_t overlay_id,rom,ram,section_size,offset,extent,section_functions;
+};
 struct CameraPatchExpected { recomp_func_t* func; size_t section; };
 #include "camera_registry_data.hpp"
+// L06a: the generated registry table (prepare_camera_bridge.write_registry_header) owns this selection's
+// provider count; registration below checks N64Recomp's section tables against it.
+constexpr size_t camera_patch_count=std::size(camera_expected_patches);
 struct CameraResident { recomp_func_t* func; uint32_t address; };
 std::array<CameraResident,camera_patch_count> camera_resident{};
 bool camera_registry_installed = false;
+#if defined(TOOIE_REGISTRY_GENERATED_RESTORATIONS)
+// L11-R4: boot and core1 rows always; ROM-PIO and heap rows under the generated header's own guards. A missing
+// row is refused per provider at registration; an extra row is refused here, at compile time.
+#ifdef BASELINE_ROM_PIO_BRIDGE
+constexpr size_t camera_base_restored_selected=3+BASELINE_HEAP_PATCH;
+#else
+constexpr size_t camera_base_restored_selected=2+BASELINE_HEAP_PATCH;
+#endif
+static_assert(std::size(camera_base_restored)==camera_base_restored_selected,"generated base restoration rows differ from the native selection");
+// L11: base restorations are the generated selected.syms rows (write_registry_header). Each provider's row is
+// restored into its original section only after that section's identity and the original's omission are checked.
+void camera_restore_base(std::vector<FuncEntry>& table,const SectionTableEntry& section,recomp_func_t* func) {
+    const CameraAlias* row=nullptr;
+    for(const auto& candidate:camera_base_restored) if(candidate.func==func) {
+        if(row) rejected_registration("duplicate generated base restoration");
+        row=&candidate;
+    }
+    if(!row || section.rom_addr!=row->rom || section.ram_addr!=row->ram || section.size!=row->section_size ||
+       uint64_t(row->offset)+row->extent>row->section_size ||
+       std::any_of(table.begin(),table.end(),[row](const FuncEntry& entry){return entry.offset==row->offset;}))
+        rejected_registration("generated base restoration row/section identity/omitted original");
+    table.push_back({.func=row->func,.offset=row->offset,.rom_size=row->extent});
+}
+// Honey and bsbtrot rows carry their overlay ID, original section identity and selected.syms function count.
+// Sections are reached through the overlay ID table, never by ordinal literal. As for the core2 rows, the
+// native selection (the same guards the generated header uses) decides how many rows exist.
+// L11-R5: Honey's row exists under the generated header's own guard, never as a literal 1.
+// L08b: under BK the raw keeps the original Honey body, so Honey has no restoration row.
+constexpr size_t camera_overlay_restored_selected=((BASELINE_HONEY_PATCH||BASELINE_RENDER_BRIDGE)&&!TOOIE_BK_PIPELINE_SELECTED)+BASELINE_QUIET_TROT+BASELINE_TROT_TOGGLE;
+static_assert(std::size(camera_overlay_restored)==camera_overlay_restored_selected,"generated overlay restoration rows differ from the native selection");
+void camera_restore_overlays(std::span<SectionTableEntry> sections,std::span<const int> ids) {
+    static std::vector<std::pair<size_t,std::vector<FuncEntry>>> tables;
+    for(const auto& row:camera_overlay_restored) {
+        if(row.overlay_id>=ids.size() || ids[row.overlay_id]<0 || size_t(ids[row.overlay_id])>=sections.size())
+            rejected_registration("generated overlay restoration ID");
+        const size_t ordinal=size_t(ids[row.overlay_id]);
+        const auto& section=sections[ordinal];
+        const size_t omitted=size_t(std::count_if(std::begin(camera_overlay_restored),std::end(camera_overlay_restored),
+            [&row](const CameraOverlayAlias& other){return other.overlay_id==row.overlay_id;}));
+        if(section.rom_addr!=row.rom || section.ram_addr!=row.ram || section.size!=row.section_size ||
+           section.index!=ordinal || uint64_t(row.offset)+row.extent>row.section_size)
+            rejected_registration("generated overlay restoration section identity");
+        auto table=std::find_if(tables.begin(),tables.end(),[ordinal](const auto& t){return t.first==ordinal;});
+        if(table==tables.end()) {
+            if(!section.funcs || section.num_funcs+omitted!=row.section_functions)
+                rejected_registration("generated overlay restoration original function count");
+            tables.emplace_back(ordinal,std::vector<FuncEntry>(section.funcs,section.funcs+section.num_funcs));
+            table=tables.end()-1;
+        }
+        if(std::any_of(table->second.begin(),table->second.end(),[&row](const FuncEntry& entry){return entry.offset==row.offset;}))
+            rejected_registration("generated overlay original was not omitted");
+        table->second.push_back({.func=row.func,.offset=row.offset,.rom_size=row.extent});
+    }
+    for(auto& [ordinal,entries]:tables) {
+        std::sort(entries.begin(),entries.end(),[](const FuncEntry& a,const FuncEntry& b){return a.offset<b.offset;});
+        if(std::adjacent_find(entries.begin(),entries.end(),[](const FuncEntry& a,const FuncEntry& b){return a.offset==b.offset;})!=entries.end())
+            rejected_registration("generated overlay restored offsets are not unique");
+        sections[ordinal].funcs=entries.data();sections[ordinal].num_funcs=entries.size();
+    }
+}
+#endif
 // Table validation and alias installation run only inside register_boot_patch.
 void camera_validate_patch_table() {
     const auto& sections=baseline_boot_patch_registry::section_table;
 #if TOOIE_PRE_SELECTED
-    if(camera_actor_palette_selected>1 || camera_actor_palette_selected!=TOOIE_ACTOR_PALETTE_SELECTED || !TOOIE_DEMO_TIMING_SELECTED || !TOOIE_SHADOW_SELECTED || std::size(sections)!=6+TOOIE_DEMO_TIMING_SELECTED+TOOIE_SHADOW_SELECTED+TOOIE_CPU625_SELECTED+TOOIE_MINIMUM_HOST_SELECTED+TOOIE_NPC665_SELECTED+TOOIE_BACKPACK621_SELECTED+BASELINE_TROT_TOGGLE+BASELINE_FIRST_PERSON_AIM+TOOIE_CKCOPY_SELECTED || std::size(camera_aliases)!=27+3*TOOIE_MINIMUM_HOST_SELECTED+TOOIE_BACKPACK621_SELECTED+TOOIE_MODERN_FPS_BODIES*BASELINE_FIRST_PERSON_AIM+BASELINE_FLAP_FLIP || std::size(camera_expected_patches)!=camera_patch_count)
+    if(camera_actor_palette_selected>1 || camera_actor_palette_selected!=TOOIE_ACTOR_PALETTE_SELECTED || !TOOIE_DEMO_TIMING_SELECTED || !TOOIE_SHADOW_SELECTED || std::size(sections)!=6+TOOIE_DEMO_TIMING_SELECTED+TOOIE_SHADOW_SELECTED+TOOIE_CPU625_SECTION_PRESENT+TOOIE_MINIMUM_HOST_SELECTED+TOOIE_NPC665_SECTION_PRESENT+TOOIE_BACKPACK621_SECTION_PRESENT+BASELINE_TROT_TOGGLE+BASELINE_FIRST_PERSON_AIM+TOOIE_CKCOPY_SELECTED || std::size(camera_aliases)!=27+3*TOOIE_MINIMUM_HOST_SELECTED+TOOIE_BACKPACK621_SELECTED+TOOIE_MODERN_FPS_BODIES*BASELINE_FIRST_PERSON_AIM+BASELINE_FLAP_FLIP)
         rejected_registration("PRE selection exact provider/alias/section counts");
     if (sections[0].rom_addr != 0 || sections[0].ram_addr != 0x80801000 || sections[0].index != 1 ||
         sections[0].num_funcs != camera_pre_replacement_count ||
         sections[0].size != TOOIE_PRE_TEXT_SIZE || sections[0].num_relocs != TOOIE_PRE_TEXT_RELOCS)
         rejected_registration("PRE fixed section0 identity");
-#if TOOIE_BACKPACK621_SELECTED
+#if TOOIE_BACKPACK621_SECTION_PRESENT
     for(size_t i=0;i<5;i++) {const auto& a=sections[i];const auto& e=backpack621_shared_sections[i];
         if(a.rom_addr!=e[0] || a.ram_addr!=e[1] || a.size!=e[2] || a.index!=e[3] || a.num_funcs!=e[4] || a.num_relocs!=e[5])rejected_registration("Backpack621 exact changed shared section");}
-#elif TOOIE_NPC665_SELECTED
+#elif TOOIE_NPC665_SECTION_PRESENT
     for(size_t i=0;i<5;i++) {const auto& a=sections[i];const auto& e=npc665_shared_sections[i];
         if(a.rom_addr!=e[0] || a.ram_addr!=e[1] || a.size!=e[2] || a.index!=e[3] || a.num_funcs!=e[4] || a.num_relocs!=e[5])rejected_registration("NPC665 exact changed shared section");}
+#elif TOOIE_BK_SHARED_SECTIONS
+    for(size_t i=0;i<5;i++) {const auto& a=sections[i];const auto& e=bk_shared_sections[i];
+        if(a.rom_addr!=e[0] || a.ram_addr!=e[1] || a.size!=e[2] || a.index!=e[3] || a.num_funcs!=e[4] || a.num_relocs!=e[5])rejected_registration("BK exact changed shared section");}
 #else
     constexpr uint32_t fixed[4][6]={{0x96C8,0x8080A6C8,0x2E38,2,1,2},{0xC500,0x8080D500,0x15FC,3,6,3},{0xDAFC,0x8080EAFC,camera_actor_palette_selected?0xD10u:0x68Cu,4,camera_actor_palette_selected?4u:3u,0},{camera_actor_palette_selected?0xE820u:0xE19Cu,camera_actor_palette_selected?0x8080F820u:0x8080F19Cu,camera_actor_palette_selected?0x3DB4u:0x20F0u,8,camera_actor_palette_selected?4u:2u,camera_actor_palette_selected?6u:4u}};
     for(size_t i=1;i<5;i++) {const auto& a=sections[i];const auto& e=fixed[i-1];
@@ -94,7 +184,7 @@ void camera_validate_patch_table() {
         sections[3].index!=4 || sections[3].num_funcs!=3 || sections[3].num_relocs!=0 ||
         sections[4].rom_addr!=(camera_actor_palette_selected?0xE4F8:0xE19C) || sections[4].ram_addr!=(camera_actor_palette_selected?0x8080F4F8:0x8080F19C) || sections[4].size!=0x20F0 ||
         sections[4].index!=8 || sections[4].num_funcs!=2 || sections[4].num_relocs!=4 ||
-        std::size(camera_aliases)!=27 || std::size(camera_expected_patches)!=camera_patch_count)
+        std::size(camera_aliases)!=27)
         rejected_registration("camera/helper/player exact registry section/count identity");
 #endif
 #if TOOIE_DEMO_TIMING_SELECTED
@@ -113,7 +203,7 @@ void camera_validate_patch_table() {
     {const auto& p=sections[TOOIE_PRE_SECTION];
      if(p.rom_addr!=TOOIE_PRE_ROM || p.ram_addr!=TOOIE_PRE_RAM || p.size!=TOOIE_PRE_SIZE || p.index!=TOOIE_PRE_INDEX || p.num_funcs!=3 || p.num_relocs!=TOOIE_PRE_RELOCS)rejected_registration("PRE exact compiled helper section");}
 #endif
-#if TOOIE_CPU625_SELECTED
+#if TOOIE_CPU625_SECTION_PRESENT
     {const auto& p=sections[TOOIE_CPU625_SECTION];
      if(!TOOIE_PRE_SELECTED || !TOOIE_ACTOR_PALETTE_SELECTED || p.rom_addr!=TOOIE_CPU625_ROM ||
         p.ram_addr!=TOOIE_CPU625_RAM || p.size!=TOOIE_CPU625_SIZE || p.index!=TOOIE_CPU625_INDEX ||
@@ -124,20 +214,20 @@ void camera_validate_patch_table() {
     {const auto& p=sections[TOOIE_MINIMUM_HOST_SECTION];
      if(TOOIE_MINIMUM_HOST_MUSIC_BYTES!=20 || !TOOIE_PRE_SELECTED || !TOOIE_ACTOR_PALETTE_SELECTED || p.rom_addr!=TOOIE_MINIMUM_HOST_ROM || p.ram_addr!=TOOIE_MINIMUM_HOST_RAM || p.size!=TOOIE_MINIMUM_HOST_SIZE || p.index!=TOOIE_MINIMUM_HOST_INDEX || p.num_funcs!=4 || p.num_relocs!=TOOIE_MINIMUM_HOST_RELOCS)rejected_registration("HOST exact compiled helper section");}
     #endif
-#if TOOIE_NPC665_SELECTED
+#if TOOIE_NPC665_SECTION_PRESENT
     {const auto& p=sections[TOOIE_NPC665_SECTION];
      if(!TOOIE_PRE_SELECTED || !TOOIE_ACTOR_PALETTE_SELECTED || p.rom_addr!=TOOIE_NPC665_ROM ||
         p.ram_addr!=TOOIE_NPC665_RAM || p.size!=TOOIE_NPC665_SIZE || p.index!=TOOIE_NPC665_INDEX ||
-        p.num_funcs!=8 || p.num_relocs!=TOOIE_NPC665_RELOCS)
-         rejected_registration("NPC665 exact eight compiled helpers");}
+        p.num_funcs!=8u || p.num_relocs!=TOOIE_NPC665_RELOCS)
+         rejected_registration("NPC665 exact compiled helpers");}
 #endif
-#if TOOIE_BACKPACK621_SELECTED
+#if TOOIE_BACKPACK621_SECTION_PRESENT
     {const auto& p=sections[TOOIE_BACKPACK621_SECTION];
      if(!TOOIE_CPU625_SELECTED || !TOOIE_PRE_SELECTED || !TOOIE_ACTOR_PALETTE_SELECTED ||
         p.rom_addr!=TOOIE_BACKPACK621_ROM || p.ram_addr!=TOOIE_BACKPACK621_RAM ||
         p.size!=TOOIE_BACKPACK621_SIZE || p.index!=TOOIE_BACKPACK621_INDEX ||
-        p.num_funcs!=8 || p.num_relocs!=TOOIE_BACKPACK621_RELOCS)
-         rejected_registration("Backpack621 exact eight compiled helpers");}
+        p.num_funcs!=8u || p.num_relocs!=TOOIE_BACKPACK621_RELOCS)
+         rejected_registration("Backpack621 exact compiled helpers");}
 #endif
 #if BASELINE_TROT_TOGGLE
     {const auto& p=sections[TOOIE_TROT_SECTION];
@@ -176,11 +266,14 @@ void camera_validate_patch_table() {
         const auto& section=sections[s];
         if(!section.funcs || uint64_t(section.ram_addr)+section.size>0x81000000ull)
             rejected_registration("camera patch section bounds/relocations");
+        // N64Recomp emits each table in traversal order; overlap is checked over an offset-sorted copy.
+        std::vector<std::pair<uint32_t,uint32_t>> extents;
+        extents.reserve(section.num_funcs);
         for(size_t i=0;i<section.num_funcs;++i) {
             const auto& f=section.funcs[i];
-            if(!f.func || !f.rom_size || uint64_t(f.offset)+f.rom_size>section.size ||
-                (i && uint64_t(section.funcs[i-1].offset)+section.funcs[i-1].rom_size>f.offset))
+            if(!f.func || !f.rom_size || uint64_t(f.offset)+f.rom_size>section.size)
                 rejected_registration("camera patch function bounds/overlap");
+            extents.emplace_back(f.offset,f.rom_size);
             size_t matches=0;
             for(const auto& expected:camera_expected_patches) if(expected.func==f.func) {
                 if(expected.section!=s) rejected_registration("camera helper section ownership");
@@ -191,8 +284,12 @@ void camera_validate_patch_table() {
                 rejected_registration("camera provider appears more than once");
             camera_resident[resident++]={f.func,section.ram_addr+f.offset};
         }
+        std::sort(extents.begin(),extents.end());
+        for(size_t i=1;i<extents.size();++i)
+            if(uint64_t(extents[i-1].first)+extents[i-1].second>extents[i].first)
+                rejected_registration("camera patch function bounds/overlap");
     }
-#if TOOIE_NPC665_SELECTED
+#if TOOIE_NPC665_SECTION_PRESENT
     size_t end_matches=0;
     for(size_t i=0;i<resident;i++) if(camera_resident[i].address==TOOIE_NPC665_END) {
         // The checked path is the absolute import; the table keeps the guest end itself.

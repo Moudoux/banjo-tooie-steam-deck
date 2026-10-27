@@ -12,6 +12,9 @@
 #include "../tools/baseline/guest/silo-candidate/render_bridge.h"
 #include "../tools/baseline/guest/silo-candidate/bk_pipeline.h"
 #include "bk_pipeline_selection_layout.h"
+#include "camera_identity_layout.h"
+#include "../tools/baseline/guest/camera-candidate/camera_identity.h"
+#include "../tools/baseline/menu_text.hpp"   // L14-VR03: native reference of the guest option-text owner
 static_assert(TOOIE_BK_PIPELINE_SELECTED==1u,"BK boundary fixture requires the BK image selection");
 #ifndef TOOIE_PLAYER_STATE_ADDRESS
 #error Define TOOIE_PLAYER_STATE_ADDRESS from the selected bridge receipt
@@ -202,8 +205,30 @@ unsigned transition_scope_cases(){
     {uint8_t* rdram=fresh();const auto before=snapshot(rdram);
         require(!helper(rdram,candidate::tooie_bk_menu_model_begin,0x30060000u,4)&&snapshot(rdram)==before,
             "unknown flags refused without mutation");++cases;}
+    // Unowned DF944 UI models (bk_menu_thunks.hpp bk_ui): the UI domain under the same owner scope. DF944 calls
+    // DE498 directly, so flags 0/1 set no own-DE448 pending; the DFAA8 end restores the unowned context exactly.
+    for(uint32_t flags:{0u,1u}){
+        constexpr uint32_t ui=TOOIE_BK_UI_ID_START+0x7E00u;   // the last model/ordinal component
+        uint8_t* rdram=fresh();put(rdram,f_id,0x12345600u);
+        const uint32_t token=helper(rdram,candidate::tooie_bk_menu_model_begin,ui,flags);
+        require(token&&word(rdram,f_kind)==TOOIE_BK_OWNER_MENU&&word(rdram,f_id)==ui&&word(rdram,owner_id)==ui&&
+            !word(rdram,pending)&&word(rdram,skip)==flags&&word(rdram,f_scope)==1u,
+            "UI model: menu owner kind, its UI ID, no pending own draw, the cut as its skip");
+        helper(rdram,candidate::tooie_bk_menu_model_end,token);
+        idle(rdram,0x12345600u,"UI model end restores the unowned context");
+        require(!word(rdram,skip)&&!word(rdram,owner_id),"UI model end restores the incoming skip and owner ID");
+        ++cases;
+    }
+    for(uint32_t bad:{TOOIE_BK_UI_ID_END,TOOIE_BK_UI_ID_START-0x100u}){
+        uint8_t* rdram=fresh();const auto before=snapshot(rdram);
+        require(!helper(rdram,candidate::tooie_bk_menu_model_begin,bad,0)&&snapshot(rdram)==before,
+            "outside the UI domain is mutation-free refusal");++cases;
+    }
     return cases;
 }
+
+#include "bk_sprite_group_cases.inc"
+#include "bk_text_cases.inc"   // L14-VR03
 
 unsigned boundary_cases(){
     unsigned cases=0;
@@ -588,9 +613,13 @@ UNEXPECTED(func_80104248)
 int main(){
     try{
         const unsigned boundaries=boundary_cases(),attachments=attachment_cases(),selectors=selector_cases(),transitions=transition_scope_cases();
-        require(boundaries==16&&attachments==6&&selectors==13&&transitions==9,"all BK boundary, attachment and selector cases ran");
+        require(boundaries==16&&attachments==6&&selectors==13&&transitions==13,"all BK boundary, attachment and selector cases ran");
+        const unsigned sprites=sprite_group_cases();
+        require(sprites==4,"all option-box sprite group cases ran (L14-VR01b billboard ordinal case)");
+        const unsigned texts=text::text_cases();
+        require(texts==3,"all L14-VR03 option-text equivalence groups ran");
         std::cout<<"BK boundary actual fixture passed: boundary_cases="<<boundaries<<"; attachment_cases="<<attachments
-            <<"; selector_cases="<<selectors<<"; transition_scope_cases="<<transitions
+            <<"; selector_cases="<<selectors<<"; transition_scope_cases="<<transitions<<"; sprite_group_cases="<<sprites<<"; text_equivalence_groups="<<texts
             <<"; frames="<<TOOIE_DRAW_101808_FRAME_BYTES<<','<<TOOIE_DRAW_DE448_FRAME_BYTES<<','<<TOOIE_BK_HELPER_FRAME_BYTES
             <<"; DE498=DOUBLE; root=TESTED; float=NOT_RUN; RT64=NOT_RUN\n";
         return 0;

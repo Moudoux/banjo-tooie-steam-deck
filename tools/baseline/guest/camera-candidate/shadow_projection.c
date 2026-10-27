@@ -48,12 +48,14 @@ SI u32 shadow_owned(void){
 }
 /* @tooie The authenticated menu scope's own bit40 draw: fxdialog3 80800174 -> DF944 -> DE498 (called
  * directly at DFAA0, so no DE448 depth) under tooie_bk_menu_model_begin, before its DF0B0 root. Only a
- * menu model-component root (menu_scope.hpp); transition masks (kind 4 from TOOIE_BK_MENU_ID_END) and the
+ * menu model-component root (menu_scope.hpp), or an otherwise unowned DF944 UI model under the same owner
+ * scope with a UI-domain ID (ui_scope.hpp); transition masks (kind 4 from TOOIE_BK_MENU_ID_END) and the
  * reserved sprite component are excluded. Returns its projection ID, or 0. */
 SI u32 shadow_menu_projection(void){
  u32 id=tooie_bk_state.owner.id;
  if(tooie_bk_state.owner.kind!=TOOIE_BK_OWNER_MENU || tooie_bk_state.draw_depth || tooie_bk_state.root_depth ||
-    tooie_bk_state.cur_drawn_model_transform_id!=id || id<TOOIE_BK_MENU_ID_START || id>=TOOIE_BK_MENU_ID_END ||
+    tooie_bk_state.cur_drawn_model_transform_id!=id ||
+    !((id>=TOOIE_BK_MENU_ID_START && id<TOOIE_BK_MENU_ID_END) || (id>=TOOIE_BK_UI_ID_START && id<TOOIE_BK_UI_ID_END)) ||
     (id&(2u*TOOIE_BK_TRANSFORM_ID_COUNT-1u)))return 0;
  return id+TOOIE_BK_MENU_PROJECTION_OFFSET;
 }
@@ -61,14 +63,19 @@ _Static_assert(TOOIE_BK_MENU_ID_START+TOOIE_BK_MENU_PROJECTION_OFFSET>=TOOIE_BK_
     TOOIE_BK_MENU_ID_START+TOOIE_BK_MENU_PROJECTION_OFFSET>=TOOIE_CAMERA_TRANSITION_ID_END &&
     TOOIE_BK_MENU_ID_END+TOOIE_BK_MENU_PROJECTION_OFFSET<=0x40000000u,
     "menu projection IDs follow the transition model/projection IDs, below the product labels");
+_Static_assert(TOOIE_BK_UI_ID_START>=TOOIE_BK_MENU_ID_END+TOOIE_BK_MENU_PROJECTION_OFFSET &&
+    TOOIE_BK_UI_ID_START+TOOIE_BK_MENU_PROJECTION_OFFSET>=TOOIE_BK_UI_ID_END &&
+    TOOIE_BK_UI_ID_END+TOOIE_BK_MENU_PROJECTION_OFFSET<=0x40000000u,
+    "UI model projection IDs follow the menu projection mirror, below the product labels");
 /* DEFB0, before the original projection MUL/NOPUSH and after DE498's DE738 pre-draw callback. A
  * shadow-owned draw gets its owner sample's projection ID with the surface policy, or, when the draw
  * skips (a cut, a discontinuity or the projected body's own visible-branch decision, tooie_bk_shadow_project,
  * made here from the effective model), the same ID with every component SKIP: CAM_POLICY_IGNORE's word is
  * BK's gEXMatrixGroupSkipAll for a NOPUSH projection, and the kept ID lets the next workload map it.
- * The menu scope's own bit40 draw likewise gets its projection ID (shadow_menu_projection) with BK's
- * gEXMatrixGroupSimpleNormal word (CAM_POLICY_WORLD), or SkipAll under the menu cut, as BK scopes its
- * portrait ortho ID. Every other bit40 draw keeps the existing actor-palette or IGNORE decision. */
+ * The menu scope's own bit40 draw (a menu box or a DF944 UI model) likewise gets its projection ID
+ * (shadow_menu_projection) with BK's gEXMatrixGroupSimpleNormal word (CAM_POLICY_WORLD), or SkipAll under
+ * the menu cut, as BK scopes its portrait ortho ID. Every other bit40 draw keeps the existing actor-palette
+ * or IGNORE decision. */
 SHADOW_HELPER void tooie_shadow_de498(u32 graphics_buffers,u32 cursor_slot,u32 effective_model){
  struct TooieCameraControl* c=&CAM_STATE.control;u32 cursor,enabled=0,id=0,shadow,menu=0,skip=0;
 #if !TOOIE_ACTOR_PALETTE

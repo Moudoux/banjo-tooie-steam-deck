@@ -20,6 +20,10 @@ constexpr uint32_t saved_address=TOOIE_CAMERA_STATE_VRAM+offsetof(TooieCameraSta
 constexpr uint32_t context_address=TOOIE_BRIDGE_STATE_VRAM+offsetof(TooieRenderBridgeState,palette_context);
 constexpr uint32_t record_address=TOOIE_CAMERA_STATE_VRAM+5u*sizeof(TooieCameraRecord);
 constexpr uint32_t all=DrawRecord::Layout|DrawRecord::Frame|DrawRecord::Root|DrawRecord::Projection|DrawRecord::Context;
+// Schema 3 frame-only availability: the secondary route is installed only outside BK.
+constexpr bool secondary_installed=TOOIE_PLAYER_SECONDARY_SELECTED && !TOOIE_BK_PIPELINE_SELECTED;
+constexpr uint32_t legacy=FrameRecord::LegacyPlayer|(secondary_installed ? uint32_t(FrameRecord::SecondaryRoute) : 0u);
+constexpr uint32_t frame_only=FrameRecord::Cpu625|legacy;
 unsigned cases=0;
 void require(bool ok,const char* what) {
     if(!ok) { std::fprintf(stderr,"FAIL: %s\n",what); std::exit(1); }
@@ -87,12 +91,13 @@ struct Fixture {
         put(guest::control_slot_address,7u);
         put(0x8007913Cu,0xFFFFFFFDu); put_half(0x80078F64u,0xFFFEu); put(0x80079138u,0x12345678u);
         TooiePlayerBoundary player{};
+        player.enabled=1u; // adapters.cpp's native enable: legacy words are observations.
         player.owner=0x80600120u; player.model=0x80500230u; player.slot=4u;
         player.effective_model_asset=0x567u; player.admissions=0x345u; player.refusals=0x678u;
         player.last_reason=4u|(0x40u<<8);
         put_abi(TOOIE_BRIDGE_STATE_VRAM+offsetof(TooieRenderBridgeState,player),player);
         put(TOOIE_BRIDGE_STATE_VRAM+offsetof(TooieRenderBridgeState,next_block),0x1234u);
-#if TOOIE_CPU625_SELECTED
+#if TOOIE_CPU625_SECTION_PRESENT // L06c-4: no state address exists without the section
         guest::Cpu625Header cpu{guest::cpu625_magic,guest::cpu625_layout,0x7FFu,epoch};
         put_abi(TOOIE_CPU625_STATE,cpu);
 #endif
@@ -448,6 +453,52 @@ void bk_root_cases() {
         require(b.out.size()==TOOIE_BK_ROOT_DEPTH,"only the bounded depths are recorded");
         for(const auto& o:b.out) require((o.valid&Bk_::End) && !(o.valid&Bk_::Unclosed),"bounded depths pair");
     }
+    {
+        // F4 caller witness (save select): an unowned top-level root joins the exact a1 of its own DE498 entry,
+        // keyed by the frame that entry opens. Translated r31 is never read.
+        constexpr uint32_t entry_sp=sp+guest::de498_frame, nested_entry=sp_inner+guest::de498_frame;
+        const auto none=[](Bk& b) { b.owner(TOOIE_BK_OWNER_NONE,0u,0u,0u); guest::de498_entries={}; };
+        {   Bk b; none(b); guest::de498_entry(b.f.ram.data(),entry_sp,actor+4u); b.begin(sp); b.end(sp);
+            const auto o=b.only();
+            require((o.valid&Bk_::Caller) && o.caller_position==actor+4u && o.caller_actor==actor &&
+                o.caller_pair==0x06651234u,"position actor+4 names the live actor and its descriptor resource");
+        }
+        {   Bk b; none(b); guest::de498_entry(b.f.ram.data(),entry_sp,sp+0x200u); b.begin(sp); b.end(sp);
+            const auto o=b.only();
+            require((o.valid&Bk_::Caller) && o.caller_position==sp+0x200u && !o.caller_actor && !o.caller_pair,
+                "any other position is exported alone, with no invented owner");
+        }
+        {   Bk b; none(b); guest::de498_entry(b.f.ram.data(),entry_sp,actor+8u); b.begin(sp); b.end(sp);
+            require(!b.only().caller_actor,"only the exact actor+4 relation names an actor");
+        }
+        {   Bk b; none(b); b.f.put(actor,0u); guest::de498_entry(b.f.ram.data(),entry_sp,actor+4u); b.begin(sp); b.end(sp);
+            require(b.only().caller_position==actor+4u && !b.only().caller_actor,"no live descriptor, no actor");
+        }
+        {   Bk b; none(b); auto* ram=b.f.ram.data();
+            guest::de498_entry(ram,entry_sp,actor+4u); guest::de498_entry(ram,entry_sp,sp+0x300u);
+            b.begin(sp); b.end(sp); b.begin(sp); b.end(sp);
+            require(b.out.size()==2u && b.out[0].caller_position==sp+0x300u && !(b.out[1].valid&Bk_::Caller),
+                "a later entry at the same frame supersedes; an entry joins once");
+        }
+        {   Bk b; none(b); guest::de498_entry(b.f.ram.data(),nested_entry,actor+4u); b.begin(sp); b.end(sp);
+            require(!(b.only().valid&Bk_::Caller),"another DE498 frame never joins");
+        }
+        {   Bk b; none(b); guest::de498_entry(b.f.ram.data(),entry_sp,actor+4u);
+            b.w(bk_diag(offsetof(TooieBkDiagnostics,frames)),41u); b.begin(sp); b.end(sp);
+            require(!(b.only().valid&Bk_::Caller),"an entry never joins across BK frames");
+        }
+        {   Bk b; b.owner(TOOIE_BK_OWNER_ACTOR,0u,actor_id,actor_id,actor_birth); guest::de498_entries={};
+            guest::de498_entry(b.f.ram.data(),entry_sp,actor+4u); b.begin(sp); b.end(sp);
+            require(!(b.only().valid&Bk_::Caller),"an owned root keeps the existing record");
+        }
+        {   Bk b; none(b); auto* ram=b.f.ram.data();
+            guest::de498_entry(ram,entry_sp,actor+4u); b.begin(sp);
+            guest::de498_entry(ram,nested_entry,actor+4u); b.begin(sp_inner); b.end(sp_inner); b.end(sp);
+            require(b.out.size()==2u && !(b.out[0].valid&Bk_::Caller) && (b.out[1].valid&Bk_::Caller),
+                "a nested root is not top-level");
+        }
+        guest::de498_entries={};
+    }
 }
 #endif
 }
@@ -468,27 +519,32 @@ int main() {
         std::memcpy(before_ctx.data(),&frame_ctx,sizeof(frame_ctx));
         const auto begin=guest::read_frame(f.ram.data(),frame_ctx,guest::Begin);
         const auto end=guest::read_frame(f.ram.data(),frame_ctx,guest::End);
-        require((begin.valid&~uint32_t(FrameRecord::Cpu625))==(DrawRecord::Layout|DrawRecord::Frame) &&
+        require((begin.valid&~frame_only)==(DrawRecord::Layout|DrawRecord::Frame) && (begin.valid&legacy)==legacy &&
             begin.phase==1 && end.phase==2,"frame phases and owner validity");
         require(begin.map==0x4567u && begin.requested_period==-3 && begin.measured_period==-2 && begin.live_period==0x12345678,"original scalar widths and signs");
         require(begin.control_slot==7u && begin.player_owner==0x80600120u && begin.player_model==0x80500230u &&
             begin.player_asset==0x567u && begin.player_admissions==0x345u && begin.player_refusals==0x678u,"current control slot distinct from aggregate player slot");
         require(before==f.ram && std::memcmp(before_ctx.data(),&frame_ctx,sizeof(frame_ctx))==0,"frame must not mutate guest or registers");
         frame_ctx.r29=(gpr)(int32_t)(frame_sp+16u);
-        require((guest::read_frame(f.ram.data(),frame_ctx,guest::Begin).valid&~uint32_t(FrameRecord::Cpu625))==
+        require((guest::read_frame(f.ram.data(),frame_ctx,guest::Begin).valid&~frame_only)==
             DrawRecord::Layout,"wrong frame owner invalid");
     }
     {
         // Schema-2 frame words: bridge words need Layout; CPU625 needs its own authenticated header.
-        constexpr uint32_t cpu_bit=TOOIE_CPU625_SELECTED ? FrameRecord::Cpu625 : 0u;
+        constexpr uint32_t cpu_bit=TOOIE_CPU625_SECTION_PRESENT ? FrameRecord::Cpu625 : 0u;
         Fixture f;
         const auto r=f.frame();
-        require(r.valid==(DrawRecord::Layout|DrawRecord::Frame|cpu_bit),"frame validity includes selected CPU625 only");
+        require(r.valid==(DrawRecord::Layout|DrawRecord::Frame|cpu_bit|legacy),
+            "frame validity includes selected CPU625 and the enabled legacy player only");
         require(r.player_last_reason==(4u|(0x40u<<8)) && r.bridge_next_block==0x1234u,"latest player reason and bridge cursor");
-        require(r.cpu625_next_block==(TOOIE_CPU625_SELECTED ? 0x7FFu : 0u),"CPU625 cursor only from selected state");
-        require(f.frame(frame_sp+16u).valid==(DrawRecord::Layout|cpu_bit) &&
+        require(r.cpu625_next_block==(TOOIE_CPU625_SECTION_PRESENT ? 0x7FFu : 0u),"CPU625 cursor only from linked state");
+#if TOOIE_CPU625_SELECTED && !TOOIE_CPU625_SECTION_PRESENT
+        // L06c-4: selected CPU625 without its BK section is unavailable (bit unset, serialized null), not a zero cursor.
+        require(!(r.valid&FrameRecord::Cpu625),"BK CPU625 cursor is unavailable, never zero-valid");
+#endif
+        require(f.frame(frame_sp+16u).valid==(DrawRecord::Layout|cpu_bit|legacy) &&
             f.frame(frame_sp+16u).bridge_next_block==0x1234u,"wrong frame owner keeps layout-authenticated words");
-#if TOOIE_CPU625_SELECTED
+#if TOOIE_CPU625_SECTION_PRESENT
         for(const uint32_t offset:{0u,4u}) {
             Fixture bad;
             bad.put(TOOIE_CPU625_STATE+offset,offset ? guest::cpu625_layout+1u : 0u);
@@ -524,9 +580,31 @@ int main() {
         f.put(ledger+offsetof(TooieSecondaryLedger,unauthenticated),4u); f.put(ledger+offsetof(TooieSecondaryLedger,admissions),2u);
         f.put(ledger+offsetof(TooieSecondaryLedger,bytes),2u*2824u);
         const auto r=f.frame();
-        require(r.secondary_opens==5u && r.secondary_faults==2u && r.secondary_seen_main==3u && r.secondary_seen_late==1u &&
-            r.secondary_unauthenticated==4u && r.secondary_admissions==2u && r.secondary_ledger_bytes==2u*2824u,
-            "secondary route counters and ledger are exported");
+        const bool exported=r.secondary_opens==5u && r.secondary_faults==2u && r.secondary_seen_main==3u &&
+            r.secondary_seen_late==1u && r.secondary_unauthenticated==4u && r.secondary_admissions==2u &&
+            r.secondary_ledger_bytes==2u*2824u;
+        const bool unset=!r.secondary_opens && !r.secondary_faults && !r.secondary_seen_main && !r.secondary_seen_late &&
+            !r.secondary_unauthenticated && !r.secondary_admissions && !r.secondary_ledger_bytes;
+        require(secondary_installed ? exported && (r.valid&FrameRecord::SecondaryRoute) :
+            unset && !(r.valid&FrameRecord::SecondaryRoute),
+            "secondary route words are exported only where the route is installed");
+    }
+    {
+        // Schema 3: a disabled legacy player boundary exports no player words, not zero observations.
+        for(const uint32_t enabled:{0u,2u}) {
+            Fixture f;
+            f.put(TOOIE_BRIDGE_STATE_VRAM+offsetof(TooieRenderBridgeState,primary_bytes),3792u);
+            f.put(TOOIE_BRIDGE_STATE_VRAM+offsetof(TooieRenderBridgeState,secondary_route)+offsetof(TooieSecondaryRoute,opens),5u);
+            f.put(TOOIE_BRIDGE_STATE_VRAM+offsetof(TooieRenderBridgeState,player)+offsetof(TooiePlayerBoundary,enabled),enabled);
+            const auto r=f.frame();
+            require(!(r.valid&legacy) &&
+                (r.valid&(DrawRecord::Layout|DrawRecord::Frame))==(DrawRecord::Layout|DrawRecord::Frame),
+                "only an exact native enable marks legacy player words available");
+            require(!r.player_owner && !r.player_model && !r.player_asset && !r.player_admissions && !r.player_refusals &&
+                !r.player_last_reason && !r.player_view && !r.player_primary_bytes && !r.secondary_opens,
+                "disabled owner words stay unset for the serializer to withhold");
+            require(r.bridge_next_block==0x1234u,"the bridge allocator cursor stays layout-authenticated");
+        }
     }
     {
         // Optional frame-end shadow words: authenticated End sample only, outside `valid`.
@@ -550,7 +628,7 @@ int main() {
             require(r.shadow_valid==1u && r.shadow_source_pc==0x800A6D60u && r.shadow_seen_epoch==epoch &&
                 !r.shadow_id && !r.shadow_group && !r.shadow_composite && !r.shadow_mode_open && !r.shadow_fault &&
                 r.shadow_args==std::array<uint32_t,4>{0u,0u,304u,228u},"End sample exports final shadow words");
-            require((r.valid&~uint32_t(FrameRecord::Cpu625))==(DrawRecord::Layout|DrawRecord::Frame),
+            require((r.valid&~frame_only)==(DrawRecord::Layout|DrawRecord::Frame),
                 "shadow words do not change frame validity bits");
             require(!f.frame().shadow_valid,"Begin sample never exports shadow words");
             require(!end(f,frame_sp+16u).shadow_valid,"wrong construction owner exports nothing");
@@ -727,7 +805,7 @@ int main() {
 #if TOOIE_BK_PIPELINE_SELECTED
     bk_root_cases();
 #endif
-    std::printf("PASS baseline guest issue evidence (%u draw cases plus frame metadata; cpu625_selected=%u; "
-        "bk_selected=%u bk_root_cases=%u)\n",
-        cases,unsigned(TOOIE_CPU625_SELECTED),unsigned(TOOIE_BK_PIPELINE_SELECTED),bk_cases);
+    std::printf("PASS baseline guest issue evidence (%u draw cases plus frame metadata; cpu625_selected=%u "
+        "cpu625_section_present=%u; bk_selected=%u bk_root_cases=%u)\n",
+        cases,unsigned(TOOIE_CPU625_SELECTED),unsigned(TOOIE_CPU625_SECTION_PRESENT),unsigned(TOOIE_BK_PIPELINE_SELECTED),bk_cases);
 }

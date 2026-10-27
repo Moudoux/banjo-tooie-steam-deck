@@ -214,6 +214,10 @@ extern "C" void func_80100A74(uint8_t*, recomp_context*);
 extern "C" void func_80100AC4(uint8_t*, recomp_context*);
 #endif
 #include "candidate_draw_boundaries_fixture.inc"
+#ifdef TOOIE_HONEY_RAW_FIXTURE
+// L08b (BK): the original Honey body from the selected raw corpus; the BK image builds no replacement.
+#include TOOIE_HONEY_RAW_FIXTURE
+#endif
 }
 namespace {
 constexpr uint32_t actor=0x80111214, rotation=0x80212224, extra=0x80313234;
@@ -1743,6 +1747,7 @@ unsigned palette_fixtures() {
     return groups;
 }
 #ifdef TOOIE_REQUIRED_STOP_FIXTURE
+#ifndef TOOIE_BK_SHADOW_FIXTURE
 // The extracted Honey body uses the selected camera pools/control ABI. Only its
 // original draw/show and getter boundaries are doubles, as in the older fixture.
 unsigned honey_close_fixtures() {
@@ -1802,6 +1807,47 @@ unsigned honey_close_fixtures() {
     }
     honey_case=-1;return 4;
 }
+#else
+// L08a (BK selection): the selected raw func_80101870 calls func_80101808, whose BK owner scope labels the
+// carrier like any other actor. The selected Honey body is the original: draw, then the optional show. In every
+// former Honey case it writes no bridge or camera state, no group command and no required stop.
+unsigned honey_bk_passthrough_fixtures() {
+    constexpr uint32_t cs=TOOIE_CAMERA_STATE_VRAM;
+    constexpr uint32_t base=TOOIE_CAMERA_MAIN_VRAM,start=base+0x100;
+    unsigned cases=0;
+    for(int which=0;which<4;++which) for(const uint32_t show:{0u,0x1000u}) {
+        std::vector<uint8_t> ram(16*1024*1024);auto* rdram=ram.data();
+        const auto words=[&](uint32_t at,uint32_t bytes){std::vector<uint32_t> out;for(uint32_t i=0;i<bytes;i+=4)out.push_back(word(rdram,at+i));return out;};
+        honey_case=which;honey_draws=0;honey_shows=0;
+        const unsigned stops=close_stop::calls;
+        put(rdram,state,TOOIE_BRIDGE_MAGIC);put(rdram,state+4,TOOIE_BRIDGE_LAYOUT);
+        put(rdram,state+offsetof(TooieRenderBridgeState,epoch),1);
+        put(rdram,state+offsetof(TooieRenderBridgeState,births),1);
+        if(which==1)put(rdram,state+offsetof(TooieRenderBridgeState,last_end),start+8);
+        put(rdram,palette_actor,palette_descriptor);put(rdram,palette_actor+0x7C,show);
+        MEM_H(0x14,guest(palette_descriptor))=0x612;MEM_H(0x16,guest(palette_descriptor))=0x1234;
+        MEM_H(0,guest(0x8007BEDA))=0;
+        put(rdram,0x8007BCD0,base);put(rdram,palette_cursor_slot,start);
+        put(rdram,cs+offsetof(TooieCameraState,owner_frame),stack);
+        put(rdram,cs+offsetof(TooieCameraState,control)+offsetof(TooieCameraControl,active),1);
+        for(uint32_t at=start;at<start+64;at+=4)put(rdram,at,0xA5A5A5A5);
+        const auto bridge_before=words(state,TOOIE_BRIDGE_STATE_BYTES);
+        const auto camera_before=words(cs,uint32_t(sizeof(TooieCameraState)));
+        auto c=context();c.r4=guest(palette_actor);c.r5=guest(honey_arg);const auto before=c;
+        candidate::func_80800380_chhoneycarrier(rdram,&c);saved(c,before);
+        require(close_stop::calls==stops,"BK Honey never reaches a required stop");
+        require(honey_draws==1 && honey_shows==unsigned(show!=0),"BK Honey: original draw once, then the show only for unk7C_12");
+        require(word(rdram,palette_cursor_slot)==start+(which==3?1u:8u) && word(rdram,start+8)==0xA5A5A5A5 &&
+            (which==3 ? word(rdram,start)==0xA5A5A5A5 : word(rdram,start)==0xD0000000 && word(rdram,start+4)==0xD0000001),
+            "BK Honey emits no command around the original draw");
+        require(words(state,TOOIE_BRIDGE_STATE_BYTES)==bridge_before,
+            "BK Honey writes no bridge state: no block, counter, active flag, cursor floor or poison");
+        require(words(cs,uint32_t(sizeof(TooieCameraState)))==camera_before,"BK Honey leaves camera state untouched (no latch)");
+        ++cases;
+    }
+    honey_case=-1;return cases;
+}
+#endif
 
 #ifndef TOOIE_BK_SHADOW_FIXTURE
 // BK-OFF composition only: the legacy shadow admission, its MODELVIEW group and paid-close state.
@@ -2959,8 +3005,12 @@ extern "C" void func_800A7180(uint8_t* rdram,recomp_context* c){
 }
 extern "C" void func_800DE498(uint8_t* rdram,recomp_context* c){
 #ifdef TOOIE_SKELETAL_FIXTURE
+#ifndef TOOIE_BK_B4_FIXTURE
+    // L06b-7: the title53 CPU-root boundary double is compiled with its BK-OFF groups only.
     if(title_boundary){title_boundary_draw(rdram,c);return;}
+    // L06b-3: the NPC665 skeletal boundary double is compiled with its BK-OFF groups only.
     if(skeletal_boundary>=0){skeletal_boundary_draw(rdram,c);return;}
+#endif
 #endif
 #ifdef TOOIE_PLAYER_STATE_ADDRESS
     if(player_case>=0){
@@ -3091,6 +3141,116 @@ extern "C" void osVirtualToPhysical_recomp(uint8_t*,recomp_context* c){
     clobber(c);c->r2=guest(p&0x1FFFFFFFu);
 }
 extern "C" void osVirtualToPhysical(uint8_t* rdram,recomp_context* c){osVirtualToPhysical_recomp(rdram,c);}
+#if defined(TOOIE_BK_DRAW_FIXTURE) && defined(TOOIE_ACTOR_PALETTE_FIXTURE)
+// L07a: the actual translated begin/end under BK. Owner words are explicit inputs standing for
+// bk_owner_actor at 80101808 (BaselineBkBoundariesTest runs that helper); this is not a DE448 run.
+unsigned palette_bk_owner_fixtures() {
+    constexpr uint32_t bs=TOOIE_BK_STATE, owner=bs+offsetof(TooieBkState,owner);
+    constexpr uint32_t owner_id=TOOIE_BK_ACTOR_ID_START, sentinel=0x2468ACE0u;
+    enum { Matched, Kind, Birth, View, Phase, ZeroId, Attachment, Tripwire, Cases };
+    unsigned cases=0;
+    for (int which=Matched;which<Cases;++which) {
+        PaletteFixture f; auto* rdram=f.rdram;
+        put(rdram,owner+offsetof(TooieBkOwner,kind),which==Kind?TOOIE_BK_OWNER_PLAYER:TOOIE_BK_OWNER_ACTOR);
+        put(rdram,owner+offsetof(TooieBkOwner,birth),which==Birth?2u:1u); // prepare(): slot0 birth1
+        put(rdram,owner+offsetof(TooieBkOwner,view),which==View?1u:0u);
+        put(rdram,owner+offsetof(TooieBkOwner,phase),which==Phase?1u:0u);
+        put(rdram,owner+offsetof(TooieBkOwner,id),which==ZeroId?0u:owner_id);
+        put(rdram,bs+offsetof(TooieBkState,cur_drawn_model_transform_id),
+            which==ZeroId?0u:which==Attachment?owner_id+TOOIE_BK_OWNER_STRIDE:owner_id);
+        if (which!=Matched && which!=Tripwire) {
+            // Any other owner state (scope overflow included) keeps the exact group and paid pop.
+            const uint32_t root=f.begin(); f.admitted(root,1); f.finish(root);
+            require(f.field(offsetof(TooieRenderBridgeState,extra_bytes))==32,"fallback keeps its 32-byte prepay");
+            ++cases; continue;
+        }
+        for (uint32_t a=f.cursor;a<f.cursor+64;a+=4) put(rdram,a,sentinel);
+        const uint32_t admissions=f.field(offsetof(TooieRenderBridgeState,silo_admissions));
+        const uint32_t root=f.begin();
+        require(root==0x90000000u,"owner-bound admission keeps its next_block projection ID");
+        require(word(rdram,palette_cursor_slot)==f.cursor && word(rdram,player_buffers)==f.cursor-64,
+            "owner-bound admission moves neither cursor");
+        require(word(rdram,ac+offsetof(TooieActorPaletteContext,admitted))==TOOIE_BRIDGE_PALETTE_ADMITTED &&
+            word(rdram,ac+offsetof(TooieActorPaletteContext,open_group))==2u,"owner-bound occurrence opens without a group");
+        require(f.field(offsetof(TooieRenderBridgeState,active))==1 &&
+            f.field(offsetof(TooieRenderBridgeState,extra_bytes))==0 &&
+            f.field(offsetof(TooieRenderBridgeState,silo_admissions))==admissions+1,"no prepay; occurrence counted");
+        const uint32_t tail=f.cursor+40,end=f.field(offsetof(TooieRenderBridgeState,last_end));
+        put(rdram,player_buffers,tail);
+        if (which==Tripwire) put(rdram,state+offsetof(TooieRenderBridgeState,births),7); // binding lost before close
+        f.invoke(candidate::tooie_actor_palette_end,player_buffers);
+        require(word(rdram,player_buffers)==tail && f.field(offsetof(TooieRenderBridgeState,last_end))==end,
+            "owner-bound end emits no pop");
+        for (uint32_t a=f.cursor;a<f.cursor+64;a+=4) require(word(rdram,a)==sentinel,"owner-bound scope writes no palette command");
+        require(f.field(offsetof(TooieRenderBridgeState,tripwire_count))==unsigned(which==Tripwire) &&
+            f.field(offsetof(TooieRenderBridgeState,poisoned))==unsigned(which==Tripwire),"binding tripwire retained");
+        require(f.field(offsetof(TooieRenderBridgeState,active))==0 &&
+            !word(rdram,ac+offsetof(TooieActorPaletteContext,open_group)) &&
+            word(rdram,ac+offsetof(TooieActorPaletteContext,admitted))==2u,"close releases the occurrence");
+        ++cases;
+    }
+    return cases;
+}
+#endif
+
+#if defined(TOOIE_BK_DRAW_FIXTURE) && defined(TOOIE_ACTOR_PALETTE_FIXTURE) && defined(TOOIE_HAND862_FIXTURE)
+// Hand862 through the actual translated begin/end with a matched BK actor owner. Synthetic words satisfy
+// hand862_check's closed grammar (actor_palette.c Hand862 section); this is not an asset dump.
+unsigned palette_bk_hand862_fixtures() {
+    constexpr uint32_t model=0x806C0000u, list=0x8011B9B0u, bs=TOOIE_BK_STATE, owner=bs+offsetof(TooieBkState,owner);
+    static_assert(state+sizeof(TooieRenderBridgeState)<=model || state>=model+7076u,"Hand model disjoint from bridge state");
+    static_assert(TOOIE_BK_STATE+sizeof(TooieBkState)<=model || TOOIE_BK_STATE>=model+7076u,"Hand model disjoint from BK state");
+    PaletteFixture f; auto* rdram=f.rdram;
+    put(rdram,0x8012C9A8,0x801015D0u); put(rdram,0x8012CA18,0x862u);
+    put(rdram,palette_data,0x015804ABu); put(rdram,palette_data+4,0x08620001u);
+    put(rdram,model+4,7016u); MEM_H(10,guest(model))=0x40; put(rdram,model+12,256u);
+    put(rdram,model+16,2368u); put(rdram,model+0x18,2136u); MEM_H(2136+4,guest(model))=14;
+    put(rdram,0x8012C960,model+256u); put(rdram,0x8012C964,model+2368u);
+    for (uint32_t n=0;n<3;++n) { put(rdram,model+7016+n*24,n<2?10u:3u); put(rdram,model+7020+n*24,n<2?24u:0u); }
+    put(rdram,player_dispatch+10*4,0x800DD410u);
+    for (uint32_t prefix:{list,list+0x20}) { put(rdram,prefix,0xE200001Cu); put(rdram,prefix+8,0xDF000000u); put(rdram,prefix+12,0); }
+    put(rdram,0x8012C840,palette_pose); put(rdram,palette_pose,14); put(rdram,palette_pose+4,14);
+    // 234 commands at +264: 14 segment-5 LOAD/PUSHes, each over vertex loads, balanced pops; the three
+    // segment-3 prefixes at 14/205/218; pipe syncs; ENDDL.
+    std::vector<std::array<uint32_t,2>> body; uint32_t vertices=0;
+    for (uint32_t m=0;m<14;++m) {
+        body.push_back({0xDA380002u,0x05000000u+m*64});
+        for (uint32_t k=0;k<(m<5?3u:2u);++k,++vertices) body.push_back({0x01001002u,0x01000000u+vertices*16});
+        body.push_back({0xD8380002u,64});
+    }
+    size_t next=0;
+    for (uint32_t i=0;i<234;++i) {
+        std::array<uint32_t,2> w{0xE7000000u,0};
+        if (i==233) w={0xDF000000u,0};
+        else if (i==14 || i==218) w={0xDE000000u,0x03000000u};
+        else if (i==205) w={0xDE000000u,0x03000020u};
+        else if (next<body.size()) w=body[next++];
+        put(rdram,model+264+i*8,w[0]); put(rdram,model+268+i*8,w[1]);
+    }
+    require(next==body.size() && vertices==33,"synthetic hand list: 14 matrices, 33 vertex loads");
+    put(rdram,owner+offsetof(TooieBkOwner,kind),TOOIE_BK_OWNER_ACTOR);
+    put(rdram,owner+offsetof(TooieBkOwner,birth),1u);
+    put(rdram,owner+offsetof(TooieBkOwner,view),0u);
+    put(rdram,owner+offsetof(TooieBkOwner,phase),0u);
+    put(rdram,owner+offsetof(TooieBkOwner,id),TOOIE_BK_ACTOR_ID_START);
+    put(rdram,bs+offsetof(TooieBkState,cur_drawn_model_transform_id),TOOIE_BK_ACTOR_ID_START);
+    const uint32_t root=f.invoke(candidate::tooie_actor_palette_begin,player_buffers,palette_cursor_slot,model,0x50000001);
+    require(root==0x90000000u,"Hand862 admits with its next_block projection ID");
+    require(word(rdram,palette_cursor_slot)==f.cursor &&
+        word(rdram,ac+offsetof(TooieActorPaletteContext,open_group))==2u &&
+        f.field(offsetof(TooieRenderBridgeState,extra_bytes))==0,"owner-bound Hand862 pushes no group or prepay");
+    const uint32_t tail=f.cursor+40; put(rdram,player_buffers,tail);
+    f.invoke(candidate::tooie_actor_palette_end,player_buffers);
+    require(word(rdram,player_buffers)==tail && f.field(offsetof(TooieRenderBridgeState,active))==0,
+        "owner-bound Hand862 end emits no pop and releases");
+    require(f.field(offsetof(TooieRenderBridgeState,tripwire_count))==0 &&
+        !f.field(offsetof(TooieRenderBridgeState,poisoned)) &&
+        word(rdram,ac+offsetof(TooieActorPaletteContext,admitted))==2u &&
+        !word(rdram,ac+offsetof(TooieActorPaletteContext,open_group)),"owner-bound Hand862 close keeps binding and releases");
+    return 1;
+}
+#endif
+
 int main(){
     try{
         unsigned comparisons=0,player_cases=0,palette_groups=0,paid_bound_cases=0;
@@ -3129,6 +3289,14 @@ int main(){
         camera_epoch_fixtures();
         paid_bound_cases+=actor_paid_physical_fixtures();
         palette_groups=palette_fixtures()+select_prop_fixtures();
+#ifdef TOOIE_BK_DRAW_FIXTURE
+        const unsigned palette_bk_owner_cases=palette_bk_owner_fixtures();
+#if defined(TOOIE_HAND862_FIXTURE)
+        const unsigned hand_cases=palette_bk_hand862_fixtures();
+        require(hand_cases==1,"Hand862 matched-owner case ran");
+#endif
+        require(palette_bk_owner_cases==8,"all L07a owner-bound/fallback palette cases ran");
+#endif
 #endif
 #ifdef TOOIE_SKELETAL_FIXTURE
 #ifndef TOOIE_BK_B4_FIXTURE
@@ -3143,7 +3311,12 @@ int main(){
         const unsigned skeletal_cases=0,title_cases=0;
 #endif
         const unsigned feather_cases=feather_cut_fixtures();
+#ifdef TOOIE_BK_DRAW_FIXTURE
+        // L06b-8: BK builds no feather helper; B1-B3 drive the actual DD024 on every role x live/SkipAll input.
+        require(feather_cases==3,"all BK DD024 feather cases ran");
+#else
         require(feather_cases==10,"all N1 feather cut helper/emitter cases ran");
+#endif
 #endif
 #ifdef TOOIE_REQUIRED_STOP_FIXTURE
 #ifndef TOOIE_BK_SHADOW_FIXTURE
@@ -3152,7 +3325,8 @@ int main(){
 #else
         // BK selection: the generic BK shadow scope, DEFB0 policy and compositor helpers are
         // BaselineBkShadowTest; the legacy shadow cases run in the BK-OFF composition (reported 0).
-        const unsigned honey_cases=honey_close_fixtures(),shadow_cases=0,shadow_mv_cases=0;
+        const unsigned honey_cases=honey_bk_passthrough_fixtures(),shadow_cases=0,shadow_mv_cases=0;
+        require(honey_cases==8,"all L08a BK Honey original-body cases ran");
 #endif
 #endif
 #ifdef TOOIE_CAMERA_PRODUCTION_FIXTURE
@@ -3186,6 +3360,12 @@ int main(){
 #ifdef TOOIE_ACTOR_PALETTE_FIXTURE
         std::cout<<"; palette_frames="<<TOOIE_ACTOR_PALETTE_BEGIN_FRAME_BYTES<<','<<TOOIE_ACTOR_PALETTE_END_FRAME_BYTES
             <<"; getter_boundaries=DOUBLED; original_tail=MODELED; loop_timer_store=MODELED";
+#ifdef TOOIE_BK_DRAW_FIXTURE
+        std::cout<<"; palette_bk_owner_cases="<<palette_bk_owner_cases<<"; bk_owner=EXPLICIT_INPUT; RT64=NOT_RUN";
+#ifdef TOOIE_HAND862_FIXTURE
+        std::cout<<"; hand_owner_cases="<<hand_cases<<"; hand_tail=EXPLICIT_INPUT";
+#endif
+#endif
 #endif
 #ifdef TOOIE_REQUIRED_STOP_FIXTURE
         std::cout<<"; honey_close_cases="<<honey_cases<<"; shadow_mode_cases="<<shadow_cases
@@ -3207,7 +3387,7 @@ int main(){
         std::cout<<"Skeletal compiled guest cases="<<skeletal_cases
             <<"; getter_boundaries=DOUBLED; graph_visits=SYNTHETIC; DE498=DOUBLE\n";
 #ifdef TOOIE_BK_DRAW_FIXTURE
-        std::cout<<"Feather cut compiled cases="<<feather_cases<<"; retained_helper+BK_DD024=ACTUAL; cut_input=EXPLICIT; leaf_list=SYNTHETIC; RT64=NOT_RUN\n";
+        std::cout<<"Feather cut compiled cases="<<feather_cases<<"; BK_DD024=ACTUAL; feather_helper=BK-OFF_ONLY; cut_input=EXPLICIT; leaf_list=SYNTHETIC; RT64=NOT_RUN\n";
 #else
         std::cout<<"Feather cut compiled cases="<<feather_cases<<"; helper+DD024=ACTUAL; leaf_list=SYNTHETIC; RT64=NOT_RUN\n";
 #endif

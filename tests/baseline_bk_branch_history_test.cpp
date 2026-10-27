@@ -52,7 +52,7 @@ constexpr TooieBkWord player = 0x20000500u, second = 0x20E8C500u, model = 0x802A
 // Projected shadow on one real resident state, in the guest's order (bk_shadow_attach.inc): the A6664 seam
 // computes the birth/light/world-cut projection, DEFB0 (tooie_bk_shadow_project) stages and decides with the
 // shared rule and zeroes the projection on a snap, the A66BC attachment of the same activation follows,
-// and A78E8 commits both tables (bk_pipeline_thunks.hpp branch_commit).
+// and A78E8 commits both tables (bk_pipeline.c tooie_bk_branch_submitted).
 struct Draw { TooieBkWord skip, projection; };
 struct Shadows {
     TooieBkState s;

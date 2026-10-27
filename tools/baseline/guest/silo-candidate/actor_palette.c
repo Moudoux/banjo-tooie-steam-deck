@@ -16,6 +16,12 @@
 #if TOOIE_HAND862 && (!TOOIE_ACTOR_PALETTE || !TOOIE_BACKPACK621)
 #error Hand862 requires the selected actor-palette 621 composition
 #endif
+#if !defined(TOOIE_BK_PIPELINE) || (TOOIE_BK_PIPELINE != 0 && TOOIE_BK_PIPELINE != 1)
+#error Explicit boolean TOOIE_BK_PIPELINE selection required
+#endif
+#if TOOIE_BK_PIPELINE
+#include "bk_pipeline.h"
+#endif
 #define AC SS.palette_context
 #define REFUSE(reason) do { SS.silo_last_reason=(reason); silo_count(&SS.silo_refusals); return 0; } while (0)
 extern u32 D_8012C820, D_8012C850[], D_8012CA18;
@@ -23,6 +29,17 @@ extern u8 D_80124740[];
 extern void* D_80136E70;
 void* func_80104148(s32);
 void* func_80104200(s16);
+
+#if TOOIE_BK_PIPELINE
+/* L07a: this draw's BK actor owner (80101808 bk_owner_actor, kept through its own top-level DE448)
+ * is current, so its type-3 list brackets bind every vertex load in the palette scope (P1/P2 static
+ * facts). Any other owner state, e.g. BK scope overflow, keeps the palette's own group. */
+SI u32 palette_bk_owned(void) {
+    volatile struct TooieBkOwner* o=&tooie_bk_state.owner;
+    return o->kind==TOOIE_BK_OWNER_ACTOR && o->birth==AC.birth && o->view==AC.view &&
+        o->phase==AC.phase && o->id && tooie_bk_state.cur_drawn_model_transform_id==o->id;
+}
+#endif
 
 /* Original immutable assets are a premise; this recognizes a finite producer,
  * not arbitrary display lists. No triangle/cache simulation or recursive calls. */
@@ -406,6 +423,17 @@ hand862_admit:
     AC.idbase=TOOIE_BRIDGE_ID_BASE+(e->block_and_valid&0x7FFFFu)*512u;
     AC.gfx_base=base; AC.pool_index=(u32)D_8007BEDA; AC.gfx_begin=current; AC.leaf_role=role;
     AC.admitted=TOOIE_BRIDGE_PALETTE_ADMITTED; AC.open_group=1u;
+#if TOOIE_BK_PIPELINE
+    /* @recomp L07a: the matched BK actor owns the list brackets, including Hand862. Original
+       vector-cache writes (C844 + 12*s16(node+8) + 4) stay within their original objects, under
+       the same loader/nonmutation premise as the admitted model. No extra corruption guard.
+       Keep the projection ID and binding tripwire; unmatched BK ownership keeps the group. */
+    if (palette_bk_owned()) {
+        AC.open_group=2u; SS.active=1;
+        silo_count(&SS.silo_admissions);
+        return AC.idbase+AC.view*128u+AC.phase*16u;
+    }
+#endif
     SS.extra_bytes+=32u;
     if (SS.extra_bytes>SS.extra_highwater) SS.extra_highwater=SS.extra_bytes;
     SS.active=1;
@@ -422,6 +450,9 @@ hand862_admit:
 }
 
 #if TOOIE_ACTOR_PALETTE
+#if !TOOIE_BK_PIPELINE
+/* L06b-7: the CPU-root route's only transport is the BK-off DEFA0 hook; the BK image builds no CPU root.
+ * L06b-8: nor the feather helper: BK's func_800DD024 takes the BK list node instead (camera_hook_leaves.c). */
 /* Immutable 065E's fifteen unconditional type17 lists inherit one root WORLD.
  * Original C964 input stability until parsing remains the baseline premise. */
 PALETTE u32 tooie_actor_cpu_root_begin(struct TooieRenderBuffers* b,
@@ -687,6 +718,7 @@ PALETTE u32 tooie_actor_feather_leaf_id(struct TooieRenderBuffers* b,
         AC.view * 128u + AC.phase * 16u + role;
 }
 #endif
+#endif
 
 PALETTE void tooie_actor_palette_end(struct TooieRenderBuffers* b) {
     u32 current, base, pool;
@@ -717,6 +749,11 @@ PALETTE void tooie_actor_palette_end(struct TooieRenderBuffers* b) {
         silo_count(&SS.tripwire_count); SS.poisoned=1;
     }
     /* The saved pool and occurrence own the pop after original scalar cleanup. */
+#if TOOIE_BK_PIPELINE
+    if (AC.open_group==2u) {
+        /* @recomp L07a: the owner-bound admission pushed no group; there is nothing to pop. */
+    } else
+#endif
     if (AC.buffers!=(u32)b || pool>1u || D_8007BEDA!=(s32)pool || base!=AC.gfx_base || AC.epoch!=SS.epoch ||
         !silo_range(base,TOOIE_BRIDGE_PHYSICAL_LIST_BYTES,7u) || AC.gfx_begin<base || AC.gfx_begin>base+TOOIE_BRIDGE_LOWER_LIST_BYTES-96u ||
         current<AC.gfx_begin+24u ||

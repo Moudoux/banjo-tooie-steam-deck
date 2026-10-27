@@ -22,7 +22,7 @@ The composer checks, before writing anything:
   (`32cad60bc4a471733db1be985ebbe0eb6ac3c0f44a382cadf056e5f8dce31639`);
 - the recipe modules in `RECIPES`: `owned_timer.py`,
   `prepare_runtime_continuous.py` and `prepare_runtime_threadqueue.py`;
-- the two recipe-owned patches in that module's `RECIPE_PATCHES` (below);
+- the three recipe-owned patches in that module's `RECIPE_PATCHES` (below);
 - each of the 13 children in `EXPECTED`.
 
 Patches are applied by one strict applier, `apply_patch` in
@@ -40,15 +40,17 @@ there is no fuzz or offset search. Hunk context need not be three lines.
 | `events-dp-freeze` | `events.cpp` | 3 | `7f287aec255a5dcb9eaa2ae53082403ff9a4eaa67c22b0f56d65e4f5d5864cdf` |
 | `events-sp-exception` | `events.cpp` | 2 | `73511703d287ce3fcf76eecafe16d97c8806a0dc448dca7f86529627dde2614f` |
 | `events-guest-clock` | `events.cpp` | 3 | `594a6c424ac803ed54feb31c4c53e7fc5db8d4db97434324a8a552874fb4bd22` |
+| `events-startup-join` | `events.cpp` | 1 | in `PATCHES` |
 | `timer-guest-clock` | `timer.cpp` | 8 | in `PATCHES` |
 | `threads-suspended-stop` | `ultramodern/src/threads.cpp` | 2 | `9438dd3c67452b673f4e5bfe494b2c54fa88574e6a11c73f0758a7df64401322` |
 | `producer-quiescent-cleanup` | `ultramodern/src/threads.cpp` | 1 | `9b4261af055d9677c061065c1d7588e79fcec74f679dac6cf12d3c069e2319fb` |
 | `threadqueue-removal` | `ultramodern/src/threadqueue.cpp` | 2 | `713659775b22eeac5c1e6f23322af35f68d66eec580819e6c0e41ee5a67b56da` |
 | `dp-freeze` | `dp.cpp` | 2 | `4006e77ef9591ac7584e84ad348eb237b09799b56962b0ed70d45100d53cfa23` |
-| `recomp-terminal-fence` | `recomp.cpp` | 4 | `eb157ab9876972d73b610edc5280cfd6475930591d119b3eb3877429cd12aae2` |
+| `recomp-terminal-fence` | `recomp.cpp` | 5 | in `PATCHES` |
 | `mesgqueue-required-admission` | `mesgqueue.cpp` | 4 | `912b8c1c6cd7e658ab63bcfbb6d4320c536c9104008e5512633abdd0919bf644` |
 | `mesgqueue-lifecycle-wait` | `mesgqueue.cpp` | 3 | in `RECIPE_PATCHES` |
-| `pi-save-persistence` | `pi.cpp` | 10 | in `RECIPE_PATCHES` |
+| `pi-save-persistence` | `pi.cpp` | 9 | in `RECIPE_PATCHES` |
+| `pi-save-root` | `pi.cpp` | 1 | in `RECIPE_PATCHES`; old-engine full mode only |
 
 `events-q-vi-lock` adds the Q-VI-LOCK `message_mutex` scope around the dummy-VI
 seed and `update_vi()`, released before VI/AI delivery and callbacks, and the lock
@@ -65,21 +67,34 @@ described below, not to the original file.
 upstream worker quick-exits on a `false` result; BK's pinned runtime does the
 same. The terminal fence, save drain and error presentation are unchanged.
 
+`recomp-terminal-fence` also catches any non-termination exception on the Game Start
+Thread (renderer setup, boot prefix) into `tooie::lifecycle::fail`; `events-startup-join`
+lets the fence join event threads when `init_events` threw before creating the VI
+thread. Together they replace `std::terminate` with the retained-error closure path.
+The startup loop also checks the existing sequentially consistent `exited` flag
+before waiting again. This prevents a mod-load failure resetting game status to
+None after quit's None-to-Quit compare-and-swap missed Running. Focused extracted-body
+fixtures cover that ordering and a quit before the first wait; full-process
+dialog/closure acceptance is recorded separately.
+
 `mesgqueue-lifecycle-wait` and `pi-save-persistence` are the former Python text of
 `messages(text)` and `saving(text)`, moved unchanged. Each function has one
-behaviour over one pinned original, so every caller (selected composer,
-`--baseline-external-wait`, old-engine full mode) applies the same patch bytes.
+representation per edit over one pinned original. Every caller applies the same
+`mesgqueue-lifecycle-wait` and `pi-save-persistence` bytes; only old-engine full mode
+also applies `pi-save-root` (`saving(text, save_root=True)`), because only it registers
+a profile save root distinct from its config root (`src/frontend_app.cpp`).
 Their pins live in `RECIPE_PATCHES` inside `prepare_runtime_continuous.py`, which
-the composer pins in `RECIPES`; the composer also records both files for its
-pre-publication input recheck. The unchanged `EXPECTED` hashes of
-`lifecycle/mesgqueue.cpp` and `runtime-continuous/pi.cpp` are the byte-equivalence
-check.
+the composer pins in `RECIPES`; the composer also records all three files for its
+pre-publication input recheck. The old-engine `runtime-continuous/pi.cpp` keeps its
+previous bytes; the selected child differs from it only in the save-folder line.
 
 - `mesgqueue-lifecycle-wait`: the bounded external-message wait with lifecycle
   polling, plus an inactive `TOOIE_PERSISTENT_RUNTIME_EXPERIMENT` export/import
   block.
-- `pi-save-persistence`: the save root, temporary-file promotion, generation
-  tracking and final drain.
+- `pi-save-persistence`: temporary-file promotion, generation tracking and final
+  drain.
+- `pi-save-root`: the old engine's registered profile save folder. The selected
+  player uses the runtime's `config_path/saves` (`recomp::register_config_path`).
 
 ## Edits still made by Python recipes
 
@@ -108,7 +123,7 @@ False)` in the old-engine full mode adds the `osStopThread` branch), and
 | `first-frame-sync/events.cpp` | + `events-next-framebuffer` | configure check only |
 | `dp-freeze/events.cpp` | + `events-dp-freeze` | configure check; SP-task parent-negative fixture; non-fence arm |
 | `lifecycle/events.cpp` | + `events-sp-exception` | configure check; non-player terminal-fence arm; SP-task fixture (`selected` pin) |
-| `guest-clock/events.cpp` | + `events-guest-clock` | **player**; SP-task fixture in player builds (`player` pin) |
+| `guest-clock/events.cpp` | + `events-guest-clock`, `events-startup-join` | **player**; SP-task fixture in player builds (`player` pin) |
 | `guest-clock/timer.cpp` | `baseline_timer` + `ordinary` + `timer-guest-clock` | **player** |
 | `thread-refusals/threads.cpp` | original + `threads-suspended-stop` | non-fence arm; lifecycle fixture input |
 | `lifecycle/threads.cpp` | + `producer-quiescent-cleanup`, then `threads(…, True)` | **player**; wait/save fixture |
@@ -116,7 +131,7 @@ False)` in the old-engine full mode adds the `osStopThread` branch), and
 | `lifecycle/mesgqueue.cpp` | original + `mesgqueue-lifecycle-wait` + `mesgqueue-required-admission` | **player**; MQ01 admission fixture |
 | `dp-freeze/dp.cpp` | original + `dp-freeze` | **player**; DP Freeze regression |
 | `lifecycle/recomp.cpp` | original + `recomp-terminal-fence` | **player** |
-| `runtime-continuous/pi.cpp` | original + `pi-save-persistence` | **player** (`TOOIE_BASELINE_SAVE_COMPOSITION`); save fixtures |
+| `runtime-continuous/pi.cpp` | original + `pi-save-persistence` | **player** (`TOOIE_BASELINE_SAVE_COMPOSITION`); save fixtures. Old engine: + `pi-save-root` |
 
 `cmake/Baseline.cmake` re-checks the selected children's hashes independently of
 `EXPECTED`. The non-fence arm's `recomp-retain-rdram.patch` input and its

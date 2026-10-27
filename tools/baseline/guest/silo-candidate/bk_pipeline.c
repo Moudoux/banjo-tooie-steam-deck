@@ -24,7 +24,7 @@ SI void bk_count(volatile u32* value) { if (*value != 0xFFFFFFFFu) *value += 1u;
 /* Stable type-12 selector numbering for PLAYER roots (always-inline; its hooks are in bk_graph.inc). */
 #include "bk_select.inc"
 /* Shadow producer route, discontinuity and light-identity state (bk_pipeline.h layout2); its
- * helpers are the last ones defined (bk_shadow_attach.inc). */
+ * helpers follow the attachment helpers (bk_shadow_attach.inc); the native-seam policy helpers close the set. */
 volatile struct TooieBkShadow tooie_bk_shadow __attribute__((section(".tooie_bk_shadow"), aligned(4))) = {
     .magic = TOOIE_BK_SHADOW_MAGIC, .layout = TOOIE_BK_SHADOW_LAYOUT,
 };
@@ -318,11 +318,12 @@ BK_HELPER void tooie_bk_scope_end(u32 token) {
  * graph and float machinery supplies its commands under the existing MAIN bulk
  * provisioning contract. There is no additional per-node menu reservation policy.
  * Native caller authenticates outer option occurrence and same gfx, and passes
- * only a component-aligned ID from the proposal's menu domain. */
+ * only a component-aligned ID from the proposal's menu domain, or, for an unowned
+ * core DF944 UI model (bk_menu_thunks.hpp bk_ui), from the UI domain. */
 BK_HELPER u32 tooie_bk_menu_model_begin(u32 id, u32 cut) {
     u32 token, previous_skip;
-    if (id < 0x30000000u || id >= 0x30060500u || (id & 255u) || cut > 3u ||
-        BK.cur_drawn_model_skip_interpolation > 1u) return 0;
+    if (!((id >= 0x30000000u && id < 0x30060500u) || (id >= TOOIE_BK_UI_ID_START && id < TOOIE_BK_UI_ID_END)) ||
+        (id & 255u) || cut > 3u || BK.cur_drawn_model_skip_interpolation > 1u) return 0;
     previous_skip = BK.cur_drawn_model_skip_interpolation;
     token = bk_scope_open(0);
     if (!token) return 0;
@@ -461,6 +462,63 @@ BK_HELPER void tooie_bk_de448_end(u32 token, u32 buffers) {
 /* Shadow producer owner scope: blob A5EA8, projected body A6664 and attachment A66BC for the
  * fallback and local-light routes (A6CF0/A6D60), light lifecycle events. */
 #include "bk_shadow_attach.inc"
+
+/* ---- Native-seam policy (L01/L02) ------------------------------------------------------
+ * Game decisions the native thunks formerly made at these seams. Each thunk now only
+ * marshals registers and calls the helper once at the same PC. Floats return as IEEE-754
+ * bits in v0 (no FP constant pool in this object); the thunk writes f0 only on a change.
+ * Defined last, so every earlier helper keeps its BK_HELPERS position. */
+/* Guest RAM range for these reads: KSEG0, 8 MiB, word-aligned (the former native lod_word). */
+SI u32 bk_lod_word(u32 address, u32 bytes) {
+    return !(address & 3u) && address >= 0x80000000u && address <= 0x80800000u - bytes;
+}
+/* BK GeoCmd8 fixed distance, after each original type8 distance function returns. */
+BK_HELPER u32 tooie_bk_lod_distance(void) { return TOOIE_BK_LOD_DISTANCE_BITS; }
+/* 94070 940B8: `distance` is EEAD4's linear player-camera distance; `player` the PlayerState (s0). */
+BK_HELPER u32 tooie_bk_player_lod_distance(u32 player, u32 distance) {
+    u32 body;
+    if (!bk_lod_word(player, 0x54u)) return distance;
+    body = *(volatile u32*)(player + 0x50u);
+    if (!bk_lod_word(body, 0x110u)) return distance;
+    return tooie_bk_player_lod_distance_rule(*(volatile s16*)(body + 0x0Cu), *(volatile u32*)(body + 0x10Cu), distance);
+}
+/* 93F30 entry in the authenticated 94038 call: `player` from the caller's sp+0x18, `tier` its a0. */
+BK_HELPER u32 tooie_bk_player_lod_tier(u32 player, u32 tier) {
+    u32 body;
+    if (tier != 1u || !bk_lod_word(player, 0x54u)) return tier;
+    body = *(volatile u32*)(player + 0x50u);
+    if (!bk_lod_word(body, 0x10u)) return tier;
+    return tooie_bk_player_lod_tier_rule(*(volatile s16*)(body + 0x0Cu), tier);
+}
+/* BK GeoCmdD and geo-wide frustum disable: every bbox- or sphere-gated child is traversed (original calls ran). */
+BK_HELPER u32 tooie_bk_bbox_visible(void) { return 1u; }
+/* Billboard entry, all three tables: BK func_803384A8 advances the traversal offset first. */
+BK_HELPER void tooie_bk_billboard_entry(void) { BK.cur_model_transform_id_offset += 1u; }
+/* DCA48 / DCC00 / DCDB8 branch point: the one advance before a one-sided node's single child. */
+BK_HELPER void tooie_bk_sort_onesided(u32 node) {
+    if (tooie_bk_sort_one_sided(*(volatile u8*)(node + 0x21u))) BK.cur_model_transform_id_offset += 1u;
+}
+/* A78E8, after the PARSED arm: the submitted construction's staged visible-branch choices become the
+ * committed baseline of both tables, every other entry unknown. A suppressed construction never gets here. */
+BK_HELPER void tooie_bk_branch_submitted(void) {
+    tooie_bk_branch_commit(BK.branches, BK.diagnostics.frames);
+    tooie_bk_branch_commit(BK.shadow_branches, BK.diagnostics.frames);
+    bk_count(&BK.branch_commits);
+}
+/* Transition E44FC at 808003D8 (bk_menu_thunks.hpp authenticates the call and owns each view's lifetime):
+ * the camera production role of that view's mask projection, decoded by camera_projection_internal_04.h
+ * cam_production_id; `fresh` selects the lifetime-cut SKIP. Returns the enclosing role word for
+ * tooie_bk_transition_role_end. A view outside the transition views writes nothing. */
+BK_HELPER u32 tooie_bk_transition_role_begin(u32 view, u32 fresh) {
+    volatile TooieCameraWord* role = &tooie_camera_state.control.role;
+    u32 previous = *role;
+    if (view < TOOIE_CAMERA_TRANSITION_VIEWS)
+        *role = (TOOIE_CAMERA_TRANSITION_ROLE_FIRST + view) | (fresh ? TOOIE_CAMERA_TRANSITION_ROLE_SKIP : 0u);
+    return previous;
+}
+BK_HELPER void tooie_bk_transition_role_end(u32 previous) { *(volatile TooieCameraWord*)&tooie_camera_state.control.role = previous; }
 /* Split players: slots 1..7 follow the shadow domain, so player, shadow and actor IDs stay disjoint. */
 _Static_assert(TOOIE_BK_PLAYER_SLOT_ID_START == TOOIE_BK_SHADOW_ID_END, "player slots 1-7 follow the shadow domain");
+/* L14-VR03 option-box text owner (BK text_transform_tagging.c); defined last, after every earlier helper. */
+#include "bk_text.inc"
 

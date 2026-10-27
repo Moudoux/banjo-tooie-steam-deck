@@ -35,6 +35,8 @@
 #ifdef BASELINE_PLAYER
 #include "librecomp/mods.hpp"
 #include "ultramodern/error_handling.hpp"
+#include "texture_pack_notice.hpp"
+#include "texture_pack_option.hpp"
 #include <unordered_map>
 #endif
 #include "SDL.h"
@@ -115,9 +117,15 @@ std::mutex texture_pack_mutex;
 std::unordered_map<std::string, TexturePack> texture_packs;
 std::atomic<bool> texture_packs_pending = false;
 void enable_texture_pack(recomp::mods::ModContext& context, const recomp::mods::ModHandle& mod) {
-    const TexturePack pack{context.get_mod_order_index(mod.manifest.mod_id), mod.manifest.mod_root_path};
+    const auto& id = mod.manifest.mod_id;
+    // RecompFrontend parity: a declared HD option decides at load whether this pack is applied.
+    const bool allowed = texture_pack_option::allows(context.get_mod_config_schema(id),
+        [&](const std::string& option) { return context.get_mod_config_value(id, option); });
+    if (!allowed) std::fprintf(stderr, "baseline texture-pack held by its HD option: %s\n", id.c_str());
+    const TexturePack pack{context.get_mod_order_index(id), mod.manifest.mod_root_path};
     std::lock_guard lock(texture_pack_mutex);
-    texture_packs.insert_or_assign(mod.manifest.mod_id, pack);
+    if (allowed) texture_packs.insert_or_assign(id, pack);
+    else texture_packs.erase(id);
     texture_packs_pending.store(true, std::memory_order_release);
 }
 void disable_texture_pack(recomp::mods::ModContext&, const recomp::mods::ModHandle& mod) {
@@ -127,9 +135,12 @@ void disable_texture_pack(recomp::mods::ModContext&, const recomp::mods::ModHand
 }
 bool texture_only_selection() {
     for (const auto& mod : recomp::mods::get_all_mod_details("bt")) {
-        if (!mod.runtime_toggleable && (recomp::mods::is_mod_enabled(mod.mod_id) ||
-                recomp::mods::is_mod_auto_enabled(mod.mod_id))) {
-            const auto message = "Only texture packs are supported. Disable mod: " + mod.display_name;
+        const bool required = recomp::mods::is_mod_auto_enabled(mod.mod_id);
+        if (!mod.runtime_toggleable && (recomp::mods::is_mod_enabled(mod.mod_id) || required)) {
+            // Before load_mods only code or ROM-patch content leaves a mod non-toggleable. Still fail closed.
+            const auto message = texture_pack_notice::refusal(mod.display_name,
+                texture_pack_notice::path_text(recomp::mods::get_mod_filename(mod.mod_id).filename()),
+                texture_pack_notice::path_text(recomp::mods::get_mods_directory()), required);
             ultramodern::error_handling::message_box(message.c_str());
             return false;
         }
@@ -540,8 +551,9 @@ public:
     float get_resolution_scale() const override { return 1.0f; }
 };
 
-// Maintain a real S16 stereo queue; no gain or pacing policy. The player reports
-// one VI fewer queued frames, as BK does; engineering builds report the raw count.
+// Maintain a real S16 stereo queue; no pacing policy. The player applies only its
+// master volume in queue_samples and reports one VI fewer queued frames, as BK does;
+// engineering builds queue unscaled samples and report the raw count.
 void set_frequency(uint32_t frequency) {
     if (frequency < 1000 || frequency > 192000) {
         std::fprintf(stderr, "baseline audio context: requested_rate=%u\n", static_cast<unsigned>(frequency));
@@ -623,6 +635,12 @@ void queue_samples(int16_t* samples, size_t count) {
         corrected[i] = samples[i + 1];
         corrected[i + 1] = samples[i];
     }
+#if TOOIE_BASELINE_HOST && defined(BASELINE_PLAYER)
+    // One SDL-owner atomic per chunk, after channel order and before queueing.
+    // 100 leaves samples untouched; 0 still queues silence, so queued-frame
+    // feedback and chunk cadence are unchanged.
+    host::apply_master_volume(corrected.data(), count, host::requested_master_volume());
+#endif
     auto& s = audio_summary;
     const bool observe = count != 0 && s.limit && s.armed && s.chunks < s.limit && !s.stopped &&
         !quit_published.load(std::memory_order_acquire);

@@ -8,7 +8,15 @@ static_assert(sizeof(TooieNpc665Slot)==72 && offsetof(TooieNpc665Slot,skeletal_l
     "named skeletal word preserves the resident slot ABI");
 constexpr uint32_t skeletal_route=0x80000004u,npc_route=0x80000003u;
 constexpr uint32_t npc_idle=0x66500000u,npc_active=2u,npc_failed=4u;
+#if TOOIE_NPC665_SECTION_PRESENT
 constexpr uint32_t ns=TOOIE_NPC665_STATE;
+#else
+// L06c-2: NPC665 stays selected while the BK image links no sidecar; every group reading it is B4.
+static_assert(TOOIE_NPC665_SELECTED==1u,"L06c-2: selection kept with the BK section absent");
+#ifndef TOOIE_BK_B4_FIXTURE
+#error NPC665 skeletal groups need the linked NPC665 sidecar
+#endif
+#endif
 struct SkeletalRow { uint32_t resource,graph,lists,vertices,attributes,bytes,poses,bones,hybrids; };
 // Rows 4..8 mirror the guest census rows (execution-facts01), rows 9..14 the WP7 shared ordinary
 // rows (execution-facts21/25): header tuple, extent, poses and executed DCF48/type24 bounds. Model
@@ -34,7 +42,9 @@ struct SkeletalFixture {
     explicit SkeletalFixture(SkeletalRow value=skeletal_rows[0]):row(value) {
         auto* rdram=f.rdram; // MEM_H expands against this conventional fixture name.
         player_case=0;skeletal_view=skeletal_phase=0;
+#if TOOIE_NPC665_SECTION_PRESENT
         put(f.rdram,ns+12,npc_idle);
+#endif
         for(uint32_t index=0;index<row.poses;++index)
             for(uint32_t diagonal=0;diagonal<4;++diagonal)
                 put(f.rdram,palette_pose+0x50+index*64+diagonal*20,0x3F800000);
@@ -139,6 +149,7 @@ struct SkeletalFixture {
         at=word(r,player_buffers);invoke(candidate::tooie_npc665_bone_pop,player_buffers,token);
         require(word(r,at)==0x6400000D && word(r,at+4)==1,"bone pop balances its exact group");
     }
+#if TOOIE_NPC665_SECTION_PRESENT
     uint32_t finish(){
         const uint32_t at=word(f.rdram,player_buffers),result=invoke(candidate::tooie_npc665_end,player_buffers);
         require(word(f.rdram,at)==0x6400000D && word(f.rdram,at+4)==1,"end pays the root pop");
@@ -146,6 +157,7 @@ struct SkeletalFixture {
             word(f.rdram,ns+12)==npc_idle,"end releases and resets shared owner");
         f.cursor=word(f.rdram,player_buffers);return result;
     }
+#endif
     void refused(uint32_t reason,bool silent=false) {
         std::array<uint32_t,18> before{};
         for(uint32_t i=0;i<before.size();++i)before[i]=word(f.rdram,rec()+i*4);
@@ -165,6 +177,9 @@ struct SkeletalFixture {
     }
 };
 
+#ifndef TOOIE_BK_B4_FIXTURE
+// L06b-3: the NPC665 admit/bone/leaf bodies these groups drive exist only in the BK-OFF image, where they
+// run (B4). SkeletalFixture above stays for the feather and title53 cases; its NPC members are inline.
 // DE498 and original getters remain doubles; this observes the real DE448 capture/end scopes.
 void skeletal_boundary_draw(uint8_t* rdram,recomp_context* c) {
     ++skeletal_boundary_calls;
@@ -707,6 +722,7 @@ void skeletal_boundary_draw(uint8_t* rdram,recomp_context* c) {
 }
 
 
+#endif
 // Title53 uses the actual CPU-root and DE448 bodies. All original tail bytes and
 // getter results remain explicit doubles; no original callback or RT64 is executed.
 constexpr uint32_t title_private=0x802B1000u;
@@ -783,6 +799,8 @@ struct Title53Fixture {
         for(uint32_t offset=0;offset<32;offset+=4)require(word(r,at+offset)==0xA55A1234,"title refusal emits zero commands");
     }
 };
+#ifndef TOOIE_BK_B4_FIXTURE
+// L06b-7: the CPU-root body these title53 groups drive exists only in the BK-OFF image, where they run (B4).
 void title_boundary_draw(uint8_t* rdram,recomp_context* c) {
     require(word(rdram,ac)==title_boundary_expected,"real DE448 captures only exact title53 owner");
     if(!title_boundary_expected) {
@@ -922,3 +940,4 @@ void title_boundary_draw(uint8_t* rdram,recomp_context* c) {
         ++cases;}
     return cases;
 }
+#endif

@@ -100,7 +100,8 @@ PublicationRing publications;
 using PlayerTransformRing=Ring<PlayerTransformRecord,player_transform_capacity>;
 using PlayerProjectionRing=Ring<PlayerProjectionRecord,player_projection_capacity>;
 constexpr size_t player_ring_bytes=sizeof(PlayerTransformRing)+sizeof(PlayerProjectionRing);
-static_assert(player_ring_bytes<=12*1024*1024, "Player rows exceed their memory cap");
+// One f32 witness adds 8 bytes after alignment per transform row: 256 KiB for the unchanged 32768-row ring.
+static_assert(player_ring_bytes<=12*1024*1024+256*1024, "Player rows exceed their bounded witness memory cap");
 PlayerTransformRing player_transforms;
 PlayerProjectionRing player_projections;
 
@@ -210,24 +211,29 @@ template<class Record> Json header(const char* type, const Record& r) {
 }
 Json row(const FrameRecord& r) {
     auto j=header("frame",r);
+    // Schema 2: an unauthenticated source is null, never a zero allocator cursor. Schema 3: the legacy
+    // player words likewise need LegacyPlayer, and the secondary group SecondaryRoute.
+    const bool layout=r.valid&DrawRecord::Layout, cpu625=layout && (r.valid&FrameRecord::Cpu625),
+        player=layout && (r.valid&FrameRecord::LegacyPlayer),
+        secondary=player && (r.valid&FrameRecord::SecondaryRoute);
+    const auto known=[](bool valid,uint32_t value) { return valid ? Json(value) : Json(nullptr); };
     j.update(Json{{"phase",r.phase},{"epoch",r.epoch},{"map",r.map},{"pool_index",r.pool_index},
         {"view",r.view},{"camera",r.camera},{"projection",r.projection},{"camera_active",r.camera_active},
         {"camera_latch",r.camera_latch},{"bridge_poisoned",r.bridge_poisoned},{"control_slot",r.control_slot},
-        {"player_owner",r.player_owner},{"player_model",r.player_model},{"player_asset",r.player_asset},
-        {"player_admissions",r.player_admissions},{"player_refusals",r.player_refusals},
+        {"player_owner",known(player,r.player_owner)},{"player_model",known(player,r.player_model)},
+        {"player_asset",known(player,r.player_asset)},{"player_admissions",known(player,r.player_admissions)},
+        {"player_refusals",known(player,r.player_refusals)},
         {"requested_period",r.requested_period},{"measured_period",r.measured_period},
         {"live_period",r.live_period},{"valid",r.valid}});
-    // Schema 2: an unauthenticated source is null, never a zero allocator cursor.
-    const bool layout=r.valid&DrawRecord::Layout, cpu625=layout && (r.valid&FrameRecord::Cpu625);
-    j.update(Json{{"player_last_reason",layout ? Json(r.player_last_reason) : Json(nullptr)},
-        {"bridge_next_block",layout ? Json(r.bridge_next_block) : Json(nullptr)},
-        {"cpu625_next_block",cpu625 ? Json(r.cpu625_next_block) : Json(nullptr)}});
-    // Optional, schema-2 compatible (PC[8] layout 4): last admitted occurrence view and ledger.
-    if (layout)
+    j.update(Json{{"player_last_reason",known(player,r.player_last_reason)},
+        {"bridge_next_block",known(layout,r.bridge_next_block)},
+        {"cpu625_next_block",known(cpu625,r.cpu625_next_block)}});
+    // Optional (PC[8] layout 4): last admitted occurrence view and ledger.
+    if (player)
         j["player_primary"]=Json{{"view",r.player_view},{"ledger_bytes",r.player_primary_bytes},
             {"ledger_highwater",r.player_primary_highwater}};
-    // Optional, schema-2 compatible (PC[8] layout 5): secondary route provenance and ledger.
-    if (layout)
+    // Optional (PC[8] layout 5): secondary route provenance and ledger, only where that route is selected outside BK.
+    if (secondary)
         j["secondary_route"]=Json{{"opens",r.secondary_opens},{"faults",r.secondary_faults},
             {"seen_main",r.secondary_seen_main},{"seen_late",r.secondary_seen_late},
             {"unauthenticated",r.secondary_unauthenticated},{"admissions",r.secondary_admissions},
@@ -300,6 +306,9 @@ Json row(const BkDrawRecord& r) {
             {"uses_bones",r.uses_bones},{"push",r.push},{"skip_all",r.skip_all},{"skip_model",r.skip_model},
             {"domain",r.id_domain},{"attachment",r.id_attachment},{"sample",r.id_sample}}},
         {"producer",r.producer_site ? Json{{"site",r.producer_site},{"model",r.producer_model}} : Json(nullptr)},
+        {"caller",has(BkDrawRecord::Caller) ? Json{{"position",r.caller_position},
+            {"actor",r.caller_actor ? Json(r.caller_actor) : Json(nullptr)},
+            {"pair",r.caller_actor ? Json(r.caller_pair) : Json(nullptr)}} : Json(nullptr)},
         {"root_witness",has(BkDrawRecord::RootWitness) ? Json{
             {"capture",Json{{"key",r.root_witness[0]},{"command",r.root_witness[1]},
                 {"deform",r.root_witness[2]},{"header",r.root_witness[3]},{"pose",r.root_witness[4]},
@@ -385,8 +394,11 @@ Json row(const PlayerTransformRecord& record) {
             {"id",has(Row::PriorSlotValid) ? Json(r.previous_workload_id) : Json(nullptr)}}},
         {"weight",r.weight},{"previous_weight",r.previous_weight},
         {"index",r.index},{"group_id",r.group_id},{"label",player_label(r.group_id)},
-        {"representative",has(Row::Representative)},
-        {"group_matrix_count",has(Row::Representative) ? Json(r.group_matrix_count) : Json(nullptr)},
+        {"representative",has(Row::Representative)},{"auto_ortho",has(Row::AutoOrtho)},
+        {"unrooted_ortho",has(Row::UnrootedOrtho)},{"vertex_skip",has(Row::VertexSkip)},
+        {"vertex_delta",has(Row::VertexMeasured) && r.vertex_delta >= 0.0f && std::isfinite(r.vertex_delta) ? Json(r.vertex_delta) : Json(nullptr)},
+        {"vertex_delta_nonfinite",has(Row::VertexMeasured) && !std::isfinite(r.vertex_delta)},
+        {"group_matrix_count",has(Row::Representative) || has(Row::AutoOrtho) ? Json(r.group_matrix_count) : Json(nullptr)},
         {"vertices",r.vertices},{"physical",r.physical},{"mapped",has(Row::Mapped)},
         {"previous_index",has(Row::Mapped) ? Json(r.previous_index) : Json(nullptr)},
         {"prior_index_valid",has(Row::PriorIndexValid)},
@@ -416,12 +428,23 @@ Json row(const PlayerProjectionRecord& record) {
         {"prior_workload",Json{{"recorded_slot",has(Row::OwnerMapped) ? Json(r.previous_slot) : Json(nullptr)},
             {"valid",has(Row::PriorSlotValid)},
             {"id",has(Row::PriorSlotValid) ? Json(r.previous_workload_id) : Json(nullptr)}}},
+        {"weight",r.weight},
         {"index",r.index},{"group_id",has(Row::GroupKnown) ? Json(r.group_id) : Json(nullptr)},
         {"mapped",has(Row::Mapped)},
         {"previous_index",has(Row::Mapped) ? Json(r.previous_index) : Json(nullptr)},
+        {"previous_group_id",has(Row::PriorIndexValid) ? Json(r.previous_group_id) : Json(nullptr)},
         {"raw",hex16(r.raw)},
         {"prior",has(Row::PriorIndexValid) ? Json(hex16(r.prior)) : Json(nullptr)},
         {"final",has(Row::Final) ? Json(hex16(r.final)) : Json(nullptr)}});
+    // Warp-UI witness: one RT64 orthographic scene's representative projection.
+    if (has(Row::OrthoScene))
+        j["ortho_scene"]=Json{{"scene",r.scene&0xFFFFu},{"representative_position",r.scene>>16},
+            {"projections",r.scene_projections},{"scenes",r.scene_counts&0xFFFFu},
+            {"previous_scenes",r.scene_counts>>16},{"census",has(Row::SceneCensus)},
+            {"truncated_after",has(Row::SceneTruncated)},{"cross_workload",has(Row::SceneCrossWorkload)},
+            {"paired",has(Row::PairKnown) ? Json{
+                {"previous_scene",r.paired_scene==UINT32_MAX ? Json(nullptr) : Json(r.paired_scene)},
+                {"first_group_id",r.paired_scene==UINT32_MAX ? Json(nullptr) : Json(r.paired_group_id)}} : Json(nullptr)}};
     return j;
 }
 Json row(const sound_trace::Event& r) {
@@ -471,6 +494,8 @@ Json coverage() {
             "player_tuple_fields_are_last_admitted_occurrence_any_owner_or_view",
             "player_tuple_fields_include_admitted_secondary_route_occurrences",
             "secondary_route_counters_are_session_cumulative_ledger_is_per_construction",
+            "legacy_player_words_null_or_absent_unless_legacy_player_bit_boundary_enabled",
+            "secondary_route_absent_unless_selected_outside_bk_not_runtime_installation_proof",
             "next_block_is_allocator_cursor_not_live_identity_count",
             "player_join_is_first_depth1_defa0_after_its_begin_call",
             "skeletal_join_is_npc_skeletal_admit_only_not_cpu_root_or_cpu625",
@@ -480,7 +505,7 @@ Json coverage() {
             "shadow_args_persist_until_the_next_rectangle_call",
             "shadow_branch_cuts_and_declined_are_session_cumulative_not_per_root_reasons",
             "menu_admission_is_native_guest_thread_cumulative_counters_and_last_values_not_per_root",
-            "menu_counts_order_reset_init_initrefused_free_enter_unregistered_invocationlimit_invalid_box_boxinvalid_modelscope_gaterefused_modelcall_identityrefused_resourceabsent_tokenrefused_tokenaccepted_modelend_rootgroupdelta_modeloutsideoption_transitionmodel_transitiontagged_transitioncut_transitionrefused",
+            "menu_counts_order_reset_init_initrefused_free_enter_unregistered_invocationlimit_invalid_box_boxinvalid_modelscope_gaterefused_modelcall_identityrefused_resourceabsent_tokenrefused_tokenaccepted_modelend_rootgroupdelta_modeloutsideoption_transitionmodel_transitiontagged_transitioncut_transitionrefused_enteradmitted_entergapcut_textscope_textpushed_textowned_textadmitted_textconverted",
             "bk_draw_is_cpu_emitted_root_tags_not_rt64_consumed_mapping_or_pixels",
             "transition_fade_is_last_source_authenticated_cpu_attempt_per_construction_not_pixels_or_effective_scissor",
             "transition_fade_multiple_attempts_overwrite_last_values_mixed_views_marks_ambiguity",
@@ -488,6 +513,8 @@ Json coverage() {
             "bk_segment_pointers_valid_only_when_enabled_1",
             "bk_history_before_requires_matching_id_frame_model",
             "bk_model_is_observed_address_not_semantic_name",
+            "bk_caller_is_unowned_top_level_de498_entry_a1_keyed_by_frame_not_return_address_or_owner",
+            "bk_caller_actor_pair_only_for_live_pooled_actor_at_exact_position_minus4",
             "bk_drawn_owner_is_callback_staged_candidate_not_authenticated_producer_owner",
             "bk_staged_raw_is_c948_snapshot_not_owner_proof",
             "bk_control_slot_is_independent_of_drawn_owner",
@@ -503,7 +530,7 @@ Json coverage() {
             "shared_presentation_cap1024_transform_ring32768_projection_cap8_unchanged",
             "supplemental_roots_use_remaining_capacity_and_shorten_ring_time_retention",
             "actor_supplement_domain50000000_90000000_root_low8_zero_bones_excluded",
-            "menu_supplement_proposed_domain30000000_30060000_even256_blocks_root_only",
+            "menu_supplement_proposed_domain30000000_30060000_model_and_sprite256_blocks_root_only",
             "transition_supplement_domain30060000_30060500_all_five256_blocks_root_only_shared64_cap",
             "untagged_id0_excluded_shadow_roots_in_shared_supplement_no_pointer_to_object_inference",
             "root_id_ordinal0_can_repeat_for_list_identity_matrix_keep_workload_and_index",
@@ -514,7 +541,17 @@ Json coverage() {
             "player_projection_rows_include_other_valid_owned_projections_in_that_range",
             "player_processed_flags_distinguish_raw_path_from_missing_processed_output",
             "player_rows_per_presentation_1024_projections_8_truncation_flagged",
-            "player_prior_and_interpolated_absent_unless_flagged"}},
+            "player_prior_and_interpolated_absent_unless_flagged",
+            "ortho_scene_rows_follow_player_projections_own_cap16_per_presentation_truncated_after_flagged",
+            "ortho_scene_census_is_first_presentation_with_a_new_first_rt64_workload_id_not_bk_frame",
+            "ortho_scene_census_lists_every_scene_in_order_other_presentations_only_interpolating_auto_scenes",
+            "ortho_scene_representative_is_first_projection_mapped_in_its_own_workload_map_else_first",
+            "ortho_scene_prior_is_the_index_rt64_processing_reads_in_the_recorded_prior_workload",
+            "ortho_scene_pairing_recomputed_from_rt64_matchscenes_inputs_up_to32x32_absent_means_not_claimed",
+            "auto_ortho_rows_are_census_only_own_cap8_after_player_rows_truncated_after_flagged",
+            "auto_ortho_includes_auto_ignore_and_explicit_nonroot_nonplayer_parts_on_orthographic_scene_projections",
+            "auto_ortho_rank_is_max_translation_and_modelspace_vertex_delta_nonfinite_first_unmapped_last_draw_order_ties",
+            "auto_ortho_group_matrix_count_is_eligible_transforms_in_that_workload"}},
         {"shadow_semantics",{{"source_local",0x800A6CF0u},{"source_fallback",0x800A6D60u},
             {"admitted_this_frame","seen_epoch_equals_epoch"},{"fullframe_composite_args",{0,0,304,228}},
             {"nonzero_id_or_group_at_end","admitted_shadow_did_not_reach_rectangle_or_complete"}}},
@@ -524,11 +561,11 @@ Json coverage() {
         {"host_enum_domain","player_preferences"},
         {"graphics_enum_domain","actual_rt64"},
         {"footer_scope","serialized_rows_complete_not_durable_persistence"},
-        {"frame_valid_bits",{{"layout",1},{"frame",2},{"cpu625",4}}},
+        {"frame_valid_bits",{{"layout",1},{"frame",2},{"cpu625",4},{"legacy_player",8},{"secondary_route",16}}},
         {"draw_valid_bits",{{"layout",1},{"frame",2},{"root",4},{"projection",8},{"context",16},
             {"player_join",32},{"player_slot",64},{"skeletal_join",128}}},
         {"bk_draw_valid_bits",{{"layout",1},{"frame",2},{"owner",4},{"staged",8},{"route",16},{"roster",32},
-            {"control",64},{"control_owner",128},{"end",256},{"unclosed",512},{"root_witness",1024}}},
+            {"control",64},{"control_owner",128},{"end",256},{"unclosed",512},{"root_witness",1024},{"caller",2048}}},
         {"bk_draw_provenance",{"callback_staged_roster_bound","callback_staged_unbound","actor_birth","unproven"}},
         {"host_flag_bits",{{"focused",1},{"menu",2},{"suppressed",4},{"game_enabled",8},
             {"withheld",16},{"fullscreen",32}}},
@@ -539,10 +576,12 @@ Json coverage() {
             {"paused",128},{"projection_known",256},{"projection_mixed",512},{"lerp_decompose",1024},
             {"lerp_translation",2048},{"lerp_rotation",4096},{"lerp_scale",8192},{"lerp_skew",16384},
             {"truncated_after",32768},{"projection_truncated",65536},{"transforms_processed",131072},
-            {"projection_incomplete",262144},{"representative",524288}}},
+            {"projection_incomplete",262144},{"representative",524288},{"auto_ortho",1048576},{"unrooted_ortho",2097152},{"vertex_skip",4194304},{"vertex_measured",8388608}}},
         {"player_projection_flag_bits",{{"owner_mapped",1},{"prior_slot_valid",2},{"mapped",4},
             {"prior_index_valid",8},{"final",16},{"group_known",32},{"lerp_decompose",1024},
-            {"lerp_translation",2048},{"lerp_rotation",4096},{"projections_processed",65536}}},
+            {"lerp_translation",2048},{"lerp_rotation",4096},{"projections_processed",65536},
+            {"ortho_scene",131072},{"scene_census",262144},{"scene_truncated_after",524288},
+            {"scene_cross_workload",1048576},{"pair_known",2097152}}},
         {"transition_source_draw_flag_bits",{{"observed",1},{"current_raw_world_pose",2},{"first_source_rects",4},
             {"qualified_current_pose_rsp_ndc_xy",8},{"invalid_input",16},{"scan_truncated",32},{"mixed_triangle_ownership",64},
             {"mixed_projection",128},{"modified_screen_vertex_or_modify_cap",256},{"invalid_or_nonpositive_w",512},
@@ -578,7 +617,7 @@ Completion export_job(const Job& job, const std::filesystem::path& root,
     bool ok=false;
     const char* failure="";
     try {
-        ok=writer.append(Json{{"type","report"},{"schema",2},{"run",run},{"marker",job.marker},
+        ok=writer.append(Json{{"type","report"},{"schema",3},{"run",run},{"marker",job.marker},
             {"ordinal",job.ordinal},{"utc",job.utc},{"trigger_us",job.trigger_us},{"version",version},
             {"clock","steady_microseconds"},{"executable_sha256_file_on_disk",hash},
             {"executable_hash_error",hash_error},{"ring_bytes",ring_bytes},

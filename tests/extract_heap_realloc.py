@@ -36,7 +36,13 @@ DEFAULT_ALLOWED = ("bs_setState", "bainput_update", "func_80800710_bsbtrot", "fu
                         "tooie_bk_selector_begin", "tooie_bk_selector_child", "tooie_bk_selector_end",
                         "tooie_bk_sort_children", "tooie_bk_attachment_begin", "tooie_bk_attachment_end",
                         "tooie_bk_shadow_route", "tooie_bk_shadow_light_event", "tooie_bk_shadow_begin",
-                        "tooie_bk_shadow_end", "tooie_bk_shadow_project")
+                        "tooie_bk_shadow_end", "tooie_bk_shadow_project",
+                        "tooie_bk_lod_distance", "tooie_bk_player_lod_distance", "tooie_bk_player_lod_tier",
+                        "tooie_bk_bbox_visible", "tooie_bk_billboard_entry", "tooie_bk_sort_onesided",
+                        "tooie_bk_branch_submitted", "tooie_bk_transition_role_begin", "tooie_bk_transition_role_end",
+                        # L14-VR03 guest option-box text owner.
+                        "tooie_bk_text_scope", "tooie_bk_text_freed", "tooie_bk_text_pushed", "tooie_bk_text_enter",
+                        "tooie_bk_text_record", "tooie_bk_text_mark", "tooie_bk_text_glyph", "tooie_bk_text_close")
 
 
 def extract(source: str, function: str = "heap_realloc", *, allowed=DEFAULT_ALLOWED) -> str:

@@ -15,6 +15,8 @@
 #include "player_startup.hpp"
 #include "player_version.hpp"
 #include "issue_evidence.hpp"
+#include "librecomp/mods.hpp"
+#include "texture_pack_notice.hpp"
 #endif
 #include <atomic>
 #ifdef BASELINE_VI_CONTROLLER_CYCLE
@@ -137,6 +139,15 @@ void console_error(const char* message) {
     const bool first = !runtime_error_reported.exchange(true, std::memory_order_relaxed);
 #else
     runtime_error_reported.store(true, std::memory_order_relaxed);
+#endif
+#ifdef BASELINE_PLAYER
+    // Runtime's mod-load report gains its recovery steps before it is logged or retained.
+    std::string recovered;
+    try {
+        recovered = baseline::texture_pack_notice::with_mod_load_recovery(message,
+            baseline::texture_pack_notice::path_text(recomp::mods::get_mods_directory()));
+        message = recovered.c_str();
+    } catch (...) {} // Otherwise logged and retained unchanged.
 #endif
     std::fprintf(stderr, "baseline runtime error: %s\n", message);
     std::fflush(stderr);

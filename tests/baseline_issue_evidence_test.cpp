@@ -33,11 +33,28 @@ int main(int argc, char** argv) {
     using namespace evidence;
     using namespace evidence::detail;
     try {
-        static_assert(sizeof(RT64::TooiePlayerTransform)==328);
-        static_assert(sizeof(PlayerTransformRecord)==344);
+        static_assert(sizeof(RT64::TooiePlayerTransform)==336);
+        static_assert(sizeof(PlayerTransformRecord)==352);
         std::printf("transition source player_ring_bytes=%zu\n",player_ring_bytes);
         PlayerTransformRecord source_probe{};
         require(!row(source_probe).contains("transition_source_draw"),"ordinary rows unchanged");
+        PlayerTransformRecord part_probe{};
+        using T=RT64::TooiePlayerTransform;
+        part_probe.row.flags=T::AutoOrtho|T::UnrootedOrtho|T::VertexSkip|T::VertexMeasured;
+        part_probe.row.vertex_delta=24.0f;
+        auto part_json=row(part_probe);
+        require(part_json["vertex_delta"]==24.0f && part_json["unrooted_ortho"]==true && part_json["vertex_skip"]==true,
+            "ortho part vertex evidence serializes");
+        part_probe.row.flags=T::Representative|T::VertexMeasured|T::VertexSkip;
+        require(row(part_probe)["vertex_delta"]==24.0f && row(part_probe)["auto_ortho"]==false,
+            "supplemental menu vertex measurement serializes without AUTO flag");
+        part_probe.row.vertex_delta=-1.0f;
+        require(row(part_probe)["vertex_delta"].is_null(),"unavailable vertex delta withheld");
+        part_probe.row.vertex_delta=std::numeric_limits<float>::infinity();
+        require(row(part_probe)["vertex_delta"].is_null() && row(part_probe)["vertex_delta_nonfinite"]==true,
+            "nonfinite vertex delta remains explicit and JSON safe");
+        part_probe.row.flags=0;part_probe.row.vertex_delta=24.0f;
+        require(row(part_probe)["vertex_delta"].is_null(),"ordinary row does not claim ortho vertex evidence");
         using O=RT64::TooieTransitionSourceDraw;
         source_probe.row.transition_source.flags=O::Observed|O::CurrentPose|O::Invalid;
         auto source_json=row(source_probe)["transition_source_draw"];
@@ -65,6 +82,14 @@ int main(int argc, char** argv) {
         producer_record.producer_site=0x800BE90Cu;producer_record.producer_model=0x80600000u;
         require(row(producer_record)["producer"]["site"]==0x800BE90Cu &&
             row(producer_record)["producer"]["model"]==0x80600000u,"exact producer witness serializes");
+        BkDrawRecord caller_record{};
+        require(row(caller_record)["caller"].is_null(),"unjoined caller is absent");
+        caller_record.valid=BkDrawRecord::Caller;caller_record.caller_position=0x807FD200u;
+        require(row(caller_record)["caller"]["position"]==0x807FD200u && row(caller_record)["caller"]["actor"].is_null() &&
+            row(caller_record)["caller"]["pair"].is_null(),"a position without a live actor names no owner");
+        caller_record.caller_actor=0x80200000u;caller_record.caller_pair=0x06651234u;
+        require(row(caller_record)["caller"]["actor"]==0x80200000u && row(caller_record)["caller"]["pair"]==0x06651234u,
+            "a validated actor and its resource pair serialize");
         FrameRecord fade_frame{};
         require(!row(fade_frame).contains("transition_fade"),"no transition attempt serializes absent");
         fade_frame.transition_fade.attempts=1;fade_frame.transition_fade.valid=1;
@@ -122,7 +147,8 @@ int main(int argc, char** argv) {
         // No application profile is used. A sentinel is evidence that unrelated bytes survive.
         { std::ofstream file(temp/"profile-sentinel"); file<<"unchanged"; }
         start(temp,"test-1.2.3");
-        FrameRecord f{}; f.epoch=123456; f.map=42; f.valid=3|FrameRecord::Cpu625;
+        FrameRecord f{}; f.epoch=123456; f.map=42;
+        f.valid=3|FrameRecord::Cpu625|FrameRecord::LegacyPlayer|FrameRecord::SecondaryRoute;
         f.player_last_reason=4u|(64u<<8); f.bridge_next_block=29; f.cpu625_next_block=2047;
         f.player_view=2; f.player_primary_bytes=7584; f.player_primary_highwater=11376;
         f.secondary_opens=3; f.secondary_faults=1; f.secondary_seen_main=2; f.secondary_seen_late=1;
@@ -132,8 +158,13 @@ int main(int argc, char** argv) {
         // Unauthenticated sources serialize as null even if a producer left words behind.
         FrameRecord no_layout{}; no_layout.epoch=654321; no_layout.valid=DrawRecord::Frame;
         no_layout.player_last_reason=no_layout.bridge_next_block=no_layout.cpu625_next_block=5; record(no_layout);
-        FrameRecord no_cpu{}; no_cpu.epoch=654322; no_cpu.valid=3; no_cpu.cpu625_next_block=6;
-        no_cpu.shadow_source_pc=0x800A6D60u; record(no_cpu); // Words without shadow_valid stay absent.
+        FrameRecord no_cpu{}; no_cpu.epoch=654322; no_cpu.valid=3|FrameRecord::LegacyPlayer; no_cpu.cpu625_next_block=6;
+        no_cpu.shadow_source_pc=0x800A6D60u; no_cpu.secondary_opens=8; record(no_cpu); // Words without their bits stay absent.
+        // Schema 3: a disabled legacy owner's leftover words never serialize as observations.
+        FrameRecord no_player{}; no_player.epoch=654323; no_player.valid=3|FrameRecord::Cpu625|FrameRecord::SecondaryRoute;
+        no_player.player_owner=no_player.player_model=no_player.player_asset=no_player.player_admissions=
+            no_player.player_refusals=no_player.player_last_reason=no_player.player_primary_bytes=no_player.secondary_opens=7;
+        no_player.bridge_next_block=30; no_player.cpu625_next_block=31; record(no_player);
         DrawRecord d{}; d.model=765432; d.valid=31;
         for (unsigned i=0; i<16; ++i) { d.root[i]=1000+i; d.projection[i]=2000+i; }
         d.player_owner=d.skeletal_calls=9; // No join bit: words left behind must not serialize.
@@ -192,7 +223,12 @@ int main(int argc, char** argv) {
             unmatched.group_matrix_count=999; // Unflagged value must not serialize as evidence.
             unmatched.previous_index=12; unmatched.previous_slot=3; // Words without flags must not serialize.
             RT64::TooiePlayerProjection projection{};
-            projection.presentation=41; projection.flags=RT64::TooiePlayerProjection::Final;
+            projection.presentation=41; projection.flags=RT64::TooiePlayerProjection::Final |
+                RT64::TooiePlayerProjection::OrthoScene | RT64::TooiePlayerProjection::SceneCensus |
+                RT64::TooiePlayerProjection::PairKnown;
+            projection.scene=3u|(2u<<16); projection.scene_counts=6u|(4u<<16);
+            projection.scene_projections=5; projection.paired_scene=1; projection.paired_group_id=0xA0000010u;
+            projection.weight=0.25f;
             projection.raw[15]=0x3f800000u;
             const PlayerRow player_rows[2]={mapped,unmatched};
             record_player(player_rows,2,&projection,1);
@@ -205,13 +241,13 @@ int main(int argc, char** argv) {
         require(result.bytes==std::filesystem::file_size(temp/result.filename) && result.bytes<=report_max_bytes,
             "size is actual report bytes");
         auto rows=read_report(temp/result.filename);
-        require(rows.front().at("schema")==2 && rows.front().at("marker")==17, "versioned marker header");
+        require(rows.front().at("schema")==3 && rows.front().at("marker")==17, "versioned marker header");
         require(rows.back().at("type")=="completion" && rows.back().at("complete")==true, "last completion footer");
         require(rows.front().at("record_bytes").at("bk_draw")==sizeof(BkDrawRecord),"BK record size declared");
         require(rows.front().at("record_bytes").at("player_transform")==sizeof(PlayerTransformRecord) &&
             rows.front().at("player_ring_bytes")==player_ring_bytes,"player record and ring sizes declared");
         bool frame=false,draw=false,host=false,graphics=false,publication=false,audio=false,missing=false;
-        bool frame_no_layout=false,frame_no_cpu=false;
+        bool frame_no_layout=false,frame_no_cpu=false,frame_no_player=false;
         unsigned joins=0;
         unsigned bk_rows=0;
         bool bk_domain=false,bk_coverage=false;
@@ -234,10 +270,18 @@ int main(int argc, char** argv) {
             if (row.at("type")=="frame" && row.at("epoch")==654321)
                 frame_no_layout=row.at("player_last_reason").is_null() && row.at("bridge_next_block").is_null() &&
                     row.at("cpu625_next_block").is_null() && !row.contains("player_primary") &&
-                    !row.contains("secondary_route");
+                    !row.contains("secondary_route") && row.at("player_owner").is_null();
             if (row.at("type")=="frame" && row.at("epoch")==654322)
                 frame_no_cpu=row.at("player_last_reason")==0 && row.at("bridge_next_block")==0 &&
-                    row.at("cpu625_next_block").is_null() && !row.contains("shadow");
+                    row.at("cpu625_next_block").is_null() && !row.contains("shadow") &&
+                    row.at("player_owner")==0 && row.at("player_primary").size()==3 && !row.contains("secondary_route");
+            if (row.at("type")=="frame" && row.at("epoch")==654323) {
+                frame_no_player=row.at("bridge_next_block")==30 && row.at("cpu625_next_block")==31 &&
+                    !row.contains("player_primary") && !row.contains("secondary_route") && row.at("valid")==(3u|4u|16u);
+                for (const char* name:{"player_owner","player_model","player_asset","player_admissions",
+                        "player_refusals","player_last_reason"})
+                    frame_no_player=frame_no_player && row.at(name).is_null();
+            }
             if (row.at("type")=="draw" && row.at("model")==765432)
                 draw=row.at("root")[15]==1015 && row.at("projection")[0]==2000 &&
                     !row.contains("player_owner") && !row.contains("skeletal_calls");
@@ -304,7 +348,12 @@ int main(int argc, char** argv) {
                     row.at("raw").get<std::string>().rfind("7fc00000 ",0)==0 && row.at("label").at("roster_slot")==1;
             if (row.at("type")=="player_projection" && row.at("presentation")==41)
                 player_rows+=row.at("final").get<std::string>().size()==143 && row.at("prior").is_null() &&
-                    row.at("group_id").is_null() && row.at("mapped")==false;
+                    row.at("group_id").is_null() && row.at("mapped")==false && row.at("weight")==0.25f &&
+                    row.at("ortho_scene").at("scene")==3 && row.at("ortho_scene").at("representative_position")==2 &&
+                    row.at("ortho_scene").at("census")==true && row.at("ortho_scene").at("scenes")==6 &&
+                    row.at("ortho_scene").at("previous_scenes")==4 && row.at("ortho_scene").at("projections")==5 &&
+                    row.at("ortho_scene").at("paired").at("previous_scene")==1 &&
+                    row.at("ortho_scene").at("paired").at("first_group_id")==0xA0000010u;
             if (row.at("type")=="domain" && row.at("domain")=="player_transform")
                 player_domain=row.at("capacity")==player_transform_capacity && row.at("retained")==2 &&
                     row.at("validity")=="flags_declare_absent_fields";
@@ -313,8 +362,8 @@ int main(int argc, char** argv) {
                 require(row.at("projection_semantics")=="last_saved_world_production" &&
                     row.at("host_stick_units")=="Q15" && row.at("graphics_enum_domain")=="actual_rt64",
                     "projection and input/settings domain semantics are explicit");
-                require(row.at("frame_valid_bits")==Json{{"layout",1},{"frame",2},{"cpu625",4}},
-                    "schema-2 frame validity bits declared");
+                require(row.at("frame_valid_bits")==Json{{"layout",1},{"frame",2},{"cpu625",4},{"legacy_player",8},
+                    {"secondary_route",16}},"schema-3 frame validity bits declared");
                 require(row.at("draw_valid_bits")==Json{{"layout",1},{"frame",2},{"root",4},{"projection",8},
                     {"context",16},{"player_join",32},{"player_slot",64},{"skeletal_join",128}},
                     "schema-2 draw join bits declared");
@@ -324,9 +373,12 @@ int main(int argc, char** argv) {
                 const auto& limits=row.at("limits");
                 const auto limited=[&](const char* name) { return std::find(limits.begin(),limits.end(),name)!=limits.end(); };
                 bk_coverage=row.at("bk_draw_valid_bits")==Json{{"layout",1},{"frame",2},{"owner",4},{"staged",8},
-                    {"route",16},{"roster",32},{"control",64},{"control_owner",128},{"end",256},{"unclosed",512},{"root_witness",1024}} &&
+                    {"route",16},{"roster",32},{"control",64},{"control_owner",128},{"end",256},{"unclosed",512},{"root_witness",1024},
+                    {"caller",2048}} &&
                     limited("bk_draw_is_cpu_emitted_root_tags_not_rt64_consumed_mapping_or_pixels") &&
                     limited("bk_model_is_observed_address_not_semantic_name") &&
+                    limited("bk_caller_is_unowned_top_level_de498_entry_a1_keyed_by_frame_not_return_address_or_owner") &&
+                    limited("bk_caller_actor_pair_only_for_live_pooled_actor_at_exact_position_minus4") &&
                     limited("bk_drawn_owner_is_callback_staged_candidate_not_authenticated_producer_owner") &&
                     limited("bk_control_slot_is_independent_of_drawn_owner") &&
                     limited("bk_fields_are_not_legacy_admission") &&
@@ -346,7 +398,8 @@ int main(int argc, char** argv) {
         require(bk_rows==5 && bk_domain && bk_coverage,"BK root rows: groups only with bits, explicit provenance, domain and coverage");
         require(frame&&draw&&host&&graphics&&publication&&audio&&missing,"all allowlisted domains and explicit gaps");
         require(player_rows==3 && player_domain && player_coverage,"player rows: actual words, absent fields null, domain and coverage");
-        require(frame_no_layout && frame_no_cpu,"unauthenticated schema-2 frame words serialize as null");
+        require(frame_no_layout && frame_no_cpu && frame_no_player,
+            "unauthenticated or unavailable frame words serialize as null or absent");
         // Export twice retains the first file exactly and generates a distinct name.
         const auto before=tooie::platform::file_sha256(temp/result.filename);
         require(capture(19),"second capture accepted");
@@ -377,7 +430,7 @@ int main(int argc, char** argv) {
             full_frame.secondary_seen_main=full_frame.secondary_seen_late=full_frame.secondary_unauthenticated=
             full_frame.secondary_admissions=full_frame.secondary_ledger_bytes=maximum; // Optional objects at full width.
         full_frame.requested_period=full_frame.measured_period=full_frame.live_period=minimum;
-        full_frame.valid=3|FrameRecord::Cpu625; // Every schema-2 word serialized at full width.
+        full_frame.valid=3|FrameRecord::Cpu625|FrameRecord::LegacyPlayer|FrameRecord::SecondaryRoute; // Every frame word at full width.
         full_frame.shadow_valid=1; // The optional shadow object also bounds the worst frame row.
         full_frame.shadow_source_pc=full_frame.shadow_seen_epoch=full_frame.shadow_id=full_frame.shadow_group=
             full_frame.shadow_composite=full_frame.shadow_mode_open=full_frame.shadow_fault=maximum;
@@ -418,7 +471,8 @@ int main(int argc, char** argv) {
             full_bk.id_attachment=full_bk.id_sample=full_bk.staged_callback=full_bk.staged_owner=full_bk.drawn_owner=
             full_bk.drawn_slot=full_bk.drawn_table_match=full_bk.control_slot=full_bk.control_owner=full_bk.end_offset=
             full_bk.end_uses_bones=full_bk.groups=full_bk.offset_overflows=full_bk.late_closes=
-            full_bk.root_overflows=full_bk.scope_overflows=maximum; // Every BK group at full width.
+            full_bk.root_overflows=full_bk.scope_overflows=full_bk.caller_position=full_bk.caller_actor=
+            full_bk.caller_pair=maximum; // Every BK group at full width.
         const auto enqueue_begin=baseline::sound_trace::now_us();
         for (size_t i=0;i<frame_capacity;++i) record(full_frame);
         for (size_t i=0;i<draw_capacity;++i) record(full_draw);

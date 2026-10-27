@@ -34,7 +34,27 @@
 +    tooie::lifecycle::enable(false);
 +    tooie::lifecycle::own_final_drain();
 +    recomp::register_heap_exports();
-@@ -897,19 +908,36 @@
+@@ -880,6 +891,13 @@
+-        ultramodern::preinit(rdram, window_handle);
+-
+-        recomp_context context{};
+-
+-        // Loop until the game starts.
+-        while (!wait_for_game_started(rdram, &context)) {}
++        try {
++            ultramodern::preinit(rdram, window_handle);
++            recomp_context context{};
++            // Loop until the game starts.
++            // quit's None->Quit CAS can miss a Running->None mod-load reset
++            // (recomp.cpp:745-747); exited then ends this loop instead of waiting.
++            while (!exited.load() && !wait_for_game_started(rdram, &context)) {}
++        } catch (const ultramodern::thread_terminated&) {
++        } catch (...) {
++            // Startup-thread failures (renderer setup, boot prefix) become one recorded
++            // terminal stop for the SDL owner instead of std::terminate.
++            tooie::lifecycle::fail(std::current_exception());
++        }
+@@ -897,19 +915,36 @@
 -    game_thread.join();
 -    ultramodern::join_event_threads();
 -    ultramodern::join_thread_cleaner_thread();

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Bootstrap pinned codegen dependencies and regenerate all local ROM-derived source."""
+"""Bootstrap pinned codegen dependencies and regenerate all local ROM-derived source.
+
+--player prepares only the selected player's CPU prerequisites (prepare_codegen.py
+--player-inputs) instead of the full CPU corpus; audio generation is unchanged.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +21,7 @@ from typing import Sequence
 ROOT = Path(__file__).resolve().parents[1]
 ROM_SHA256 = "9ec37fba6890362eba86fb855697a9cff1519275531b172083a1a6a045483583"
 DECOMP_SHA256 = "8c9d316b2edca686ec8393ddf95d480a7dfd9879ef434dbcfc4ea3000f2ffe89"
+PLAYER_CPU_EVIDENCE = "codegen-player-inputs"
 
 
 def sha256(path: Path) -> str:
@@ -95,7 +100,33 @@ def materialize_codegen_tools(deps: Path, decomp: Path) -> None:
         raise RuntimeError(f"materialized codegen tools are incomplete: {missing}")
 
 
-def main() -> int:
+def player_cpu_evidence(evidence: Path) -> Path:
+    """Return the --player CPU evidence directory, refusing one already in use.
+
+    prepare_codegen.py --player-inputs requires a fresh evidence directory; checking
+    here refuses a rerun before bootstrap, the decomp build or audio generation.
+    """
+    path = evidence / PLAYER_CPU_EVIDENCE
+    if path.is_symlink() or (path.exists() and (not path.is_dir() or any(path.iterdir()))):
+        raise RuntimeError(f"{path} is occupied; keep it and pass a new --evidence root "
+                           "(or move it aside) to prepare again")
+    return path
+
+
+def cpu_command(venv_python: Path, local_rom: Path, decomp: Path, n64recomp: Path,
+                cpu_evidence: Path, reference_generated: Path | None,
+                player: bool) -> list[object]:
+    command: list[object] = [venv_python, ROOT / "tools/prepare_codegen.py",
+        "--rom", local_rom, "--decomp-root", decomp, "--n64recomp", n64recomp,
+        "--evidence", cpu_evidence]
+    if player:
+        command.append("--player-inputs")
+    if reference_generated:
+        command.extend(["--reference-generated", reference_generated.resolve()])
+    return command
+
+
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rom", required=True, type=Path,
                         help="user-owned NTSC-U big-endian Banjo-Tooie ROM")
@@ -104,7 +135,15 @@ def main() -> int:
     parser.add_argument("--evidence", type=Path, default=ROOT / ".local-evidence")
     parser.add_argument("--reference-generated", type=Path,
                         help="optional retained generated/ tree for migration comparison")
-    args = parser.parse_args()
+    parser.add_argument("--player", action="store_true",
+                        help="prepare only the selected player's CPU inputs "
+                             "(prepare_codegen.py --player-inputs); audio is unchanged")
+    args = parser.parse_args(argv)
+    if args.player and args.reference_generated:
+        parser.error("--player has no --reference-generated comparison")
+    evidence = args.evidence.expanduser().resolve()
+    # Refuse reused --player CPU evidence before any dependency, ROM or source side effect.
+    cpu_evidence = player_cpu_evidence(evidence) if args.player else evidence / "codegen"
 
     validate_pinned_hashes()
 
@@ -115,7 +154,6 @@ def main() -> int:
 
     rom = args.rom.expanduser().resolve()
     deps = args.deps_dir.expanduser().resolve()
-    evidence = args.evidence.expanduser().resolve()
     # Validate the user's source before creating or replacing any local ROM input.
     original_sha = require_hash(rom, ROM_SHA256, "NTSC-U ROM")
 
@@ -185,12 +223,8 @@ def main() -> int:
     rsp_recomp = executable(codegen_build, "RSPRecomp")
 
     evidence.mkdir(parents=True, exist_ok=True)
-    cpu_command: list[object] = [venv_python, ROOT / "tools/prepare_codegen.py",
-        "--rom", local_rom, "--decomp-root", decomp, "--n64recomp", n64recomp,
-        "--evidence", evidence / "codegen"]
-    if args.reference_generated:
-        cpu_command.extend(["--reference-generated", args.reference_generated.resolve()])
-    run(cpu_command)
+    run(cpu_command(venv_python, local_rom, decomp, n64recomp, cpu_evidence,
+                    args.reference_generated, args.player))
     audio_command: list[object] = [venv_python, ROOT / "tools/prepare_audio_rsp.py",
         "--rom", local_rom, "--decompressed-rom", decompressed,
         "--rsp-recomp", rsp_recomp, "--n64recomp-source", n64recomp_source,
@@ -211,6 +245,14 @@ def main() -> int:
         "n64recomp_sha256": sha256(n64recomp),
         "rsp_recomp_sha256": sha256(rsp_recomp),
     }
+    if args.player:
+        receipt["cpu_mode"] = "player-inputs"
+        # The CPU evidence directory was fresh; the legacy receipt is left untouched.
+        with (cpu_evidence / "generate-local.json").open("x") as output:
+            output.write(json.dumps(receipt, indent=2) + "\n")
+        print(f"prepared selected player inputs and audio source; receipts under {cpu_evidence}",
+              flush=True)
+        return 0
     (evidence / "generate-local.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print(f"generated local source under {ROOT / 'generated'}", flush=True)
     return 0
