@@ -118,9 +118,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=Path.cwd())
     parser.add_argument('--rom', type=Path, required=True, help='User-supplied NTSC-U ROM; never copied')
-    parser.add_argument('--standalone-reference', type=Path, required=True,
+    parser.add_argument('--standalone-reference', type=Path, required=sys.platform != 'linux',
                         help='Preserved Silo folder with the pinned legacy boot.bin, data.syms.toml and '
-                             'receipt.json; read only')
+                             'receipt.json; read only. Linux fork: optional, omitted to regenerate them')
     args = parser.parse_args()
     root, rom = args.root.resolve(), args.rom.resolve()
     if sys.platform != 'linux':
@@ -129,8 +129,11 @@ def main():
         if (root / name).exists():
             raise ValueError(f'fresh build tree required; preserve existing {name}')
     # Authenticate the preserved legacy files before any output is written.
-    reference = args.standalone_reference.resolve()
-    legacy = read_standalone_reference(reference)
+    # Linux fork: without a preserved folder the Silo step regenerates the standalone image, data symbols
+    # and receipt from source, as Alpha 4.4 did (prepare_camera_bridge.CLEAN_STANDALONE_IMAGE_SHA256).
+    # The gate below is unchanged: the selected image must still equal IMAGE_SHA256.
+    reference = args.standalone_reference.resolve() if args.standalone_reference else None
+    legacy = read_standalone_reference(reference) if reference else None
     prepare_native_references(root, rom)
     tools = root / 'tools/baseline'
     def step(script, *args):
@@ -141,8 +144,13 @@ def main():
     # path compiles its own owner objects (prepare_camera_bridge.py) and never reads the standalone
     # bone/pair/silo/player/actor/leaf/lifecycle objects, whose historical OFF pins stay with --objects;
     # the standalone image is the imported legacy reference.
-    step('prepare_silo_bridge.py', '--raw', '--bridge-object', '--no-prior-honey')
-    standalone = install_standalone_reference(root, reference, legacy)
+    if reference:
+        step('prepare_silo_bridge.py', '--raw', '--bridge-object', '--no-prior-honey')
+        standalone = install_standalone_reference(root, reference, legacy)
+    else:
+        step('prepare_silo_bridge.py', '--raw', '--image', '--no-prior-honey')
+        standalone = dict(regenerated=True, files={name: dict(sha256=sha(root / SILO / name))
+                                                   for name in STANDALONE_REFERENCE})
     # The 621 image proves its existing owner objects unchanged against a same-selection OFF carrier.
     sys.path.insert(0, str(tools))
     import prepare_camera_bridge as camera_owner

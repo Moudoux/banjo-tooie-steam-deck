@@ -4,7 +4,8 @@ State of Banjo-Tooie: Steam Deck Port, the Linux fork of Banjo-Tooie: Scurvy
 Dog Port, for whoever picks it up next. Upstream ships a Windows player and, since
 Alpha 4.4, has its own Linux code paths (POSIX profile startup, a `linux-player`
 preset); this fork builds and ships a Linux player tuned for the Steam Deck OLED.
-Rebased onto upstream Alpha 4.4 (`05359b6`) on 2026-10-25.
+Rebased onto upstream Alpha 4.5 (`30922ba`) on 2026-10-27 (Alpha 4.4,
+`05359b6`, on 2026-10-25).
 
 ## Repository layout
 
@@ -263,7 +264,12 @@ Steam Deck features:
   dispatcher's `s0`, the node it dispatched). Edge pop-in while turning
   relies on the frustum padding above, as before the rebase; the game's
   frustum still follows the widescreen setting (4:3 draws less). Worth
-  reporting upstream: the same cost applies on Windows.
+  reporting upstream: the same cost applies on Windows. Alpha 4.5 moved
+  upstream's decision into the guest (`tooie_bk_bbox_visible`, still always
+  1; Windows calls it) and added the same seam after the in-graph sphere
+  test (`func_800E3E8C`) in `func_800DDDC4` (twice), `func_800DDF14` and
+  `func_800DDFA0`. There `s0` is that handler's own node, never type 13, so
+  the Linux thunk draws those subtrees as upstream does.
 
 - **Camera scenes paired by their IDs** (RT64 recipe
   `patches/rt64/owner_index_guard_scene_ids.delta.json`, selected instead of
@@ -856,6 +862,17 @@ Steam Deck features:
   from the Deck: Fit window at 16:10 in gameplay, upstream's right-stick
   first-person aim in place of the old twin-stick Blaster, levitate and
   autosave from the moved hook, and the profile rename with upstream's folder lock.
+- Alpha 4.5 rebase (2026-10-27), dev machine only: no raw hook moved; the
+  clean build passes all of upstream's gates with the regenerated Silo
+  reference, and the embedded guest image is upstream's pinned `6845c8ce…`.
+  A scripted run reaches a new game in Spiral Mountain with the minimap drawn
+  and shuts down cleanly with the save persisted. Upstream's new Master
+  volume is in the Audio tab next to the fork's settings. Confirmed on the
+  Steam Deck by the owner (2026-10-27): 90 fps at 3x in Jinjo Village with no
+  camera stutter (upstream now also forces the in-graph sphere tests
+  visible, see bounding-box culling above), Master volume, and the pause
+  backdrop, warp menu and Hailfire Peaks ice cave as before; the Deck log
+  is clean and no core dumps.
 - Bounding-box culling with the BK pipeline (2026-10-25), dev machine only:
   RT64's draws, vertices and render passes in Jinjo Village match the
   pre-rebase build exactly (68.4k draws/s at 60 presents); four concurrent
@@ -936,6 +953,14 @@ breaks one of them is not done. In practice:
   CPU625 object without ckpack copy storage, as the BK-pipeline image builds
   it). None of them may change the output: the gate is the final guest image,
   which must still equal upstream's `IMAGE_SHA256` and `LAYOUT_SHA256`.
+  Alpha 4.5 fixed the carrier itself (`bk_pipeline=True`; ours dropped) and
+  made `prepare_player_guest.py` import the legacy Silo `boot.bin`,
+  `data.syms.toml` and `receipt.json` from a preserved old build folder
+  (`--standalone-reference`). This fork has no such folder, so on Linux the
+  argument is optional: without it the Silo step runs `--raw --image` and
+  regenerates them as in Alpha 4.4 (`PLAYER_GUEST.json` records
+  `regenerated: true`). Upstream's import path is unchanged when the argument
+  is given.
 - RT64 recipes: any recipe upstream adds or changes is written against its
   RT64 pin, not this fork's. Materialize every recipe against `deps/rt64`
   (`tools/prepare_rt64_matching.py`'s `materialize`), relocate the ones that
