@@ -257,6 +257,11 @@ int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     try {
 #ifdef BASELINE_PLAYER
+#if TOOIE_TEST_CONTROL
+        // Linux test suite (linux/tests): any TOOIE_TEST_CONTROL, even empty, keeps errors in the log only,
+        // including a rejected command line, so test runs never open a dialog on the desktop.
+        if (std::getenv("TOOIE_TEST_CONTROL")) baseline::player::set_log_only_errors();
+#endif
         // Zero-argument play or an explicit QA folder; the profile stays owned until exit.
 #ifdef _WIN32
         const auto player_arguments = baseline::player::parse_arguments(baseline::player::command_line());

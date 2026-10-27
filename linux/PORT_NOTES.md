@@ -906,13 +906,36 @@ Test against real SDL2 by copying `libSDL2-2.0.so.0` out of the toolchain
 image and running with `LD_LIBRARY_PATH` pointing at it. On the Deck,
 `coredumpctl info -1` gives a symbolized backtrace for a `SYMBOLS=1` build.
 
+## Test suite
+
+`linux/tests/` (README there) checks the features above on the dev machine:
+`python3 linux/tests/run.py` (static + quick, about 5 minutes) after a change,
+`--tier full` (about 15 minutes, needs the owner's save under
+`local/tests/fixtures/`) after a rebase. For each fix it reproduces the
+original trigger. It drives the player through the **test control channel**
+(`src/test_control.cpp`, Linux only, compiled in with `TOOIE_TEST_CONTROL=1`):
+when the `TOOIE_TEST_CONTROL` environment variable names a FIFO, the player
+reads commands from it on the SDL thread (a virtual Xbox pad through SDL's
+virtual joystick, key and mouse events, hint queries, quit; a camera pose is
+applied on the game thread at the top of `tooie_camera_orbit_apply`) and treats the
+window as focused (`minimum_host.cpp`, `frontend_input_preference.cpp`'s
+`has_keyboard_focus`), without capturing the pointer. Set but empty, it only
+keeps errors out of dialogs (`main.cpp`). Unset, nothing changes; the suite
+checks that. The FIFO is read with `read(2)`, not stdio: a `FILE` blocked in a
+read holds its lock and the player's final `fflush(nullptr)` waited on it (the
+shutdown watchdog then exited with 124). Do not place the camera or the player by
+writing guest RAM from outside every frame: it races the game (the view flickers
+between two poses) and writes into objects the heap defrag has moved (a test
+run crashed the player that way).
+
+What it does not cover is listed in `linux/tests/README.md`; those stay Deck
+checks.
+
 ## Testing input without a gamepad
 
-You are in the `input` group, so a script can create a virtual Xbox 360 pad
-through `/dev/uinput` (raw ioctls, no extra packages) and hold any stick.
-The game only accepts input while its window has focus; desktop test runs
-usually lack it, so a throwaway build that ignores focus is needed for such
-runs (never commit it). QA `--input-script` files can only press N64 inputs.
+Use the test control channel above (`pad attach`, `pad axis rx 32767`, ...):
+it needs no focus and no extra build. QA `--input-script` files can only press
+N64 inputs and the left stick at full tilt.
 
 ## When pulling upstream
 
@@ -932,8 +955,9 @@ breaks one of them is not done. In practice:
 - Drop ours only where upstream now provides the same feature (as with rumble,
   Linux enablement and the twin-stick Blaster in Alpha 4.4), say so here, and
   have the owner confirm upstream's version on the Deck.
-- Afterwards, check each feature on the dev machine where possible and list
-  the rest for the owner's Deck test; record what was confirmed.
+- Afterwards, run `python3 linux/tests/run.py --tier full` (a clean build
+  first), check what it does not cover on the dev machine where possible, and
+  list the rest for the owner's Deck test; record what was confirmed.
 
 - `git fetch upstream`, back up the branch, then `git rebase upstream/main`
   with `git config rerere.enabled true`: most commits touch

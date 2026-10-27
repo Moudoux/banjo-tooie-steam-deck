@@ -561,6 +561,9 @@ inline constexpr char version[] = "@TOOIE_PLAYER_VERSION@";
     if(_baseline_elf)
         set(_baseline_player_startup tools/baseline/player_startup_posix.cpp)
         target_link_libraries(TooieBaseline PRIVATE nfd)
+        # Linux test suite control channel (linux/tests), inert unless TOOIE_TEST_CONTROL is set.
+        target_sources(TooieBaseline PRIVATE src/test_control.cpp)
+        target_compile_definitions(TooieBaseline PRIVATE TOOIE_TEST_CONTROL=1)
     else()
         set(_baseline_player_startup tools/baseline/player_startup.cpp)
     endif()

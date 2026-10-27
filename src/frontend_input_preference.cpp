@@ -18,6 +18,9 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#if TOOIE_TEST_CONTROL
+#include "test_control.hpp"
+#endif
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -26,6 +29,13 @@
 #endif
 
 namespace {
+// The window has keyboard focus; the Linux test suite (TOOIE_TEST_CONTROL) stands in for it.
+bool has_keyboard_focus(SDL_Window* window) {
+#if TOOIE_TEST_CONTROL
+    if (window && tooie::test_control::active()) return true;
+#endif
+    return window && SDL_GetKeyboardFocus() == window;
+}
 using namespace tooie::input;
 #if defined(_WIN32)
 std::string hid_product_name(const char* path) {
@@ -1742,7 +1752,7 @@ void handle_event(const SDL_Event& event) {
     }
     const bool analog_camera_enabled = analog_camera_input_enabled();
     if (!key && !button && !axis_event) return;
-    const bool focused = frontend_window && SDL_GetKeyboardFocus() == frontend_window;
+    const bool focused = has_keyboard_focus(frontend_window);
     const bool selected_event = key || (button_event ? event.cbutton.which : event.caxis.which) == chosen.load();
     const bool background_gameplay = !focused && selected_event && (button || axis_event) &&
         background_input_enabled() && host().game_started() &&
@@ -1893,7 +1903,7 @@ void tick(SDL_Window* window, bool gameplay, bool menu_open) {
     const bool background_controller = background_input_enabled();
     sync_background_joystick_events(background_controller);
     SDL_GameControllerUpdate();
-    const bool focused = window && SDL_GetKeyboardFocus() == window;
+    const bool focused = has_keyboard_focus(window);
     BindingTable table, modified_table;
     Binding active_modifier;
     ModifierSoloBehavior solo_behavior;
@@ -2158,6 +2168,11 @@ void tick(SDL_Window* window, bool gameplay, bool menu_open) {
         const bool want = enabled && focused && mouse_aim_wanted.load(std::memory_order_acquire) &&
             steady_nanoseconds() < first_person_until.load(std::memory_order_acquire);
         if (want != mouse_aim_relative) {
+#if TOOIE_TEST_CONTROL
+            // Test runs feed motion through events and never capture the desktop's pointer.
+            if (tooie::test_control::active()) mouse_aim_relative = want;
+            else
+#endif
             mouse_aim_relative = want && SDL_SetRelativeMouseMode(SDL_TRUE) == 0;
             if (!mouse_aim_relative) SDL_SetRelativeMouseMode(SDL_FALSE);
             static int logged = -1; // relative + 2 x wanted, logged on change only.

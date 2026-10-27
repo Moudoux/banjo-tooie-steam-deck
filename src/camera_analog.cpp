@@ -10,6 +10,9 @@
 #include "funcs.h"
 #ifdef TOOIE_NATIVE_HOST
 #include "frontend_input_preference.hpp"
+#if TOOIE_TEST_CONTROL
+#include "test_control.hpp"
+#endif
 #endif
 
 // Right-stick orbit camera with the feel of Lighthouse's free-look
@@ -540,6 +543,15 @@ extern "C" void tooie_camera_orbit_apply(std::uint8_t* rdram, recomp_context* ct
     // the position (+0x74) and rotation (+0x80) are copied for the view, so
     // the game's shake and roll still apply on top of the orbit.
     const gpr component = ctx->r16;
+#if TOOIE_TEST_CONTROL
+    // Linux test suite: a held pose replaces this frame's camera, as the orbit does.
+    float pose_position[3], pose_rotation[3];
+    if (tooie::test_control::camera_pose(pose_position, pose_rotation)) {
+        store_vector(rdram, component + 0x74, pose_position);
+        store_vector(rdram, component + 0x80, pose_rotation);
+        return;
+    }
+#endif
     if (!(orbit.active || orbit.entering)) {
         orbit.seen_input_frames = orbit.input_frames;
         return;

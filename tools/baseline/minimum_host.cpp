@@ -11,6 +11,9 @@
 #include "level_minimap.hpp"
 #include "levitate.hpp"
 #include "autosave.hpp"
+#if TOOIE_TEST_CONTROL
+#include "test_control.hpp"
+#endif
 #if BASELINE_PLAYER
 #include "virtual_clock.hpp"
 #include "player_version.hpp"
@@ -668,6 +671,10 @@ void initialize(SDL_Window* target, const std::filesystem::path& profile, bool a
     if (initialized || !target) throw std::runtime_error("Invalid baseline host initialization");
     window = target; window_id = SDL_GetWindowID(target);
     focused = (SDL_GetWindowFlags(target) & SDL_WINDOW_INPUT_FOCUS) != 0;
+#if TOOIE_TEST_CONTROL
+    tooie::test_control::set_window(target);
+    focused |= tooie::test_control::active(); // The test suite stands in for focus.
+#endif
     tooie::frontend::settings::initialize(profile);
     using namespace tooie::frontend;
     const double rumble_strength = settings::get_number("rumble_strength", 100.0);
@@ -884,6 +891,9 @@ void handle_event(const SDL_Event& event) {
         if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) map_key_held = false;
 #endif
         if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) focused = true;
+#if TOOIE_TEST_CONTROL
+        focused |= tooie::test_control::active();
+#endif
     }
     if (!focused) switch (event.type) {
     case SDL_KEYDOWN: case SDL_KEYUP: case SDL_TEXTINPUT:

@@ -12,6 +12,9 @@
 #include "sound_trace.hpp"
 #include "issue_evidence.hpp"
 #include "level_minimap.hpp"
+#if TOOIE_TEST_CONTROL
+#include "test_control.hpp"
+#endif
 #endif
 #include "input.hpp"
 #ifdef BASELINE_TERMINAL_FENCE
@@ -1161,6 +1164,9 @@ void vi_complete() {
 void update_gfx(void*) {
 #if TOOIE_BASELINE_HOST
     SDL_Event event;
+#if TOOIE_TEST_CONTROL
+    tooie::test_control::pump();
+#endif
     while(SDL_PollEvent(&event)) host::handle_event(event);
 #ifdef BASELINE_PLAYER
     {

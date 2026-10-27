@@ -64,6 +64,9 @@ Almost every input is hash-pinned, and a mismatch stops the build on purpose.
 
 ## Testing
 
+- Run the test suite after changes: `python3 linux/tests/run.py` (static +
+  quick), `--tier full` after a rebase (`linux/tests/README.md`). Add a test with
+  every feature or fix; for a fix, reproduce what originally triggered it.
 - You can run the player on the dev machine: a copy of the binary with a scratch
   `--profile-dir` (marker file `.encore-profile` containing
   `Banjo-Tooie: Encore profile v1`, plus a flat `tooie_imgui.json` with
