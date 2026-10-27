@@ -178,6 +178,117 @@ def pause_warp(ctx):
         ctx.note(line.group(0).split(': ', 1)[1])
 
 
+JIGGY_LINE = (r'^player pause jiggies: world (0x[0-9a-f]+) ids (\d+)\.\.(\d+) collected (0x[0-9a-f]+) '
+              r'\((\d+) of 10, totals (\d+)\)$')
+
+
+@test('full', 'Pause-menu jiggy list from View Totals (owner\'s save: Isle o\' Hags, Mayahem Temple)',
+      trigger='Deck: A on a jiggy row hid the list for good, the pause froze; the owner asked to open the '
+              'list from each world\'s Totals page instead of a pause row')
+def pause_jiggies(ctx):
+    save = ctx.fixture(SAVE)
+    with Player(ctx, 'run', save=save) as p:
+        flows.load_save(p, expect=guest.JINJO_VILLAGE)
+        still(p, 4.0)
+        for _ in range(4):
+            p.press('start', after=1.5)
+            if p.game_state() == guest.STATE_PAUSED:
+                break
+        check(p.game_state() == guest.STATE_PAUSED, 'pause did not open')
+        check(pause_page(p) == (guest.PAUSE_OPTIONS, None), 'the pause opened on page %s' % (pause_page(p),))
+        p.screenshot('pause-list')
+        # Return, Objects and Items, Jinjos, View Totals (the current world's page), Exit:
+        # no JIGGIES row any more.
+        down(p, 3)
+        p.press('a')
+        totals_page(p, IOH_TOTALS, 'View Totals did not open on the Isle o\' Hags page')
+        p.screenshot('ioh-totals')
+        # The Isle o' Hags: the Jinjo families and King Jingaling.
+        ids = jiggy_list(ctx, p, 'ioh', IOH_TOTALS, answers=True)
+        check(ids == (81, 90), 'Isle o\' Hags listed jiggies %d..%d, not the Jinjo families and King Jingaling' % ids)
+        # Right to Mayahem Temple: its own list, and B comes back to its page.
+        flip(p, 1.0)
+        totals_page(p, MT_TOTALS, 'right of the Isle o\' Hags is not the Mayahem Temple page')
+        ids = jiggy_list(ctx, p, 'mt', MT_TOTALS)
+        check(ids == (1, 10), 'Mayahem Temple listed jiggies %d..%d' % ids)
+        # Spiral Mountain has no jiggies: A there does nothing.
+        flip(p, -1.0)
+        flip(p, -1.0)
+        totals_page(p, SM_TOTALS, 'left of the Isle o\' Hags is not the Spiral Mountain page')
+        p.mark()
+        p.press('a', after=2.0)
+        check(pause_page(p) == (guest.PAUSE_TOTALS, SM_TOTALS), 'A on Spiral Mountain left its page')
+        check('player pause jiggies' not in p.log_since_mark(), 'A on Spiral Mountain listed jiggies')
+        # Start in a list resumes play.
+        flip(p, 1.0)
+        totals_page(p, IOH_TOTALS, 'right of Spiral Mountain is not the Isle o\' Hags page')
+        p.mark()
+        p.press('a', after=3.0)
+        p.wait_log(JIGGY_LINE, 20, since_mark=True)
+        p.press('start', after=2.5)
+        check(p.game_state() == guest.STATE_PLAYING, 'Start in the jiggy list did not resume play')
+
+
+# View Totals subpages (D_808020A8_gcnewpause).
+SM_TOTALS, IOH_TOTALS, MT_TOTALS = 3, 4, 5
+
+
+def pause_page(p):
+    """(PageIndex, SubPage) of the open pause; SubPage only on a Totals page."""
+    pause = p.u32(guest.PAUSE)
+    if not pause:
+        return None, None
+    page = p.u8(pause)
+    return page, p.u8(pause + 1) if page == guest.PAUSE_TOTALS else None
+
+
+def totals_page(p, subpage, message, timeout=10):
+    """Wait until the Totals page shows the subpage and takes input."""
+    deadline = time.time() + timeout
+    while pause_page(p) != (guest.PAUSE_TOTALS, subpage):
+        if time.time() > deadline:
+            raise Failure('%s (pause page %s)' % (message, pause_page(p)))
+        time.sleep(0.2)
+    time.sleep(2.0)  # Its header and counts slide in.
+
+
+def flip(p, direction):
+    p.axis('lx', direction)
+    time.sleep(0.2)
+    p.axis('lx', 0)
+    time.sleep(1.5)
+
+
+def jiggy_list(ctx, p, label, subpage, answers=False):
+    """A on a world's Totals page: its jiggy list, checked against the game's own count;
+    B returns to the same page. Returns the jiggy ids."""
+    p.mark()
+    p.press('a', after=3.0)
+    line = p.wait_log(JIGGY_LINE, 20, since_mark=True)
+    check(pause_page(p)[0] == guest.PAUSE_OPTIONS, 'the jiggy list is not on the option page')
+    p.screenshot(label + '-jiggy-list')
+    world, first, last, mask, got, totals = line.groups()
+    got, totals = int(got), int(totals)
+    check(got == bin(int(mask, 16)).count('1'), 'count %d does not match the mask %s' % (got, mask))
+    # The list reads the save flags; the Totals page counts the same jiggies its own way.
+    check(got == totals, 'the list shows %d collected, the game\'s Totals count is %d' % (got, totals))
+    ctx.note('%s: world %s, %d of 10 (mask %s)' % (label, world, got, mask))
+    if answers:
+        # A on a row answers in the header and keeps the list (A used to hide it for good,
+        # freezing the pause on the Deck); the B below fails if it is stuck.
+        p.press('a', after=5.0)  # The answer types itself in.
+        p.screenshot(label + '-answer-first')
+        down(p, 9)  # Scroll to the last jiggy.
+        p.press('a', after=2.0)
+        p.screenshot(label + '-answer-last')
+        check(p.game_state() == guest.STATE_PAUSED, 'A in the jiggy list left the pause')
+    p.press('b')
+    check(p.game_state() == guest.STATE_PAUSED, 'B left the pause instead of returning to Totals')
+    totals_page(p, subpage, 'B in the %s jiggy list did not return to its Totals page' % label)
+    p.screenshot(label + '-totals-again')
+    return int(first), int(last)
+
+
 def down(p, count):
     for _ in range(count):
         p.axis('ly', 1.0)

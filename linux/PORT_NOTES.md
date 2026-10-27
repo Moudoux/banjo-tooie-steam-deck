@@ -560,6 +560,89 @@ Steam Deck features:
     Temple pad 4 to Jade Snake Grove, map `0xC4`), and "everything looks good".
     The first Deck build crashed opening that pause (six visible rows); fixed.
 
+- **Pause-menu jiggy list** (`src/pause_warp.cpp`, same raw hooks; always on).
+  In the pause, View Totals, then A on a world's page opens the list of that
+  world's jiggies; flipping left/right through the Totals pages checks each
+  world. Worlds with jiggies: the eight worlds and the Isle o' Hags (Jinjo
+  families and King Jingaling); A does nothing on Spiral Mountain, Cauldron
+  Keep, Objects and Items, Jinjos and the game totals. The list is a
+  pad-style list in the pause's own OptionState (mode 0, Jamjars' portrait
+  `0x6F` as the pad list): the header "N OF 10 JIGGIES FOUND", ten rows with
+  the jiggy icon `0x01` (View Totals' icon) and a name, the ones not
+  collected tinted red (`0xFF,0x50,0x50`; the list already draws every row
+  away from the cursor grey, so a grey tint could not be seen on the Deck).
+  A shows in the header what to do for a jiggy not collected
+  (`k_jiggy_hints`, ours: the game has no such text; two header lines of
+  about 22 characters at most), or "COLLECTED!" (`gcnewoption_entrypoint_34`,
+  as a pad's refusal); every row is marked unusable
+  (`gcnewoption_entrypoint_23`, only a flag) for that, since A on a usable
+  row hides the list and waits for its owner (the first Deck build froze the
+  pause there). B returns to the same world's Totals page, Start resumes
+  play.
+  - Opening from Totals (owner's request after the Deck tests of a JIGGIES
+    pause row, which this replaces). The Totals update
+    (`gcnewpause_entrypoint_2`, PageIndex 3) reads only Start
+    (`func_80015FA0`: close the pause), B (`func_80016B30(c, 1)`: back to the
+    option page) and the stick, so A was free. A raw hook before `0x80800224`
+    (Totals waiting for input, before the Start test; s0 pause) reads A
+    (`func_80016B30(c, 0) == 1`) and, when the subpage's world
+    (`func_808016A4_gcnewpause`, table `D_808020A8`: subpages 3..13 are SM,
+    IoH, MT, GGM, WW, JRL, TDL, GI, HFP, CCL, CK, with `D_8012762C` world ids)
+    has jiggies, notes the subpage past the pause and leaves the page as B
+    does (`func_808015F8(pause, 0)`: sound, header and counts slide away,
+    then `func_80800534(pause, 2)`); it also clears the arrows' flags so no
+    stick flip starts in the same frame, and drops a note left from a frame
+    where the stick won. A hook before `0x8080042C`, right after that
+    `func_80800534(pause, 2)`, turns the pause list just built into the
+    jiggy list (HUD counts flag cleared). The list's close event (B) calls
+    `func_808017C8(pause, subpage)` and `func_80800534(pause, 3)`, what View
+    Totals itself does (`func_80800CE4`); the page change frees the list.
+  - Jiggies: the world's first id is found as `func_80800000_gccollectDll`
+    does (`func_800D06D4(id, 1) == world`, ten in a row); collected is the
+    save flag itself (`func_800DA298(func_800D0A80(id, 1))`, flags `0x250 +
+    id - 1`), not `func_800D0B68`, which also says yes in some cutscenes and
+    with a cheat. The names are ours (`k_jiggy_names`, capitals only, the
+    pause font has no lowercase; over about 16 characters a name wraps to two
+    lines): the game has no jiggy names.
+  - Texts: the jiggy list loads the pause block `0x1863` so the gldbstring
+    hook knows it, and answers index 0 (the header), `0x80 + row` (names),
+    `0x90 + row` (hints) and `0x9F` ("COLLECTED!"); the WARP label is
+    `0x7E`. gczoombox keeps the string pointers it is given
+    (`gczoombox_entrypoint_7`, `+0x17C`), and `func_800C08C0` defrags the
+    pause while it is open, so all these texts
+    live in a separate `heap_alloc` made with the pause (hook after
+    `gcnewpause_entrypoint_0`'s bzero, `0x80800028`, which also clears our
+    extra bytes) and freed at `gcnewpause_entrypoint_1` (`0x808000D4`). Before
+    this, the WARP label lived inside the pause and could go stale after a
+    move.
+  - Log: `player pause jiggies: world W ids A..B collected MASK (N of 10,
+    totals T)`; T is the game's own count for the world
+    (`func_800D0018(1, world)`, the Totals page's number).
+  - Verified locally from View Totals (2026-10-27, build `5c2c480b`, owner's
+    save copy; test `pause_jiggies`): the pause list has no JIGGIES row; View
+    Totals opens on the Isle o' Hags, A lists ids 81..90 (1 of 10, totals 1,
+    page 1/10), the A answers, B back to the Isle o' Hags page; right to
+    Mayahem Temple, A lists ids 1..10 (10 of 10, totals 10, page 10/10), B
+    back to its page; A on Spiral Mountain does nothing; Start in a list
+    resumes play. Not verified: the other worlds' pages.
+  - Verified locally with the JIGGIES pause row (2026-10-27, owner's save
+    copy; the earlier `pause_jiggies`): Jinjo Village lists ids 81..90 with King Jingaling collected (1 of 10,
+    totals 1); Mayahem Temple ids 1..10, 0 of 10 (totals 0), after WARP;
+    scrolling to the last row, A on a missing and a collected row, B and
+    reopening, Start; two-line names. Not verified: the other worlds' names on
+    screen.
+  - Steam Deck, first build (2026-10-27, `9cec88ca`): counts right (Isle o'
+    Hags 3 of 10, totals 3), but grey rows could not be told apart and A on a
+    row froze the pause; both fixed in the next build.
+  - Steam Deck, second build (2026-10-27, `a5d48205`): red rows and the A
+    answers confirmed by the owner ("works perfect"); the owner then asked
+    for the per-jiggy hints. The hints are written from memory of the game,
+    not checked against it: the owner reports wrong ones.
+  - Steam Deck, opened from View Totals (2026-10-27, build `5c2c480b`, real
+    save): confirmed by the owner ("works perfect"), the hints included.
+    Log: Isle o' Hags 3 of 10 (totals 3) and Witchyworld ids 21..30, 8 of 10
+    (totals 8), each from its own Totals page.
+
 - **First-person mouse aiming, for Steam Input gyro-as-mouse** (Camera
   settings, `tooie_mouse_aim` default on, `tooie_mouse_sensitivity` in
   hundredths of a degree per count, default 0.06, `tooie_mouse_invert_y`
@@ -947,7 +1030,7 @@ breaks one of them is not done. In practice:
   16:10, XBLA layout, intro and cutscene skips, picture and anti-aliasing
   options, draw distance and LOD, frustum padding, underwater sway width,
   minimap, levitate,
-  autosave, pause-menu warp, heap, analog camera, mouse/gyro aim, the culling and camera
+  autosave, pause-menu warp and jiggy list, heap, analog camera, mouse/gyro aim, the culling and camera
   fixes, draw-call matching speed, the pause backdrop tile copies, the F4 RAM snapshot, the startup
   dummy-workload fix, and anything added since).
 - When a conflict or a moved/failed raw hook touches one, carry it over (move

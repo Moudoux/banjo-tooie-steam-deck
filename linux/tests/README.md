@@ -28,7 +28,7 @@ fails.
   camera, levitate, mouse aim, frustum padding).
 - **full**: also long runs and everything that needs the owner's save: GPU work
   in Jinjo Village (bounding-box culling), camera scene pairing, draw distance,
-  the Hailfire Peaks ice cave, the pause backdrop, the pause-menu warp, the heap
+  the Hailfire Peaks ice cave, the pause backdrop, the pause-menu warp and jiggy list, the heap
   in Witchyworld, Atlantis (underwater aspect, mouse aim while swimming),
   autosave, game select interpolation and the 10-launch startup crash loop.
 

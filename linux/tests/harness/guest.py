@@ -8,6 +8,8 @@ import struct
 MAP = 0x80132DC2            # Current map id (u16).
 GAME_STATE = 0x80127632     # D_80127630 +0x02 (s16): 3 in play, 4 paused.
 STATE_PLAYING, STATE_PAUSED = 3, 4
+PAUSE = 0x80128AF0          # The open pause (D_80128AF0): PageIndex +0, SubPage +1.
+PAUSE_OPTIONS, PAUSE_TOTALS = 2, 3
 PLAYERS, CONTROLLED = 0x80135490, 0x801354DC  # PlayerState table, controlled index.
 VIEWPORT = 0x8012D500       # Pointer to the viewport: eye +0, forward +0xC, pitch/yaw +0x18/+0x1C.
 CONTROLLERS = 0x800799E0    # Controller button tables (port 0 first).
